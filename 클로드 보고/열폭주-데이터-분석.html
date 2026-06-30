@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>리튬이온·리튬폴리머 배터리 열폭주 데이터 분석 보고서 — 실측 신호 시그니처와 AI 특징 매핑</title>
+<style>
+  :root{
+    --bg:#0f1419; --card:#1a2129; --line:#2a3441; --ink:#e6edf3; --muted:#9aa7b4;
+    --accent:#4cc2ff; --good:#3fb950; --warn:#d29922; --bad:#f85149; --chip:#222d39;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Pretendard",Segoe UI,Roboto,sans-serif;
+    line-height:1.7;font-size:16px;}
+  .wrap{max-width:960px;margin:0 auto;padding:48px 24px 96px;}
+  header.top{border-bottom:1px solid var(--line);padding-bottom:24px;margin-bottom:32px;}
+  .kicker{color:var(--accent);font-weight:700;font-size:13px;letter-spacing:.08em;text-transform:uppercase;}
+  h1{font-size:30px;line-height:1.3;margin:8px 0 12px;}
+  .meta{color:var(--muted);font-size:14px;}
+  h2{font-size:22px;margin:48px 0 16px;padding-top:32px;border-top:1px solid var(--line);}
+  h3{font-size:17px;margin:28px 0 10px;color:var(--accent);}
+  p{margin:12px 0;}
+  a{color:var(--accent);text-decoration:none;border-bottom:1px solid rgba(76,194,255,.35);}
+  a:hover{border-bottom-color:var(--accent);}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:20px 24px;margin:18px 0;}
+  .verdict{border-left:4px solid var(--good);}
+  .callout{background:#16202b;border:1px solid var(--line);border-radius:10px;padding:14px 18px;margin:16px 0;font-size:15px;}
+  .callout.warn{border-left:4px solid var(--warn);}
+  .callout.tip{border-left:4px solid var(--accent);}
+  .callout.bad{border-left:4px solid var(--bad);}
+  table{width:100%;border-collapse:collapse;margin:16px 0;font-size:14.5px;}
+  th,td{text-align:left;padding:11px 12px;border-bottom:1px solid var(--line);vertical-align:top;}
+  th{color:var(--muted);font-weight:600;font-size:13px;text-transform:uppercase;letter-spacing:.03em;}
+  tr:hover td{background:rgba(255,255,255,.02);}
+  .pill{display:inline-block;padding:2px 9px;border-radius:999px;font-size:12px;font-weight:600;}
+  .g-norm{background:rgba(63,185,80,.15);color:var(--good);border:1px solid rgba(63,185,80,.4);}
+  .g-caut{background:rgba(76,194,255,.12);color:var(--accent);border:1px solid rgba(76,194,255,.35);}
+  .g-warn{background:rgba(210,153,34,.14);color:var(--warn);border:1px solid rgba(210,153,34,.4);}
+  .g-bad{background:rgba(248,81,73,.14);color:var(--bad);border:1px solid rgba(248,81,73,.45);}
+  ul{margin:10px 0;padding-left:22px;}
+  li{margin:6px 0;}
+  code{background:var(--chip);padding:2px 7px;border-radius:6px;font-size:13.5px;
+    font-family:"SF Mono",Menlo,Consolas,monospace;color:#ffd9a8;}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;}
+  @media(max-width:680px){.grid{grid-template-columns:1fr}h1{font-size:24px}}
+  .num{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;
+    background:var(--accent);color:#04121c;border-radius:8px;font-weight:800;font-size:15px;margin-right:10px;}
+  .sources li{font-size:13.5px;color:var(--muted);word-break:break-all;}
+  footer{margin-top:64px;padding-top:24px;border-top:1px solid var(--line);color:var(--muted);font-size:13px;}
+  /* 단계 타임라인 */
+  .timeline{list-style:none;padding:0;margin:18px 0;}
+  .timeline li{position:relative;padding:0 0 18px 30px;border-left:2px solid var(--line);margin:0;}
+  .timeline li:last-child{border-left-color:transparent;}
+  .timeline .dot{position:absolute;left:-8px;top:2px;width:14px;height:14px;border-radius:50%;border:3px solid var(--bg);}
+  .timeline b{display:block;}
+  .small{font-size:13px;color:var(--muted);}
+  .lead{font-size:18px;color:var(--ink);}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="top">
+  <div class="kicker">Claude 보고 · 데이터 분석</div>
+  <h1>리튬이온·리튬폴리머 배터리 열폭주 데이터 분석 보고서</h1>
+  <div class="meta">대상: AI 배터리 열폭주 조기감지 관제 시스템 (프로젝트 7241ba62)<br>
+  작성일: 2026-06-20 · 요청: "배터리가 터지는 엣지 상황·이상 데이터를 직접 테스트하긴 위험하니, 18650/리튬폴리머 열폭주 데이터를 웹에서 분석해 보고서로 만들어줘"</div>
+</header>
+
+<!-- 결론 먼저 -->
+<div class="card verdict">
+  <h3 style="margin-top:0;color:var(--good)">요약 — 직접 폭주시키지 않고도 "정답 신호"를 확보할 수 있습니다 ✅</h3>
+  <p class="lead" style="margin-top:4px">전 세계 연구진이 이미 18650·파우치 셀을 <b>실제로 열폭주시키며 전압·온도·가스를 초 단위로 계측한 공개 데이터·논문</b>이 충분히 있습니다.</p>
+  <p>이 보고서는 그 실측값을 모아 ① 열폭주가 <b>어떤 순서로 어떤 신호를 내는지</b>(전기·온도·가스 + <b>외부 물리 신호: 팽창·소리·연기</b>), ② 우리 AI의 7개 특징(<code>V_drop</code>·<code>dT_dt</code> 등)에 <b>각 단계가 어떻게 찍히는지</b>, ③ 그래서 <b>직접 만들 수 있는 합성 이상(anomaly) 데이터의 시그니처</b>가 무엇인지를 정리합니다.</p>
+  <p style="margin-bottom:0"><b>핵심 결론:</b> 우리는 위험한 실폭주 실험 대신, <b>공개 데이터셋 + 아래 시그니처 기반 합성 데이터</b>로 LSTM-AutoEncoder의 이상탐지 성능을 검증·튜닝할 수 있습니다.</p>
+</div>
+
+<!-- 1 -->
+<h2><span class="num">1</span>왜 실측 대신 "공개 데이터 + 합성 데이터"인가</h2>
+<div class="callout bad">
+  <b>실폭주 실험은 시제품 단계에서 부적절합니다.</b> 18650 한 셀의 열폭주 피크 온도는 <b>290~730 ℃</b>에 이르고, 셀 내부 가스가 분출(벤팅)된 뒤 <b>24초 만에 발화</b>한 실험 보고가 있습니다. 독성 가스(CO·HF)·분출물·화재 위험이 커서 통제된 방폭 시설 밖에서는 재현해선 안 됩니다.
+</div>
+<p>대신 두 가지를 결합합니다.</p>
+<div class="grid">
+  <div class="card">
+    <h3 style="margin-top:0">① 공개 실측 데이터셋</h3>
+    <p style="margin-bottom:0" class="small">NASA·Sandia·ORNL 등이 실제 셀을 파괴 시험하며 기록한 전압·전류·온도·하중 시계열. <b>5장</b>에 링크 정리.</p>
+  </div>
+  <div class="card">
+    <h3 style="margin-top:0">② 시그니처 기반 합성 데이터</h3>
+    <p style="margin-bottom:0" class="small">아래 실측 거동(전압 급락·온도 상승률 폭증·가스 방출 순서)을 정상 시계열 위에 주입해 "주의→경고→위험" 라벨 데이터를 직접 생성. <b>6장</b> 참조.</p>
+  </div>
+</div>
+
+<!-- 2 -->
+<h2><span class="num">2</span>열폭주는 어떤 순서로 신호를 내는가 (4단계 메커니즘)</h2>
+<p>리튬이온 셀의 열폭주는 갑자기 터지는 것이 아니라, <b>측정 가능한 전조가 순차적으로</b> 나타납니다. 문헌 공통으로 ①초기 → ②가스 감지 → ③반응 가속 → ④폭주 후의 4단계로 구분합니다.</p>
+
+<ul class="timeline">
+  <li><span class="dot" style="background:var(--good)"></span>
+    <b>① 초기 / 미세 이상 (T &lt; ~90 ℃)</b>
+    <span class="small">SEI 피막 분해 시작. <b>전압·내부저항의 미세 변화</b>가 가장 먼저(거의 즉각) 나타남. 온도 상승률은 아주 완만 — T1은 보통 <code>0.01 ℃/min</code> 상승률을 넘는 시점으로 정의.</span>
+  </li>
+  <li><span class="dot" style="background:var(--accent)"></span>
+    <b>② 가스 방출 / 안전밸브 개방 (~140–160 ℃)</b>
+    <span class="small">전해액이 끓어 셀이 부풀고(스웰링) <b>안전밸브가 열리며 off-gas 분출</b>. <b>수소(H₂)가 가장 먼저</b> 공기 중에 검출됨 → 가장 빠른 1차 경보 신호(온도 급상승 수십 초~수 분 전).</span>
+  </li>
+  <li><span class="dot" style="background:var(--warn)"></span>
+    <b>③ 반응 가속 / 트리거 (T2 ≈ 140–186 ℃)</b>
+    <span class="small">분리막 용융·내부 단락. 이 임계점 이후 <b>온도가 지수적으로 상승</b>해 어떤 냉각으로도 멈출 수 없음. <code>dT/dt</code>가 폭증하고 <b>전압이 급락</b>하기 시작.</span>
+  </li>
+  <li><span class="dot" style="background:var(--bad)"></span>
+    <b>④ 열폭주 / 발화 (T3 ≈ 290–730 ℃)</b>
+    <span class="small">대량 가스·전해액 분출, <b>전압 0 V로 붕괴</b>, 연기·화염. 18650 기준 발화는 폭주 개시 <b>약 24초 후</b> 관측.</span>
+  </li>
+</ul>
+<div class="callout tip"><b>우리 시스템의 의미:</b> 현재 보는 전압·전류·온도·SOC·절연저항은 ①·③·④를 잡습니다. ②(가스)는 <a href="센서-추가-검토.html">가스 센서 추가 검토 보고서</a>에서 다룬 대로 보강하면 경보를 <b>수십 초~수 분</b> 더 당길 수 있습니다.</div>
+
+<!-- 3 -->
+<h2><span class="num">3</span>핵심 실측 데이터</h2>
+
+<h3>3-1. 특성 온도 T1·T2·T3 (셀 종류별 비교)</h3>
+<table>
+  <tr><th>셀 종류</th><th>T1 — 자기발열 개시</th><th>T2 — 폭주 트리거</th><th>T3 — 피크</th><th>비고</th></tr>
+  <tr>
+    <td><b>18650 NMC/NCA</b><br><span class="small">(EV용 일반)</span></td>
+    <td>~78–130 ℃</td>
+    <td>~140–186 ℃</td>
+    <td><b>650–730 ℃</b></td>
+    <td>전압은 모든 고장 유형에 거의 즉각 반응; 전압 급락이 표면 온도 급상승에 선행.</td>
+  </tr>
+  <tr>
+    <td><b>LFP (인산철)</b><br><span class="small">파우치/각형</span></td>
+    <td>밸브개방 156.7–159.9 ℃<br><span class="small">(SOC 무관)</span></td>
+    <td>180–186 ℃<br><span class="small">(SOC 무관)</span></td>
+    <td>194 ℃(0%)→<b>357 ℃(100%)</b><br><span class="small">(SOC에 강하게 비례)</span></td>
+    <td>상대적으로 안전하지만 100% SOC에선 위험. 가스량 SOC↑ 따라 0.68→2.33 mol.</td>
+  </tr>
+  <tr>
+    <td><b>리튬폴리머 (과충전)</b></td>
+    <td>5.10 V 과충전 시 내부 ~50 ℃,<br>60 ℃ 초과 시 전해액 산화 급증</td>
+    <td>SOC 180% 초과 시<br>내부 &gt;200 ℃</td>
+    <td><b>&gt;660 ℃</b></td>
+    <td>충전전류 10.4 A 초과 시 가스·전해액 격렬 분출(폭발성).</td>
+  </tr>
+</table>
+<div class="callout warn"><b>T1·T2·T3 정의:</b> <b>T1</b>=부반응 자기발열 시작(완만), <b>T2</b>=온도가 완만→급격으로 바뀌는 임계점(=폭주 트리거, 이후 제어 불가), <b>T3</b>=폭주 중 도달하는 최고 온도(=방출 에너지량 지표). 값은 셀·SOC·가열조건에 따라 달라지므로 <b>절대값보다 "상승률(dT/dt)의 변곡"이 더 일반적인 신호</b>입니다.</div>
+
+<h3>3-2. 전압 거동 — 가장 빠르고 보편적인 전기 신호</h3>
+<ul>
+  <li>정상/밸브개방 직후까지는 전압이 <b>상당 시간 안정</b>하게 유지됨 (한 LFP 실험에선 12,500–17,000초 구간 안정).</li>
+  <li>내부 단락이 진행되며 <b>전압이 급락</b>, 폭주 격화 구간에서 <b>0 V로 붕괴</b>.</li>
+  <li>핵심: <b>전압은 거의 모든 고장 유형에 즉각 반응</b>하며, <b>전압 급락이 표면 온도 급상승보다 앞선다.</b> → <code>V_drop</code>·<code>V_delta</code> 특징의 근거.</li>
+</ul>
+
+<h3>3-3. 방출 가스 조성 (LFP, SOC별 실측)</h3>
+<table>
+  <tr><th>SOC</th><th>주요 가스 조성</th><th>총량</th><th>폭발하한(LEL)</th></tr>
+  <tr><td>0%</td><td>CO₂ 82% · CH₄ 9.6% · C₂H₄ 6.9%</td><td>0.68 mol</td><td>55.4% <span class="pill g-norm">안전여유 큼</span></td></tr>
+  <tr><td>25%</td><td>CO₂ 65.6% · <b>H₂ 15.9%</b> · CH₄ 10.9%</td><td>0.85 mol</td><td>23.9%</td></tr>
+  <tr><td>50%</td><td>CO₂ 53.8% · <b>H₂ 23.7%</b> · C₂H₄ 9.8%</td><td>0.90 mol</td><td>14.9%</td></tr>
+  <tr><td>75%</td><td><b>H₂ 37.1%</b> · CO₂ 31.3% · CH₄ 11.9%</td><td>1.18 mol</td><td>7.84%</td></tr>
+  <tr><td>100%</td><td><b>H₂ 39.8%</b> · CO₂ 23.5% · CH₄ 11.5% · CO 4.2%</td><td>2.33 mol</td><td>6.91% <span class="pill g-bad">매우 위험</span></td></tr>
+</table>
+<div class="callout tip"><b>읽는 법:</b> SOC가 높을수록 ⓐ가스량이 많고(0.68→2.33 mol), ⓑ수소 비중이 커지며(0→39.8%), ⓒ폭발하한이 낮아져 더 쉽게 점화됩니다. <b>고충전 상태일수록 H₂ 조기 감지의 가치가 큽니다.</b></div>
+
+<!-- 4 (신규) 외부 물리 시그널 -->
+<h2><span class="num">4</span>배터리가 "터질 때" 내는 외부(물리) 시그널</h2>
+<p>전압·온도·가스 외에도, 셀이 폭주로 가는 동안 <b>외부로 관측 가능한 물리 신호</b>가 순차적으로 나옵니다. 상당수는 <b>비접촉·저가 센서</b>로 잡히고, 일부(<b>팽창·음향</b>)는 표면 온도보다 더 빨라 멀티모달 조기경보의 핵심 채널로 주목받습니다.</p>
+
+<h3>4-1. 외부 신호의 출현 순서 (이른→늦은)</h3>
+<ul class="timeline">
+  <li><span class="dot" style="background:var(--good)"></span>
+    <b>① 팽창·스웰링 / 내부 압력 상승 (가장 이른 기계 신호)</b>
+    <span class="small">가스 발생으로 셀 케이스가 부풀고 내부 압력이 오름. <b>내부 압력 피크는 온도 피크에 선행</b>하며, 압력 도함수의 변곡점을 잡으면 안전밸브 개방 <b>최대 30분 전</b> 경보 가능. NMC 과충전은 5단계, LFP는 2단계의 힘(force) 변화를 보임.</span>
+  </li>
+  <li><span class="dot" style="background:var(--accent)"></span>
+    <b>② 음향(소리) — 안전밸브 개방·파열음</b>
+    <span class="small">압력이 임계에 도달해 <b>밸브가 열리거나 파우치가 터질 때 날카로운 벤팅음</b> 발생. 주파수 <b>0–8000 Hz(주로 3000 Hz 이하)</b>. 음향은 물리 변형에 직결돼 <b>온도·압력 모니터링보다 약 2배 빠른</b> 경보가 가능(딥러닝 분류 정확도 93.9% 보고).</span>
+  </li>
+  <li><span class="dot" style="background:var(--warn)"></span>
+    <b>③ 가스·냄새 (off-gas + 자극적 전해액 냄새)</b>
+    <span class="small">수소(H₂)가 최선행(3-3절). 외부로는 자극적인 전해액 증기(VOC) 냄새로도 나타남. 온도 급상승 <b>수십 초~수 분 전</b>.</span>
+  </li>
+  <li><span class="dot" style="background:#e06c4b"></span>
+    <b>④ 연기·입자 (후기 신호)</b>
+    <span class="small">고분자(분리막·바인더) 분해·연소로 발생. 한 실험에서 <b>벤팅 후 약 300초</b>에 연기가 챔버를 가득 채움. 입자 분출(particle venting) 동반.</span>
+  </li>
+  <li><span class="dot" style="background:var(--bad)"></span>
+    <b>⑤ 표면 발열 핫스팟 → 화염·빛 (최종)</b>
+    <span class="small">표면 국소 핫스팟이 적외선으로 먼저 보이고, 마지막에 화염·강한 발광. 발화는 폭주 개시 <b>약 24초 후</b>(3장).</span>
+  </li>
+</ul>
+
+<h3>4-2. 외부 신호 ↔ 우리 시스템 센서 매핑</h3>
+<table>
+  <tr><th>외부 신호</th><th>물리 현상</th><th>선행성</th><th>감지 수단</th><th>우리 보유</th></tr>
+  <tr>
+    <td><b>팽창·내부압</b></td>
+    <td>가스→케이스 팽창·압력↑</td>
+    <td><b>벤팅 30분 전</b>(압력 도함수 변곡)</td>
+    <td>힘/스트레인 게이지, 광섬유, 압력센서</td>
+    <td><span class="pill g-bad">미보유</span> 추가가치 큼</td>
+  </tr>
+  <tr>
+    <td><b>음향(벤팅음)</b></td>
+    <td>밸브 개방·파열</td>
+    <td><b>온도/압력 대비 ~2배 빠름</b></td>
+    <td>MEMS 마이크 + 딥러닝</td>
+    <td><span class="pill g-bad">미보유</span> 초저가 추가 가능</td>
+  </tr>
+  <tr>
+    <td><b>가스(H₂ 등)</b></td>
+    <td>off-gas 분출</td>
+    <td>온도급상승 수십초~수분 전</td>
+    <td>반도체/전기화학 가스센서</td>
+    <td><span class="pill g-warn">제안중</span> <a href="센서-추가-검토.html">가스 보고서</a></td>
+  </tr>
+  <tr>
+    <td><b>냄새(VOC)</b></td>
+    <td>전해액 증기</td>
+    <td>가스와 동반</td>
+    <td>VOC 센서(BME680)</td>
+    <td><span class="pill g-warn">제안중</span></td>
+  </tr>
+  <tr>
+    <td><b>연기·입자</b></td>
+    <td>고분자 분해·연소</td>
+    <td>벤팅 ~300초 후(후기)</td>
+    <td>광산란 연기감지, IR</td>
+    <td><span class="pill g-caut">부분</span> IR 카메라</td>
+  </tr>
+  <tr>
+    <td><b>표면 핫스팟</b></td>
+    <td>국소 발열</td>
+    <td>트리거 부근</td>
+    <td>접촉온도 + IR 카메라</td>
+    <td><span class="pill g-norm">보유</span> DS18B20+IR</td>
+  </tr>
+  <tr>
+    <td><b>화염·빛</b></td>
+    <td>발화</td>
+    <td>최종 단계</td>
+    <td>화염/광 센서, IR</td>
+    <td><span class="pill g-caut">부분</span> IR 카메라</td>
+  </tr>
+</table>
+<div class="callout tip"><b>우리 시스템 관점 — 가장 가치 있는 추가 2가지:</b> ① <b>MEMS 마이크 기반 음향</b>(초저가·비접촉, 온도보다 빠른 벤팅음 포착)과 ② <b>팽창/압력 센서</b>(밸브 개방 최대 30분 선행). 둘 다 전기·온도·가스와 <b>독립적인 물리 채널</b>이라, 여러 신호를 합치는 멀티모달 융합에서 오탐(false alarm)을 크게 줄여줍니다.</div>
+<div class="callout warn"><b>AI 연계:</b> 이들 외부 신호는 LSTM-AE의 <b>추가 입력 특징</b>으로 합치거나, 별도 채널의 <b>확인/거부(veto) 신호</b>로 써서 릴레이 인터락 결정을 한 번 더 보강할 수 있습니다(예: "전압·온도 이상 + 벤팅음 동시 검출 → 즉시 차단").</div>
+
+<!-- 5 -->
+<h2><span class="num">5</span>바로 쓸 수 있는 공개 데이터셋</h2>
+<table>
+  <tr><th>데이터셋</th><th>내용</th><th>우리 활용</th></tr>
+  <tr>
+    <td><a href="https://data.nasa.gov/dataset/li-ion-battery-aging-datasets">NASA Li-ion Battery Aging</a> <span class="pill g-caut">정상패턴 학습</span></td>
+    <td>다양한 온도·프로파일에서의 전압·전류·온도·시간 시계열(충방전 사이클·노화).</td>
+    <td>LSTM-AE의 <b>"정상" 학습 데이터</b>로 직접 사용 가능(열폭주는 아님). 노화에 따른 정상 분포 이동 학습.</td>
+  </tr>
+  <tr>
+    <td><a href="https://www.sciencedirect.com/science/article/pii/S2352340924005766">ORNL/Sandia 기계적 유발 열폭주 데이터셋</a> <span class="pill g-bad">이상 라벨</span></td>
+    <td>표준 압입 시험으로 내부단락을 유발하며 <b>전압·하중·압입 변위·온도</b>를 시계열 계측. 셀별 SOC·용량·치수와 0–100 <b>심각도 점수</b> 라벨 포함.</td>
+    <td><b>실제 고장 구간 + 심각도 라벨</b>이 있어, 우리 등급(정상/주의/경고/위험) 검증·테스트셋으로 가장 적합.</td>
+  </tr>
+  <tr>
+    <td><a href="https://www.sandia.gov/app/uploads/sites/82/2022/10/301_Wang_Safety.pdf">Sandia Thermal Runaway Database</a> <span class="pill g-warn">물성·온도</span></td>
+    <td>LCO·LFP·NCA 상용 셀의 칼로리미터·열중량(TGA) 데이터 — 셀 구성요소별 발열 특성.</td>
+    <td>합성 데이터의 <b>온도 곡선·발열 파라미터 보정</b> 근거.</td>
+  </tr>
+  <tr>
+    <td><a href="https://www.mdpi.com/2313-0105/3/2/14">ARC 18650 열폭주 실험 (MDPI Batteries)</a> <span class="pill g-warn">곡선 참고</span></td>
+    <td>가속열량계(ARC)로 측정한 18650 자기발열 개시·트리거·피크 온도 곡선.</td>
+    <td>T1/T2/T3 변곡과 <code>dT/dt</code> 폭증 형상을 합성 데이터에 반영.</td>
+  </tr>
+</table>
+<div class="callout warn"><b>주의:</b> 논문 본문(ScienceDirect 등)은 상당수 유료입니다. NASA 포털과 ORNL 데이터 논문(데이터 첨부형), Sandia PDF는 공개입니다. 일부 데이터셋은 SOC·셀 화학종이 우리 대상과 다르니 <b>특징(feature) 단위로 정규화해 사용</b>하길 권장합니다.</div>
+
+<!-- 6 -->
+<h2><span class="num">6</span>우리 AI 특징에 매핑한 "이상 시그니처" — 합성 데이터 설계표</h2>
+<p>위 실측 거동을 PLAN의 7개 특징(<code>V_scaled</code>·<code>V_delta</code>·<code>V_drop</code>·<code>I_smooth</code>·<code>dT_dt</code>·<code>d2T_dt2</code>·<code>Wh_cumsum</code>)과 4등급으로 매핑했습니다. <b>정상 시계열 위에 아래 거동을 단계적으로 주입하면, 직접 라벨된 이상 데이터를 만들 수 있습니다.</b></p>
+<table>
+  <tr><th>등급 / 이상점수</th><th>물리 단계</th><th>전압 신호 <code>V_drop</code>·<code>V_delta</code></th><th>온도 신호 <code>dT_dt</code>·<code>d2T_dt2</code></th><th>기타</th></tr>
+  <tr>
+    <td><span class="pill g-norm">정상 0.0–0.3</span></td>
+    <td>정상 충방전</td>
+    <td>전압 평탄, 변화율 잡음 수준</td>
+    <td><code>dT/dt</code> ≈ 0 (&lt;0.01 ℃/min)</td>
+    <td>SOC에 따른 정상 거동</td>
+  </tr>
+  <tr>
+    <td><span class="pill g-caut">주의 0.3–0.6</span></td>
+    <td>① 미세 이상 / SEI 분해</td>
+    <td><b>내부저항↑로 전압 미세 처짐</b>, 부하 변동 시 회복 둔화</td>
+    <td><code>dT/dt</code> 완만한 양(+)전환, <code>d2T/dt2</code>≈0</td>
+    <td>국소 온도 편차 시작</td>
+  </tr>
+  <tr>
+    <td><span class="pill g-warn">경고 0.6–0.8</span></td>
+    <td>② 가스/밸브개방 ~ ③ 트리거 직전</td>
+    <td><b><code>V_drop</code> 뚜렷한 음(–) 스텝</b> 시작</td>
+    <td><b><code>dT/dt</code> 가속, <code>d2T/dt2</code>&gt;0 (변곡)</b></td>
+    <td>스웰링·가스(H₂) 출현 — 가스 센서 시 조기 포착</td>
+  </tr>
+  <tr>
+    <td><span class="pill g-bad">위험 0.8–1.0</span></td>
+    <td>③ 가속 ~ ④ 폭주</td>
+    <td><b>전압 급락 → 0 V 붕괴</b></td>
+    <td><b><code>dT/dt</code> 지수적 폭증</b> (제어 불가)</td>
+    <td>대량 가스 분출, 발화 임박(폭주~발화 ≈ 24 s)</td>
+  </tr>
+</table>
+<div class="callout tip"><b>합성 데이터 생성 권장 절차:</b> ① NASA 정상 시계열을 베이스로 → ② 특정 시점부터 <code>V_drop</code> 음의 드리프트·<code>dT/dt</code> 지수 항을 주입 → ③ 단계 전환 시점에 위 등급 라벨 부여 → ④ <b>재구성 오차(MSE)가 등급과 단조 증가</b>하는지로 모델 검증. 여러 SOC·모드(1/2/3)별로 변주하면 일반화도 함께 점검됩니다.</div>
+
+<!-- 7 -->
+<h2><span class="num">7</span>다음 단계 제안</h2>
+<ul>
+  <li><b>NASA 데이터로 정상 베이스라인 학습</b> — LSTM-AE를 "정상"에 먼저 수렴시킨 뒤 임계 MSE를 0.3/0.6/0.8 등급에 매핑.</li>
+  <li><b>ORNL/Sandia 고장 데이터로 테스트셋 구성</b> — 실제 고장 + 심각도 라벨로 오탐·미탐을 정량 평가.</li>
+  <li><b>6장 시그니처로 합성 이상 주입</b> — 실폭주 없이 "주의→경고→위험" 전이 시계열을 대량 생성해 학습/검증 보강.</li>
+  <li><b>가스 채널 합류 검토</b> — H₂가 ②단계의 최선행 신호이므로, 가스 특징을 추가하면 경보 시점이 더 앞당겨짐(<a href="센서-추가-검토.html">가스 센서 보고서</a> 연계).</li>
+</ul>
+<div class="callout warn"><b>확인 필요(사용자 판단):</b> ① 우리 실측 대상 셀의 정확한 화학종(NMC/LFP/LiPo)과 ② 모드별 정상 운용 SOC 범위를 알려주시면, 합성 데이터의 온도·전압 파라미터를 그 셀에 맞춰 더 정확히 보정하겠습니다.</div>
+
+<!-- 출처 -->
+<h2><span class="num">8</span>출처</h2>
+<ul class="sources">
+  <li>Experimental Study of Thermal Runaway Process of 18650 Lithium-Ion Battery — https://pmc.ncbi.nlm.nih.gov/articles/PMC5503358/</li>
+  <li>Multi-Stage Evolution of Thermal Runaway &amp; Gas Flammability of LiFePO4 by SOC Gradient — https://pmc.ncbi.nlm.nih.gov/articles/PMC12114410/</li>
+  <li>A Critical Review of Thermal Runaway Prediction and Early-Warning Methods (Energy Material Advances) — https://spj.science.org/doi/10.34133/energymatadv.0008</li>
+  <li>Characterization on thermal runaway of commercial 18650 (review, ScienceDirect) — https://www.sciencedirect.com/science/article/abs/pii/S2352152X21006095</li>
+  <li>Experimental Analysis of Thermal Runaway in 18650 Using an ARC (MDPI Batteries) — https://www.mdpi.com/2313-0105/3/2/14</li>
+  <li>A multi-level early warning strategy for LiFePO4 overcharge thermal runaway (ScienceDirect) — https://www.sciencedirect.com/science/article/abs/pii/S0306261923007390</li>
+  <li>Gas detection technology for thermal runaway of Li-ion batteries (Frontiers in Physics) — https://www.frontiersin.org/journals/physics/articles/10.3389/fphy.2025.1615872/full</li>
+  <li>A dual-stage thermal runaway early warning based on multi-domain acoustic signal fusion (ScienceDirect, Energy) — https://www.sciencedirect.com/science/article/abs/pii/S0360544225013908</li>
+  <li>Swelling Mechanisms, Diagnostic Applications, and Mitigation Strategies in Li-Ion Batteries (MDPI Batteries) — https://www.mdpi.com/2313-0105/11/10/356</li>
+  <li>Advances in Early Warning of Thermal Runaway in Li-Ion Battery ESS (Wiley, Advanced Sensor Research) — https://advanced.onlinelibrary.wiley.com/doi/10.1002/adsr.202400165</li>
+  <li>Early warning of thermal runaway for large-capacity LFP via multifunctional optical fiber sensors (ScienceDirect) — https://www.sciencedirect.com/science/article/abs/pii/S2405829726004216</li>
+  <li>NASA Li-ion Battery Aging Datasets — https://data.nasa.gov/dataset/li-ion-battery-aging-datasets</li>
+  <li>Dataset of mechanically induced thermal runaway measurement and severity (ORNL/Sandia, ScienceDirect Data) — https://www.sciencedirect.com/science/article/pii/S2352340924005766</li>
+  <li>Sandia Thermal Runaway Database Development (PDF) — https://www.sandia.gov/app/uploads/sites/82/2022/10/301_Wang_Safety.pdf</li>
+  <li>Why Do LiPo Batteries Explode and How to Prevent It (Large Battery) — https://www.large-battery.com/blog/why-lipo-batteries-explode-and-prevent-it/</li>
+</ul>
+
+<footer>
+  Claude 보고 · 데이터 분석 · 2026-06-20 · 프로젝트 7241ba62-d21a-4de4-ba45-fe572dd0f4de<br>
+  수치는 인용 논문·데이터셋의 실험 조건(셀 화학종·SOC·가열조건)에 따른 값이며, 우리 대상 셀에 적용 시 특징 단위 정규화·보정을 권장합니다.
+</footer>
+
+</div>
+</body>
+</html>

@@ -1,0 +1,447 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8"/>
+<title>AI 배터리 열폭주 조기감지 — 서비스 개요</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: #eef2ff;
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    padding: 48px 32px;
+  }
+  h1 {
+    font-size: 1.35rem;
+    font-weight: 800;
+    color: #1e3a5f;
+    margin-bottom: 6px;
+    letter-spacing: -0.3px;
+  }
+  .sub {
+    font-size: 0.82rem;
+    color: #6b7280;
+    margin-bottom: 40px;
+  }
+
+  /* ── main diagram ── */
+  .diagram {
+    display: flex;
+    align-items: center;
+    gap: 0;
+    background: #ffffff;
+    border-radius: 20px;
+    padding: 40px 36px;
+    box-shadow: 0 8px 40px rgba(37,99,235,0.10);
+  }
+
+  /* ── panel ── */
+  .panel {
+    width: 188px;
+    min-height: 360px;
+    border: 2.5px solid #2563eb;
+    border-radius: 18px;
+    padding: 20px 16px 24px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0;
+    background: #fff;
+    position: relative;
+  }
+  .panel-title {
+    font-size: 0.92rem;
+    font-weight: 800;
+    color: #b91c1c;
+    text-align: center;
+    line-height: 1.35;
+    margin-bottom: 20px;
+    letter-spacing: -0.2px;
+  }
+  .panel-body {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 14px;
+    width: 100%;
+    flex: 1;
+    justify-content: center;
+  }
+
+  /* ── arrows ── */
+  .arrow {
+    flex-shrink: 0;
+    padding: 0 4px;
+    display: flex;
+    align-items: center;
+  }
+
+  /* ── icon box ── */
+  .icon-box {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 7px;
+    width: 100%;
+  }
+  .icon-box svg { display: block; }
+  .icon-label {
+    font-size: 0.72rem;
+    color: #374151;
+    font-weight: 600;
+    text-align: center;
+    line-height: 1.3;
+  }
+  .icon-label-sm {
+    font-size: 0.65rem;
+    color: #6b7280;
+    text-align: center;
+    line-height: 1.3;
+  }
+
+  /* ── inner sub-box (for AI panel) ── */
+  .sub-box {
+    border: 2px solid #f97316;
+    border-radius: 10px;
+    padding: 9px 14px;
+    text-align: center;
+    width: 100%;
+    background: #fff7ed;
+  }
+  .sub-box-title {
+    font-size: 0.78rem;
+    font-style: italic;
+    font-weight: 700;
+    color: #c2410c;
+    line-height: 1.3;
+  }
+  .sub-box-sub {
+    font-size: 0.65rem;
+    color: #9a3412;
+    margin-top: 2px;
+  }
+  .inner-arrow {
+    color: #f97316;
+    font-size: 1rem;
+    line-height: 1;
+    text-align: center;
+    width: 100%;
+  }
+
+  /* divider inside a panel */
+  .panel-divider {
+    width: 80%;
+    border: none;
+    border-top: 1px dashed #dbeafe;
+    margin: 4px 0;
+  }
+</style>
+</head>
+<body>
+
+<h1>AI 배터리 열폭주 조기감지 관제 시스템</h1>
+<p class="sub">리튬이온 배터리 시계열 데이터 → Kafka 스트리밍 → LSTM-AutoEncoder → React 대시보드</p>
+
+<div class="diagram">
+
+  <!-- ══════════════════ PANEL 1 — Edge ══════════════════ -->
+  <div class="panel">
+    <div class="panel-title">에지<br>데이터 소스</div>
+    <div class="panel-body">
+
+      <!-- Raspberry Pi icon -->
+      <div class="icon-box">
+        <svg width="52" height="52" viewBox="0 0 52 52" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <!-- PCB board -->
+          <rect x="6" y="6" width="40" height="40" rx="5" fill="#1e7f3e" stroke="#166534" stroke-width="1.5"/>
+          <!-- GPIO pins top -->
+          <rect x="10" y="3" width="5" height="6" rx="1" fill="#9ca3af"/>
+          <rect x="17" y="3" width="5" height="6" rx="1" fill="#9ca3af"/>
+          <rect x="24" y="3" width="5" height="6" rx="1" fill="#9ca3af"/>
+          <rect x="31" y="3" width="5" height="6" rx="1" fill="#9ca3af"/>
+          <!-- USB ports left -->
+          <rect x="1" y="17" width="7" height="8" rx="1.5" fill="#d1d5db" stroke="#9ca3af" stroke-width="1"/>
+          <rect x="1" y="28" width="7" height="8" rx="1.5" fill="#d1d5db" stroke="#9ca3af" stroke-width="1"/>
+          <!-- CPU chip -->
+          <rect x="16" y="16" width="20" height="20" rx="3" fill="#374151"/>
+          <rect x="18" y="18" width="16" height="16" rx="2" fill="#4b5563"/>
+          <text x="26" y="29" text-anchor="middle" font-size="5.5" fill="#f9fafb" font-weight="700" font-family="monospace">RPi</text>
+          <!-- SD card right -->
+          <rect x="44" y="23" width="7" height="6" rx="1" fill="#fbbf24"/>
+        </svg>
+        <div class="icon-label">Raspberry Pi</div>
+      </div>
+
+      <hr class="panel-divider"/>
+
+      <!-- Sensors -->
+      <div class="icon-box">
+        <svg width="44" height="40" viewBox="0 0 44 40" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <!-- INA sensor chip -->
+          <rect x="4" y="4" width="36" height="14" rx="3" fill="#1d4ed8" stroke="#1e40af" stroke-width="1"/>
+          <text x="22" y="14" text-anchor="middle" font-size="5.5" fill="white" font-weight="700" font-family="monospace">INA 219/226</text>
+          <!-- legs -->
+          <rect x="7" y="17" width="3" height="5" rx="1" fill="#6b7280"/>
+          <rect x="13" y="17" width="3" height="5" rx="1" fill="#6b7280"/>
+          <rect x="19" y="17" width="3" height="5" rx="1" fill="#6b7280"/>
+          <rect x="25" y="17" width="3" height="5" rx="1" fill="#6b7280"/>
+          <rect x="31" y="17" width="3" height="5" rx="1" fill="#6b7280"/>
+          <!-- DS18B20 temp sensor -->
+          <rect x="9" y="26" width="26" height="10" rx="3" fill="#dc2626" stroke="#991b1b" stroke-width="1"/>
+          <text x="22" y="33.5" text-anchor="middle" font-size="5" fill="white" font-weight="700" font-family="monospace">DS18B20</text>
+        </svg>
+        <div class="icon-label">전압·전류·온도</div>
+        <div class="icon-label-sm">INA219/226 · DS18B20<br>bq27441 · IR Camera</div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- arrow 1 -->
+  <div class="arrow">
+    <svg width="52" height="28" viewBox="0 0 52 28" fill="none">
+      <line x1="4" y1="14" x2="42" y2="14" stroke="#3b82f6" stroke-width="2.5"/>
+      <polyline points="36,7 44,14 36,21" stroke="#3b82f6" stroke-width="2.5" stroke-linejoin="round" fill="none"/>
+    </svg>
+  </div>
+
+  <!-- ══════════════════ PANEL 2 — Kafka ══════════════════ -->
+  <div class="panel">
+    <div class="panel-title">스트리밍<br>파이프라인</div>
+    <div class="panel-body">
+
+      <!-- Kafka logo simplified -->
+      <div class="icon-box">
+        <svg width="72" height="52" viewBox="0 0 72 52" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <!-- center node -->
+          <circle cx="36" cy="26" r="9" fill="#231f20" stroke="#231f20" stroke-width="1.5"/>
+          <text x="36" y="30" text-anchor="middle" font-size="6" fill="white" font-weight="800" font-family="monospace">K</text>
+          <!-- satellite nodes -->
+          <circle cx="11" cy="12" r="6" fill="#231f20"/>
+          <circle cx="61" cy="12" r="6" fill="#231f20"/>
+          <circle cx="11" cy="40" r="6" fill="#231f20"/>
+          <circle cx="61" cy="40" r="6" fill="#231f20"/>
+          <!-- lines -->
+          <line x1="17" y1="14" x2="27" y2="20" stroke="#231f20" stroke-width="2"/>
+          <line x1="55" y1="14" x2="45" y2="20" stroke="#231f20" stroke-width="2"/>
+          <line x1="17" y1="38" x2="27" y2="32" stroke="#231f20" stroke-width="2"/>
+          <line x1="55" y1="38" x2="45" y2="32" stroke="#231f20" stroke-width="2"/>
+        </svg>
+        <div class="icon-label" style="font-size:1.05rem;font-weight:800;color:#231f20;letter-spacing:-0.5px;">kafka</div>
+      </div>
+
+      <hr class="panel-divider"/>
+
+      <!-- Topics -->
+      <div class="icon-box" style="gap:5px;">
+        <div style="background:#dbeafe;border-radius:6px;padding:4px 8px;width:100%;text-align:center;">
+          <div style="font-size:0.62rem;font-weight:700;color:#1e40af;font-family:monospace;">raw-metrics</div>
+        </div>
+        <div style="background:#dcfce7;border-radius:6px;padding:4px 8px;width:100%;text-align:center;">
+          <div style="font-size:0.62rem;font-weight:700;color:#166534;font-family:monospace;">anomaly-alerts</div>
+        </div>
+        <div style="background:#fef9c3;border-radius:6px;padding:4px 8px;width:100%;text-align:center;">
+          <div style="font-size:0.62rem;font-weight:700;color:#854d0e;font-family:monospace;">events</div>
+        </div>
+        <div class="icon-label-sm" style="margin-top:2px;">토픽 3개</div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- arrow 2 -->
+  <div class="arrow">
+    <svg width="52" height="28" viewBox="0 0 52 28" fill="none">
+      <line x1="4" y1="14" x2="42" y2="14" stroke="#3b82f6" stroke-width="2.5"/>
+      <polyline points="36,7 44,14 36,21" stroke="#3b82f6" stroke-width="2.5" stroke-linejoin="round" fill="none"/>
+    </svg>
+  </div>
+
+  <!-- ══════════════════ PANEL 3 — AI ══════════════════ -->
+  <div class="panel" style="width:210px;">
+    <div class="panel-title">AI 처리 시스템</div>
+    <div class="panel-body" style="gap:6px;">
+
+      <!-- 특징 추출 sub-box -->
+      <div class="sub-box">
+        <div class="sub-box-title">특징 추출 · 칼만 필터</div>
+        <div class="sub-box-sub">V_scaled · dT_dt · Wh_cumsum</div>
+      </div>
+
+      <!-- inner arrows up/down -->
+      <div class="inner-arrow">↑ &nbsp; ↓</div>
+
+      <!-- LSTM-AE main box -->
+      <div class="sub-box" style="background:#fff7ed;border-color:#f97316;padding:12px 14px;">
+        <div class="sub-box-title" style="font-size:0.88rem;">LSTM-AutoEncoder</div>
+        <div class="sub-box-sub">재구성 오차 → 이상점수<br>윈도우 30 time-steps</div>
+      </div>
+
+      <!-- inner arrows up/down -->
+      <div class="inner-arrow">↑ &nbsp; ↓</div>
+
+      <!-- Kafka Consumer sub-box -->
+      <div class="sub-box">
+        <div class="sub-box-title">Kafka Consumer</div>
+        <div class="sub-box-sub">TimescaleDB 적재<br>오프셋 재처리</div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- arrow 3 -->
+  <div class="arrow">
+    <svg width="52" height="28" viewBox="0 0 52 28" fill="none">
+      <line x1="4" y1="14" x2="42" y2="14" stroke="#3b82f6" stroke-width="2.5"/>
+      <polyline points="36,7 44,14 36,21" stroke="#3b82f6" stroke-width="2.5" stroke-linejoin="round" fill="none"/>
+    </svg>
+  </div>
+
+  <!-- ══════════════════ PANEL 4 — Storage ══════════════════ -->
+  <div class="panel">
+    <div class="panel-title">저장소</div>
+    <div class="panel-body">
+
+      <!-- PostgreSQL elephant icon -->
+      <div class="icon-box">
+        <svg width="56" height="56" viewBox="0 0 56 56" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <!-- elephant body -->
+          <ellipse cx="28" cy="30" rx="18" ry="16" fill="#336791"/>
+          <!-- head -->
+          <ellipse cx="28" cy="18" rx="13" ry="11" fill="#336791"/>
+          <!-- eye -->
+          <circle cx="24" cy="16" r="2.5" fill="white"/>
+          <circle cx="24.8" cy="16" r="1.2" fill="#1e3a5f"/>
+          <!-- tusk -->
+          <path d="M20 22 Q15 26 14 30" stroke="white" stroke-width="2.5" stroke-linecap="round" fill="none"/>
+          <!-- ear -->
+          <ellipse cx="38" cy="17" rx="7" ry="9" fill="#4a8ab5"/>
+          <!-- trunk -->
+          <path d="M15 22 Q8 28 10 36 Q11 40 16 38" stroke="#336791" stroke-width="5" stroke-linecap="round" fill="none"/>
+          <!-- legs -->
+          <rect x="16" y="42" width="8" height="10" rx="4" fill="#336791"/>
+          <rect x="32" y="42" width="8" height="10" rx="4" fill="#336791"/>
+          <!-- tail -->
+          <path d="M46 28 Q52 22 50 32" stroke="#336791" stroke-width="3" stroke-linecap="round" fill="none"/>
+        </svg>
+        <div class="icon-label">PostgreSQL</div>
+        <div class="icon-label-sm">사용자 · 디바이스 · 이벤트</div>
+      </div>
+
+      <hr class="panel-divider"/>
+
+      <!-- TimescaleDB cylinder icon -->
+      <div class="icon-box">
+        <svg width="50" height="52" viewBox="0 0 50 52" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <!-- cylinder body -->
+          <rect x="7" y="12" width="36" height="30" rx="0" fill="#fbbf24"/>
+          <!-- top ellipse -->
+          <ellipse cx="25" cy="12" rx="18" ry="6" fill="#f59e0b"/>
+          <!-- bottom ellipse -->
+          <ellipse cx="25" cy="42" rx="18" ry="6" fill="#d97706"/>
+          <!-- stripe -->
+          <rect x="7" y="22" width="36" height="2" fill="#d97706" opacity="0.5"/>
+          <rect x="7" y="30" width="36" height="2" fill="#d97706" opacity="0.5"/>
+          <!-- clock icon on front -->
+          <circle cx="25" cy="27" r="7" fill="white" opacity="0.9"/>
+          <line x1="25" y1="27" x2="25" y2="22" stroke="#d97706" stroke-width="1.5" stroke-linecap="round"/>
+          <line x1="25" y1="27" x2="29" y2="29" stroke="#d97706" stroke-width="1.5" stroke-linecap="round"/>
+        </svg>
+        <div class="icon-label">TimescaleDB</div>
+        <div class="icon-label-sm">시계열 하이퍼테이블</div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- arrow 4 -->
+  <div class="arrow">
+    <svg width="52" height="28" viewBox="0 0 52 28" fill="none">
+      <line x1="4" y1="14" x2="42" y2="14" stroke="#3b82f6" stroke-width="2.5"/>
+      <polyline points="36,7 44,14 36,21" stroke="#3b82f6" stroke-width="2.5" stroke-linejoin="round" fill="none"/>
+    </svg>
+  </div>
+
+  <!-- ══════════════════ PANEL 5 — Dashboard ══════════════════ -->
+  <div class="panel">
+    <div class="panel-title">대시보드<br>& 알림</div>
+    <div class="panel-body">
+
+      <!-- Monitor / React dashboard icon -->
+      <div class="icon-box">
+        <svg width="68" height="56" viewBox="0 0 68 56" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <!-- monitor body -->
+          <rect x="4" y="4" width="60" height="38" rx="4" fill="#1e293b" stroke="#334155" stroke-width="1.5"/>
+          <!-- screen -->
+          <rect x="7" y="7" width="54" height="32" rx="2" fill="#0f172a"/>
+          <!-- screen content: bar chart -->
+          <rect x="14" y="28" width="6" height="8" rx="1" fill="#60a5fa"/>
+          <rect x="22" y="22" width="6" height="14" rx="1" fill="#34d399"/>
+          <rect x="30" y="18" width="6" height="18" rx="1" fill="#60a5fa"/>
+          <rect x="38" y="24" width="6" height="12" rx="1" fill="#f87171"/>
+          <rect x="46" y="16" width="6" height="20" rx="1" fill="#34d399"/>
+          <!-- gauge circle -->
+          <circle cx="13" cy="17" r="5" fill="none" stroke="#60a5fa" stroke-width="2"/>
+          <path d="M8 17 A5 5 0 0 1 18 17" stroke="#34d399" stroke-width="2" stroke-linecap="round" fill="none"/>
+          <!-- stand -->
+          <rect x="28" y="41" width="12" height="5" rx="1" fill="#475569"/>
+          <rect x="22" y="46" width="24" height="4" rx="2" fill="#475569"/>
+          <!-- React orbit above monitor -->
+          <ellipse cx="57" cy="8" rx="7" ry="3.5" fill="none" stroke="#61dafb" stroke-width="1.5" transform="rotate(-30 57 8)"/>
+          <ellipse cx="57" cy="8" rx="7" ry="3.5" fill="none" stroke="#61dafb" stroke-width="1.5" transform="rotate(30 57 8)"/>
+          <ellipse cx="57" cy="8" rx="7" ry="3.5" fill="none" stroke="#61dafb" stroke-width="1.5"/>
+          <circle cx="57" cy="8" r="2" fill="#61dafb"/>
+        </svg>
+        <div class="icon-label">React 대시보드</div>
+        <div class="icon-label-sm">15개 페이지 · WebSocket</div>
+      </div>
+
+      <hr class="panel-divider"/>
+
+      <!-- KakaoTalk icon -->
+      <div class="icon-box">
+        <svg width="52" height="48" viewBox="0 0 52 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <!-- Kakao chat bubble -->
+          <ellipse cx="26" cy="22" rx="22" ry="18" fill="#FEE500"/>
+          <!-- tail -->
+          <path d="M18 36 Q14 42 10 44 Q16 40 20 38 Z" fill="#FEE500"/>
+          <!-- K letter -->
+          <text x="26" y="29" text-anchor="middle" font-size="16" font-weight="900" fill="#3C1E1E" font-family="system-ui">K</text>
+          <!-- small notification dot -->
+          <circle cx="42" cy="8" r="6" fill="#ef4444"/>
+          <text x="42" y="12" text-anchor="middle" font-size="7" fill="white" font-weight="700">!</text>
+        </svg>
+        <div class="icon-label">카카오톡 알림</div>
+        <div class="icon-label-sm">위험 감지 즉시 발송</div>
+      </div>
+
+    </div>
+  </div>
+
+</div>
+
+<!-- ── bottom flow label ── -->
+<div style="margin-top:28px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:center;">
+  <div style="background:white;border:1.5px solid #dbeafe;border-radius:8px;padding:6px 14px;font-size:0.72rem;font-weight:600;color:#1e40af;">100ms 폴링</div>
+  <svg width="24" height="14" viewBox="0 0 24 14"><line x1="2" y1="7" x2="18" y2="7" stroke="#93c5fd" stroke-width="2"/><polyline points="14,3 19,7 14,11" stroke="#93c5fd" stroke-width="2" fill="none"/></svg>
+  <div style="background:white;border:1.5px solid #dbeafe;border-radius:8px;padding:6px 14px;font-size:0.72rem;font-weight:600;color:#1e40af;">Kafka 발행</div>
+  <svg width="24" height="14" viewBox="0 0 24 14"><line x1="2" y1="7" x2="18" y2="7" stroke="#93c5fd" stroke-width="2"/><polyline points="14,3 19,7 14,11" stroke="#93c5fd" stroke-width="2" fill="none"/></svg>
+  <div style="background:white;border:1.5px solid #dbeafe;border-radius:8px;padding:6px 14px;font-size:0.72rem;font-weight:600;color:#1e40af;">DB 적재</div>
+  <svg width="24" height="14" viewBox="0 0 24 14"><line x1="2" y1="7" x2="18" y2="7" stroke="#93c5fd" stroke-width="2"/><polyline points="14,3 19,7 14,11" stroke="#93c5fd" stroke-width="2" fill="none"/></svg>
+  <div style="background:white;border:1.5px solid #dbeafe;border-radius:8px;padding:6px 14px;font-size:0.72rem;font-weight:600;color:#1e40af;">AI 추론</div>
+  <svg width="24" height="14" viewBox="0 0 24 14"><line x1="2" y1="7" x2="18" y2="7" stroke="#93c5fd" stroke-width="2"/><polyline points="14,3 19,7 14,11" stroke="#93c5fd" stroke-width="2" fill="none"/></svg>
+  <div style="background:white;border:1.5px solid #dbeafe;border-radius:8px;padding:6px 14px;font-size:0.72rem;font-weight:600;color:#1e40af;">WebSocket 푸시</div>
+  <svg width="24" height="14" viewBox="0 0 24 14"><line x1="2" y1="7" x2="18" y2="7" stroke="#93c5fd" stroke-width="2"/><polyline points="14,3 19,7 14,11" stroke="#93c5fd" stroke-width="2" fill="none"/></svg>
+  <div style="background:#fef2f2;border:1.5px solid #fca5a5;border-radius:8px;padding:6px 14px;font-size:0.72rem;font-weight:700;color:#991b1b;">위험 → Kill-Switch 차단</div>
+</div>
+
+<div style="margin-top:16px;font-size:0.68rem;color:#9ca3af;">
+  Manyfast 프로젝트 ID: 7241ba62-d21a-4de4-ba45-fe572dd0f4de &nbsp;|&nbsp; 2026
+</div>
+
+</body>
+</html>

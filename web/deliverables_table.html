@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>수행 단계별 주요 산출물</title>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700&display=swap" rel="stylesheet" />
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Noto Sans KR', 'Apple SD Gothic Neo', sans-serif;
+      background: #fff;
+      padding: 48px 60px;
+      color: #111;
+      font-size: 13.5px;
+    }
+
+    .caption {
+      font-size: 13px;
+      font-weight: 500;
+      margin-bottom: 8px;
+      color: #111;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      border-top: 2px solid #111;
+      border-bottom: 2px solid #111;
+    }
+
+    /* 헤더 */
+    thead th {
+      padding: 10px 16px;
+      font-size: 14px;
+      font-weight: 700;
+      text-align: left;
+      border-bottom: 2px solid #111;
+      background: #fff;
+    }
+    thead th:nth-child(1) { width: 12%; }
+    thead th:nth-child(2) { width: 12%; }
+    thead th:nth-child(3) { width: 76%; }
+
+    /* 바디 */
+    tbody td {
+      padding: 7px 16px;
+      vertical-align: middle;
+      line-height: 1.5;
+    }
+
+    /* 단계 셀 — 세로 병합, 가운데 정렬 */
+    td.phase {
+      text-align: center;
+      font-weight: 500;
+      font-size: 13.5px;
+      border-right: 1px solid #ccc;
+      vertical-align: middle;
+    }
+
+    /* 코드 셀 */
+    td.code {
+      font-size: 13px;
+      color: #111;
+      border-right: 1px dashed #ccc;
+    }
+
+    /* 산출물 셀 */
+    td.item {
+      font-size: 13px;
+      color: #111;
+    }
+
+    /* 행 구분 — 같은 단계 내 점선 */
+    tr.inner td.code,
+    tr.inner td.item {
+      border-top: 1px dashed #ccc;
+    }
+
+    /* 단계 경계선 */
+    tr.phase-start td {
+      border-top: 1px solid #999;
+    }
+    tr.phase-start td.phase {
+      border-top: 1px solid #999;
+    }
+  </style>
+</head>
+<body>
+
+<p class="caption">〈표 1-1〉 AI 배터리 열폭주 조기감지 관제 시스템 수행 단계별 주요 산출물</p>
+
+<table>
+  <thead>
+    <tr>
+      <th>단계</th>
+      <th>코드</th>
+      <th>산출물</th>
+    </tr>
+  </thead>
+  <tbody>
+
+    <!-- ── 분석 ── -->
+    <tr class="phase-start">
+      <td class="phase" rowspan="6">분석</td>
+      <td class="code">A1</td>
+      <td class="item">요구사항 명세서</td>
+    </tr>
+    <tr class="inner">
+      <td class="code">A2</td>
+      <td class="item">시스템 아키텍처 분석서</td>
+    </tr>
+    <tr class="inner">
+      <td class="code">A3</td>
+      <td class="item">하드웨어·센서 사양 분석서</td>
+    </tr>
+    <tr class="inner">
+      <td class="code">A4</td>
+      <td class="item">기술 스택 검토서</td>
+    </tr>
+    <tr class="inner">
+      <td class="code">A5</td>
+      <td class="item">유저 플로우 다이어그램</td>
+    </tr>
+    <tr class="inner">
+      <td class="code">A6</td>
+      <td class="item">KPI 정의서 및 리스크 분석서</td>
+    </tr>
+
+    <!-- ── 설계 ── -->
+    <tr class="phase-start">
+      <td class="phase" rowspan="9">설계</td>
+      <td class="code">D1</td>
+      <td class="item">TimescaleDB 시계열 스키마 설계서</td>
+    </tr>
+    <tr class="inner">
+      <td class="code">D2</td>
+      <td class="item">Kafka 토픽·메시지 설계서</td>
+    </tr>
+    <tr class="inner">
+      <td class="code">D3</td>
+      <td class="item">REST API 설계서</td>
+    </tr>
+    <tr class="inner">
+      <td class="code">D4</td>
+      <td class="item">RBAC 정책 설계서</td>
+    </tr>
+    <tr class="inner">
+      <td class="code">D5</td>
+      <td class="item">센서 드라이버 추상화 설계서</td>
+    </tr>
+    <tr class="inner">
+      <td class="code">D6</td>
+      <td class="item">측정 모드·릴레이 인터락 설계서</td>
+    </tr>
+    <tr class="inner">
+      <td class="code">D7</td>
+      <td class="item">AI 모델 설계서 (LSTM-AutoEncoder)</td>
+    </tr>
+    <tr class="inner">
+      <td class="code">D8</td>
+      <td class="item">와이어프레임 (15페이지)</td>
+    </tr>
+    <tr class="inner">
+      <td class="code">D9</td>
+      <td class="item">카카오톡 알림 메시지 템플릿 설계서</td>
+    </tr>
+
+    <!-- ── 구현 ── -->
+    <tr class="phase-start">
+      <td class="phase" rowspan="30">구현</td>
+      <td class="code">I1</td>
+      <td class="item">PostgreSQL + TimescaleDB 스키마 적용 스크립트</td>
+    </tr>
+    <tr class="inner">
+      <td class="code">I2</td>
+      <td class="item">Kafka 클러스터 구성 및 토픽 3개 생성 스크립트</td>
+    </tr>
+    <tr class="inner">
+      <td class="code">I3</td>
+      <td class="item">백엔드 프로젝트 초기화</td>
+    </tr>
+    <tr class="inner">
+      <td class="code">I4</td>
+      <td class="item">회원가입·로그인 API</td>
+    </tr>
+    <tr class="inner">
+      <td class="code">I5</td>
+      <td class="item">소셜 로그인(OAuth) API</td>
+    </tr>
+    <tr class="inner">
+      <td class="code">I6</td>
+      <td class="item">계정 찾기·비밀번호 재설정 API</td>
+    </tr>
+    <tr class="inner">
+      <td class="code">I7</td>
+      <td class="item">RBAC 미들웨어</td>
+    </tr>
+    <tr class="inner">
+      <td class="code">I8</td>
+      <td class="item">센서 드라이버 모듈 (INA219/226, DS18B20, bq27441, IR 카메라)</td>
+    </tr>
+    <tr class="inner">
+      <td class="code">I9</td>
+      <td class="item">100ms 폴링 스케줄러</td>
+    </tr>
+    <tr class="inner">
+      <td class="code">I10</td>
+      <td class="item">측정 모드 선택 및 릴레이 인터락 로직</td>
+    </tr>
+    <tr class="inner">
+      <td class="code">I11</td>
+      <td class="item">Kafka 프로듀서 및 센서 JSON 직렬화</td>
+    </tr>
+    <tr class="inner">
+      <td class="code">I12</td>
+      <td class="item">Kafka Consumer → TimescaleDB 적재 파이프라인</td>
+    </tr>
+    <tr class="inner">
+      <td class="code">I13</td>
+      <td class="item">대시보드용 조회 뷰·요약 테이블</td>
+    </tr>
+    <tr class="inner">
+      <td class="code">I14</td>
+      <td class="item">오류·예외 이벤트 기록 모듈</td>
+    </tr>
+    <tr class="inner">
+      <td class="code">I15</td>
+      <td class="item">학습용 정상 데이터 수집·라벨링 파이프라인</td>
+    </tr>
+    <tr class="inner">
+      <td class="code">I16</td>
+      <td class="item">특징 추출·윈도우링 파이프라인 (30 time-steps, 7 특징)</td>
+    </tr>
+    <tr class="inner">
+      <td class="code">I17</td>
+      <td class="item">LSTM-AutoEncoder 모델 학습 스크립트 및 모델 아티팩트</td>
+    </tr>
+    <tr class="inner">
+      <td class="code">I18</td>
+      <td class="item">실시간 추론 서버 및 이상점수 계산 모듈</td>
+    </tr>
+    <tr class="inner">
+      <td class="code">I19</td>
+      <td class="item">상태 등급 판정 및 이상 이벤트 저장</td>
+    </tr>
+    <tr class="inner">
+      <td class="code">I20</td>
+      <td class="item">임계치 관리 API</td>
+    </tr>
+    <tr class="inner">
+      <td class="code">I21</td>
+      <td class="item">React 프로젝트 초기화, 라우팅 구조 및 반응형 레이아웃</td>
+    </tr>
+    <tr class="inner">
+      <td class="code">I22</td>
+      <td class="item">실시간 반응형 대시보드 페이지 (요약 카드 4개, 게이지 5개)</td>
+    </tr>
+    <tr class="inner">
+      <td class="code">I23</td>
+      <td class="item">반응형 추세 차트 페이지 (전압·온도·전류 라이브 차트)</td>
+    </tr>
+    <tr class="inner">
+      <td class="code">I24</td>
+      <td class="item">이벤트 이력·이상 탐지 관리 페이지 (데스크톱 테이블/모바일 카드)</td>
+    </tr>
+    <tr class="inner">
+      <td class="code">I25</td>
+      <td class="item">임계치 설정 UI</td>
+    </tr>
+    <tr class="inner">
+      <td class="code">I26</td>
+      <td class="item">카카오톡 알림 연동 모듈</td>
+    </tr>
+    <tr class="inner">
+      <td class="code">I27</td>
+      <td class="item">릴레이·Kill-Switch 제어 API</td>
+    </tr>
+    <tr class="inner">
+      <td class="code">I28</td>
+      <td class="item">긴급 차단 Fail-Safe 자동화 로직</td>
+    </tr>
+    <tr class="inner">
+      <td class="code">I29</td>
+      <td class="item">알림 설정·알림 이력 UI</td>
+    </tr>
+    <tr class="inner">
+      <td class="code">I30</td>
+      <td class="item">관리자 제어 패널·사용자 권한 관리 UI</td>
+    </tr>
+
+    <!-- ── 시험 ── -->
+    <tr class="phase-start">
+      <td class="phase" rowspan="7">시험</td>
+      <td class="code">T1</td>
+      <td class="item">단위 테스트 보고서</td>
+    </tr>
+    <tr class="inner">
+      <td class="code">T2</td>
+      <td class="item">통합 테스트 보고서 (에지 → Kafka → DB → AI → 대시보드 E2E)</td>
+    </tr>
+    <tr class="inner">
+      <td class="code">T3</td>
+      <td class="item">이상 시나리오 주입 테스트 결과서 (오탐·미탐 검증)</td>
+    </tr>
+    <tr class="inner">
+      <td class="code">T4</td>
+      <td class="item">Fail-Safe·릴레이 인터락 동작 확인서</td>
+    </tr>
+    <tr class="inner">
+      <td class="code">T5</td>
+      <td class="item">KPI 측정 결과서</td>
+    </tr>
+    <tr class="inner">
+      <td class="code">T6</td>
+      <td class="item">성능 튜닝 보고서</td>
+    </tr>
+    <tr class="inner">
+      <td class="code">T7</td>
+      <td class="item">배포·운영 모니터링 설정 확인서</td>
+    </tr>
+
+  </tbody>
+</table>
+
+</body>
+</html>

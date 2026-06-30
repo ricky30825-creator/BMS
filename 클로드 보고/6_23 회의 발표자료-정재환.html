@@ -1,0 +1,454 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<title>6/23 회의 발표자료-정재환</title>
+<style>
+  :root{
+    --navy:#0A2A8C;
+    --navy2:#13328F;
+    --blue:#1F5FD6;
+    --lblue:#EAF0FB;
+    --lblue2:#E4ECF8;
+    --orange:#E07B1E;
+    --red:#C0392B;
+    --ink:#222;
+    --gray:#6b6b6b;
+    --capbg:#F1F1F4;
+    --line:#d8dde8;
+  }
+  *{box-sizing:border-box; margin:0; padding:0;}
+  html,body{
+    font-family:"Apple SD Gothic Neo","Pretendard",-apple-system,"Helvetica Neue",sans-serif;
+    color:var(--ink);
+    -webkit-print-color-adjust:exact;
+    print-color-adjust:exact;
+  }
+  @page{ size:297mm 210mm; margin:0; }
+
+  .slide{
+    position:relative;
+    width:297mm; height:210mm;
+    padding:16mm 18mm 14mm 18mm;
+    page-break-after:always;
+    overflow:hidden;
+    background:#fff;
+  }
+  .slide:last-child{ page-break-after:auto; }
+
+  /* 상단 네이비 바 + 페이지번호 */
+  .topbar{ position:absolute; left:18mm; right:14mm; top:11mm; height:5px; background:var(--navy); }
+  .pageno{ position:absolute; right:14mm; top:13mm; font-size:11px; color:#555; }
+
+  h1.title{ color:var(--navy); font-size:30px; font-weight:800; letter-spacing:-0.5px; margin-top:6mm; margin-bottom:7mm; }
+  .lead{ font-size:14.5px; line-height:1.65; color:#333; margin-bottom:6mm; }
+  .lead .hi{ color:var(--navy); font-weight:700; }
+
+  .cols{ display:flex; gap:9mm; }
+  .col-l{ flex:1 1 50%; }
+  .col-r{ flex:1 1 50%; }
+
+  ul.b{ list-style:none; }
+  ul.b li{ position:relative; padding-left:16px; font-size:13.5px; line-height:1.6; margin-bottom:9px; color:#333; }
+  ul.b li::before{ content:""; position:absolute; left:0; top:8px; width:6px; height:6px; background:var(--navy); }
+  .sub{ font-size:13px; color:#444; line-height:1.55; margin:2px 0 9px 16px; }
+  b,strong{ color:var(--navy); }
+  .ink b{ color:#111; }
+
+  .sec-h{ color:var(--navy); font-size:15px; font-weight:800; margin:0 0 6px 0; }
+  .sec-h .en{ font-weight:600; color:var(--blue); font-size:13px; }
+
+  /* 표 */
+  table{ width:100%; border-collapse:collapse; font-size:12.5px; }
+  table.k th{ background:var(--navy); color:#fff; font-weight:700; padding:9px 10px; text-align:left; font-size:12.5px; }
+  table.k td{ padding:8px 10px; border-bottom:1px solid var(--line); color:#333; vertical-align:top; line-height:1.45; }
+  table.k tr:nth-child(even) td{ background:#f7f9fd; }
+  td .em{ color:var(--navy); font-weight:700; }
+  td .warn{ color:var(--red); font-weight:700; }
+  td .ok{ color:#1f8a4c; font-weight:700; }
+
+  /* 카드 */
+  .card{ background:var(--lblue); border-left:5px solid var(--navy); padding:13px 15px; border-radius:3px; margin-bottom:11px; }
+  .card .ct{ font-size:14px; font-weight:800; color:var(--navy); margin-bottom:5px; }
+  .card .cb{ font-size:12.5px; line-height:1.55; color:#333; }
+  .card.warnote{ background:#FDECEC; border-left-color:var(--red); }
+  .card.warnote .ct{ color:var(--red); }
+  .card.amber{ background:#FCF1E2; border-left-color:var(--orange); }
+  .card.amber .ct{ color:var(--orange); }
+
+  .caption{ background:var(--capbg); color:#777; font-size:11.5px; text-align:center; padding:7px; margin-top:9px; border-radius:2px; }
+  .foot{ position:absolute; left:18mm; right:14mm; bottom:7mm; font-size:9px; color:#9a9a9a; line-height:1.4; border-top:1px solid #eee; padding-top:5px; }
+
+  .pill{ display:inline-block; background:var(--lblue2); color:var(--navy); font-weight:700; font-size:11.5px; padding:3px 9px; border-radius:11px; margin:0 4px 4px 0; }
+
+  /* ===== 표지 ===== */
+  .cover{ background:#fff; }
+  .cover .ver{ position:absolute; right:18mm; top:18mm; font-size:12px; color:#444; }
+  .cover .band{ position:absolute; left:0; right:0; top:50%; height:90mm; background:var(--navy); transform:translateY(-30%); }
+  .cover .ttl{ position:absolute; left:0; right:0; top:50%; transform:translateY(-150%); text-align:center; z-index:2; }
+  .cover .ttl .t1{ color:var(--navy); font-size:46px; font-weight:800; }
+  .cover .ttl .t2{ color:#cdd6ee; font-size:40px; font-weight:800; margin-top:4px; }
+
+  /* 목차 */
+  .toc{ display:flex; gap:14mm; margin-top:6mm; }
+  .toc .left{ flex:0 0 34%; }
+  .toc .left .ko{ color:var(--navy); font-size:40px; font-weight:800; }
+  .toc .left .en{ color:var(--blue); font-size:14px; margin-top:6px; }
+  .toc .right{ flex:1; border-left:2px solid var(--navy); padding-left:12mm; }
+  .toc .item{ display:flex; justify-content:space-between; align-items:baseline; padding:13px 0; border-bottom:1px solid #eee; }
+  .toc .item .nm{ color:var(--navy); font-weight:800; font-size:17px; }
+  .toc .item .nm small{ color:#666; font-weight:500; font-size:12.5px; margin-left:8px; }
+  .toc .item .pg{ color:#9aa3b8; font-size:13px; }
+
+  /* 타임라인 */
+  .tl{ display:flex; align-items:stretch; gap:6px; margin:4mm 0 2mm; }
+  .tl .step{ flex:1; border-radius:4px; padding:10px 6px; text-align:center; color:#fff; font-size:11.5px; line-height:1.35; }
+  .tl .num{ display:block; font-weight:800; font-size:12.5px; margin-bottom:3px; }
+  .tl .arrow{ align-self:center; color:#9aa3b8; font-weight:800; }
+  .bracket{ margin-top:6px; font-size:11.5px; color:#333; }
+  .bracket .seg{ display:inline-block; padding:5px 10px; border-radius:3px; font-weight:700; }
+
+  .twobranch{ display:flex; flex-direction:column; gap:11px; }
+  .branch{ border:1px solid var(--line); border-radius:5px; padding:12px 14px; }
+  .branch .bt{ font-weight:800; color:var(--navy); font-size:13.5px; margin-bottom:4px; }
+  .branch .bb{ font-size:12.5px; line-height:1.5; color:#333; }
+  .branch.fast{ border-color:#c9d6f3; background:#f5f8fe; }
+
+  .codebox{ background:#0f1b3d; color:#dfe6f7; border-radius:5px; padding:12px 14px; font-family:"SF Mono",Menlo,monospace; font-size:11px; line-height:1.6; white-space:pre; }
+  .codebox .c{ color:#7f8fb5; }
+  .codebox .k{ color:#9fc1ff; }
+
+  /* 옵션 카드 */
+  .opts{ display:flex; gap:9px; margin-top:3mm; }
+  .opt{ flex:1; border:1.5px solid var(--line); border-radius:6px; padding:13px; position:relative; }
+  .opt .oh{ font-weight:800; font-size:14px; color:#333; margin-bottom:6px; }
+  .opt .tag{ font-size:11px; color:#fff; background:#9aa3b8; padding:2px 7px; border-radius:10px; font-weight:700; }
+  .opt.rec{ border-color:var(--navy); border-width:2px; background:#f5f8fe; }
+  .opt.rec .tag{ background:var(--navy); }
+  .opt ul{ list-style:none; margin-top:8px; }
+  .opt li{ font-size:12px; line-height:1.5; padding-left:13px; position:relative; margin-bottom:5px; color:#333; }
+  .opt li::before{ content:"–"; position:absolute; left:0; color:#9aa3b8; }
+  .addon{ margin-top:11px; background:var(--lblue); border-radius:5px; padding:11px 14px; font-size:12.5px; line-height:1.55; }
+  .addon b{ color:var(--navy); }
+</style>
+</head>
+<body>
+
+<!-- 1. 표지 -->
+<section class="slide cover">
+  <div class="ver">2026.6.23_V1</div>
+  <div class="band"></div>
+  <div class="ttl">
+    <div class="t1">6/23 회의 발표자료</div>
+    <div class="t2">- 정재환</div>
+  </div>
+</section>
+
+<!-- 2. 목차 -->
+<section class="slide">
+  <div class="topbar"></div><div class="pageno">2</div>
+  <div class="toc">
+    <div class="left">
+      <div class="ko">목차</div>
+      <div class="en">Table of Contents</div>
+      <div style="margin-top:10mm; font-size:12.5px; color:#555; line-height:1.7;">
+        주제 : <b>음향 기반 열폭주 조기감지<br>센서 도입 검토</b>
+      </div>
+    </div>
+    <div class="right">
+      <div class="item"><span class="nm">01 &nbsp;배경과 한계 <small>현재 센서 구성이 놓치는 구간</small></span><span class="pg">3p</span></div>
+      <div class="item"><span class="nm">02 &nbsp;음향 조기감지 원리 <small>벤팅음 · 내부 탄성파(AE)</small></span><span class="pg">5p</span></div>
+      <div class="item"><span class="nm">03 &nbsp;신뢰성 근거 <small>특허 KR102254734B1 · 논문</small></span><span class="pg">7p</span></div>
+      <div class="item"><span class="nm">04 &nbsp;적용 방안 <small>센서 후보 · 시스템 통합</small></span><span class="pg">10p</span></div>
+      <div class="item"><span class="nm">05 &nbsp;선택 가능한 옵션 <small>회의 의사결정</small></span><span class="pg">11p</span></div>
+    </div>
+  </div>
+</section>
+
+<!-- 3. 배경: 현재 센서 한계 -->
+<section class="slide">
+  <div class="topbar"></div><div class="pageno">3</div>
+  <h1 class="title">현재 센서 구성은 "온도가 오른 뒤"를 본다</h1>
+  <div class="cols">
+    <div class="col-l">
+      <p class="lead">우리 시스템이 수집하는 지표는 <span class="hi">전압·전류·전력·SOC·온도(접촉/IR)·절연저항</span>이다. 모두 의미 있지만, 대부분 <span class="hi">전조의 중·후반</span>에서야 뚜렷이 변한다.</p>
+      <ul class="b">
+        <li>전압·내부저항 미세 변화는 잡기 어렵고, 실제 경보는 <b>온도 급상승(④)</b>에 의존하는 경향</li>
+        <li>온도가 오른 시점은 이미 <b>SEI 분해·부반응이 진행된 뒤</b> → 대응 시간이 짧음</li>
+        <li>LSTM-AutoEncoder가 정상패턴 이탈을 학습해도, <b>입력 신호 자체가 늦으면 경보도 늦다</b></li>
+        <li>→ 온도보다 <b>앞선 물리 신호</b>(내부 미세 파괴·기포·벤팅)를 잡을 채널이 필요</li>
+      </ul>
+    </div>
+    <div class="col-r">
+      <div class="sec-h">지표별 포착 시점</div>
+      <table class="k">
+        <tr><th>신호 채널</th><th>주로 포착하는 단계</th><th>시점</th></tr>
+        <tr><td>전압 / 내부저항</td><td>① 미세 이상</td><td><span class="ok">이른 편</span> (그러나 미약)</td></tr>
+        <tr><td>가스(off-gas)</td><td>② off-gas 방출</td><td>중간</td></tr>
+        <tr><td>온도(접촉/IR)</td><td>④ 표면 온도 급상승</td><td><span class="warn">늦음</span></td></tr>
+        <tr><td>절연저항</td><td>③~⑤ 절연 열화</td><td>늦음</td></tr>
+        <tr><td class="em">음향(신규 검토)</td><td>① 내부 탄성파 ~ ⑤ 벤팅음</td><td><span class="ok">가장 이른 축</span></td></tr>
+      </table>
+      <div class="caption">현재 구성은 ④ 온도 중심 → "사후"에 가까움</div>
+    </div>
+  </div>
+  <div class="foot">전조 단계 정의: 본 팀 「센서 추가 검토」 자료 및 열폭주 메커니즘(SEI 분해→분리막 용융→양극 분해) 기준.</div>
+</section>
+
+<!-- 4. 전조 신호 타임라인 -->
+<section class="slide">
+  <div class="topbar"></div><div class="pageno">4</div>
+  <h1 class="title">음향은 "가스가 새기 전"부터 "벤팅음"까지 포괄한다</h1>
+  <p class="lead">열폭주 전조는 아래 순서로 진행된다. <span class="hi">음향 신호</span>는 내부 탄성파(가장 이른 축)부터 벤팅음까지 넓은 구간을 덮어, 온도 기반 탐지보다 앞설 수 있다.</p>
+
+  <div class="tl">
+    <div class="step" style="background:#2E62C9"><span class="num">①</span>전압·내부저항<br>변화</div>
+    <div class="arrow">›</div>
+    <div class="step" style="background:#E07B1E"><span class="num">②</span>off-gas<br>방출</div>
+    <div class="arrow">›</div>
+    <div class="step" style="background:#E0991E"><span class="num">③</span>셀 스웰링<br>(팽창)</div>
+    <div class="arrow">›</div>
+    <div class="step" style="background:#D9622A"><span class="num">④</span>표면 온도<br>급상승</div>
+    <div class="arrow">›</div>
+    <div class="step" style="background:#C0392B"><span class="num">⑤</span>벤팅<br>(안전밸브)</div>
+    <div class="arrow">›</div>
+    <div class="step" style="background:#7A1414"><span class="num">⑥</span>발화·<br>폭발</div>
+  </div>
+
+  <div class="cols" style="margin-top:7mm;">
+    <div class="col-l">
+      <div class="card amber"><div class="ct">현재 우리 시스템이 잡는 구간</div><div class="cb">대체로 <b>② off-gas ~ ④ 온도 급상승</b>. 신호가 뚜렷해질 때는 이미 부반응이 상당히 진행.</div></div>
+    </div>
+    <div class="col-r">
+      <div class="card"><div class="ct">음향이 잡는 구간</div><div class="cb"><b>내부 탄성파(① 부근의 분리막 균열·기포 생성)</b>부터 <b>⑤ 벤팅음</b>까지. → 더 이른 경보 가능.</div></div>
+    </div>
+  </div>
+  <div class="caption">[열폭주 전조 타임라인과 신호 채널별 커버리지]</div>
+</section>
+
+<!-- 5. 우리 환경 특수성 -->
+<section class="slide">
+  <div class="topbar"></div><div class="pageno">5</div>
+  <h1 class="title">우리는 "밀폐 팩"이 아니라 "개방 공간"에서 측정한다</h1>
+  <div class="cols">
+    <div class="col-l">
+      <p class="lead">대상은 <span class="hi">개방(open) 공간의 18650 셀·USB 보조배터리</span>다. ESS·EV처럼 셀이 밀폐 팩 안에 있지 않다. 이 차이가 센서 선택을 가른다.</p>
+      <ul class="b">
+        <li><b>가스센서</b>: 밀폐 팩은 off-gas가 <b>축적</b>되어 ppm이 치솟지만, open에서는 즉시 <b>확산·희석</b> → 센서 도달 농도↓, 거리·기류에 좌우 → "온도보다 먼저"의 강점이 약화</li>
+        <li><b>음향(벤팅음)</b>: 매질이 공기 중 음파라 <b>거리·개방 여부의 영향이 작고</b>, 실제로 <b>MW급 ESS 현장</b>에서 검증된 방식</li>
+        <li>결론: open 환경에서는 <b>가스보다 음향이 비용 대비 효용·재현성에서 유리</b></li>
+      </ul>
+    </div>
+    <div class="col-r">
+      <div class="sec-h">open 환경 적합성 비교</div>
+      <table class="k">
+        <tr><th>항목</th><th>가스센서</th><th>음향(벤팅음)</th></tr>
+        <tr><td>신호 매질</td><td>가스 농도(확산)</td><td>공기 중 음파</td></tr>
+        <tr><td>개방 공간 적합성</td><td><span class="warn">낮음</span> (희석·기류 의존)</td><td><span class="ok">높음</span></td></tr>
+        <tr><td>거리 민감도</td><td>큼</td><td>상대적으로 작음</td></tr>
+        <tr><td>현장 검증</td><td>주로 밀폐 캐비닛</td><td><span class="ok">MW급 ESS station 검증</span></td></tr>
+        <tr><td>응답 속도</td><td>수초~분</td><td><span class="ok">ms 수준(벤팅 순간)</span></td></tr>
+      </table>
+      <div class="caption">검증 사례: 8p 논문 근거 참조</div>
+    </div>
+  </div>
+</section>
+
+<!-- 6. 음향 원리 -->
+<section class="slide">
+  <div class="topbar"></div><div class="pageno">6</div>
+  <h1 class="title">음향 기반 감지는 두 갈래다 — 듣기(AE) vs 거리측정</h1>
+  <p class="lead">"음향 센서"는 크게 두 방식으로 나뉜다. 우리가 원하는 것은 <span class="hi">소리를 듣는(수동) 방식</span>이다.</p>
+  <div class="cols">
+    <div class="col-l">
+      <div class="twobranch">
+        <div class="branch fast">
+          <div class="bt">(A) 벤팅·안전밸브 파열음 — 수동 마이크</div>
+          <div class="bb">셀이 부풀다 안전밸브가 터질 때 나는 "쉭/팡" 소리를 마이크로 청취. <b>open 공간에 적합</b>, 라즈베리파이 직결 가능. 단 <b>벤팅 단계(⑤)</b>라 상대적으로 늦은 신호.</div>
+        </div>
+        <div class="branch fast">
+          <div class="bt">(B) 내부 균열·기포 탄성파 — 접촉 AE(음향방출)</div>
+          <div class="bb">셀 내부에서 <b>분리막 균열·가스 기포</b>가 생길 때 발생하는 초음파(~100kHz↑)를 셀 표면에 붙인 <b>압전 소자</b>로 포착. <b>가스가 외부로 새기 전</b>에 감지 → 가장 빠른 축. 신호처리·하드웨어 난이도 높음.</div>
+        </div>
+      </div>
+    </div>
+    <div class="col-r">
+      <div class="card warnote">
+        <div class="ct">⚠ 흔한 오해 정정</div>
+        <div class="cb">시중의 <b>"초음파 센서(HC-SR04)"</b>는 펄스를 <b>쏘고 반향 시간을 재는 거리측정(소나)</b> 장치로, <b>소리를 듣는 센서가 아니다</b>. 전조음 청취 목적에는 부적합하며, 굳이 쓴다면 <b>스웰링(팽창) 거리 측정</b>용으로만 의미가 있다.</div>
+      </div>
+      <div class="card">
+        <div class="ct">정리</div>
+        <div class="cb">전조음 탐지 = <b>수동 청취형</b>(마이크 / AE 압전). <br>거리측정 초음파 모듈은 별개 용도.</div>
+      </div>
+      <div class="caption">[수동 청취(AE/마이크) vs 능동 거리측정(초음파 소나) 구분]</div>
+    </div>
+  </div>
+</section>
+
+<!-- 7. 신뢰성 ① 특허 -->
+<section class="slide">
+  <div class="topbar"></div><div class="pageno">7</div>
+  <h1 class="title">신뢰성 ① — 국내 등록특허가 같은 접근을 검증한다</h1>
+  <div class="cols">
+    <div class="col-l">
+      <p class="lead"><span class="hi">KR102254734B1</span><br>「음향을 이용한 ESS 배터리의 화재 조기 감지 장치 및 방법」</p>
+      <table class="k">
+        <tr><th>항목</th><th>내용</th></tr>
+        <tr><td>등록번호</td><td>KR 10-2254734 B1</td></tr>
+        <tr><td>권리자</td><td>(주)인텍에프에이 · 임건표</td></tr>
+        <tr><td>출원일</td><td>2020. 10. 21.</td></tr>
+        <tr><td>등록일</td><td>2021. 05. 24.</td></tr>
+      </table>
+      <p class="sub" style="margin-top:9px;">→ 음향을 1차 신호로 쓰는 조기감지가 <b>국내에서 권리화된 검증된 접근</b>임을 보여준다.</p>
+    </div>
+    <div class="col-r">
+      <div class="sec-h">청구항 핵심 구성</div>
+      <div class="card">
+        <div class="ct">① 센서부 — 복합 감지</div>
+        <div class="cb">배터리 셀의 <b>가스</b>, 가스 배출 시의 <b>음향</b>, 화재 시 <b>광</b>, <b>온도 변화</b>를 함께 감지</div>
+      </div>
+      <div class="card">
+        <div class="ct">② 분석부 — 필터링</div>
+        <div class="cb">각 아날로그 신호를 <b>설정 필터링 파라미터</b>로 필터링하여 필터링 정보 생성</div>
+      </div>
+      <div class="card">
+        <div class="ct">③ 판정 — 화재 단계</div>
+        <div class="cb">필터링 정보를 종합해 <b>화재 발생 단계를 판단</b>하고 경보</div>
+      </div>
+      <div class="caption">우리의 <b>멀티모달(전압·온도 + 음향) + AI 단계 판정</b> 방향과 정합</div>
+    </div>
+  </div>
+  <div class="foot">출처: Google Patents KR102254734B1 (https://patents.google.com/patent/KR102254734B1/ko)</div>
+</section>
+
+<!-- 8. 신뢰성 ② 논문 -->
+<section class="slide">
+  <div class="topbar"></div><div class="pageno">8</div>
+  <h1 class="title">신뢰성 ② — 음향 조기경보는 다수 논문으로 뒷받침된다</h1>
+  <p class="lead">최근 연구들은 <span class="hi">벤팅 음향 신호</span>가 빠르고 민감하며 저비용의 조기경보 수단임을 반복적으로 보고한다.</p>
+  <table class="k">
+    <tr><th style="width:40%">연구 (핵심 내용)</th><th style="width:27%">출처 · 연도</th><th>시사점</th></tr>
+    <tr><td>MW급 ESS station에서 <b>벤팅 음향</b>으로 안전 경보 — 코너 4개 음향센서 + 음원 위치추정, <b>ms급 응답</b></td><td>J. of Energy Storage, 2021</td><td>현장(grid) 규모 검증, open 환경 적용성</td></tr>
+    <tr><td>벤팅 음향 신호의 <b>시간-주파수 인식</b>으로 안전 경고</td><td>J. of Energy Storage, 2025</td><td>신호처리로 오탐 저감 가능</td></tr>
+    <tr><td>음향 신호 <b>멀티모달 재구성 융합</b> 기반 열폭주 조기경보</td><td>J. of Energy Storage, 2025</td><td>AE+타 신호 융합 = 우리 방향과 동일</td></tr>
+    <tr><td>열폭주 <b>초기 이상음 탐지·위치추정</b></td><td>연구논문, 2025</td><td>초기 단계 음향 신호의 유효성</td></tr>
+    <tr><td>BESS 열폭주 <b>조기경보 기술 종설</b></td><td>Advanced Sensor Research (Wiley), 2025</td><td>음향이 주요 조기경보 모달리티로 정리됨</td></tr>
+    <tr><td>(대비) 반도체 <b>가스센서</b>의 초기 열폭주 가스 탐지</td><td>PMC(논문), 2025</td><td>가능하나 드리프트·교차감도·환경 의존 한계</td></tr>
+  </table>
+  <div class="caption">공통 결론: 음향은 <b>빠르고(ms) · 민감하며 · 저비용</b>인 조기경보 채널 — 단일 신호보다 <b>융합</b> 시 오탐 감소</div>
+  <div class="foot">출처: ScienceDirect(J. Energy Storage) S2352152X21002474 / S2352152X25049734 / S2352152X25032104 · ResearchGate 398171567 · Adv. Sensor Research 10.1002/adsr.202400165 · PMC12006763</div>
+</section>
+
+<!-- 9. 신뢰성 ③ 음향 진단 계보 -->
+<section class="slide">
+  <div class="topbar"></div><div class="pageno">9</div>
+  <h1 class="title">신뢰성 ③ — 음향은 이미 배터리 진단의 검증된 모달리티다</h1>
+  <div class="cols">
+    <div class="col-l">
+      <p class="lead">화재 경보뿐 아니라 <span class="hi">배터리 내부 상태 진단</span>에도 음향(초음파)이 학계에서 정립되어 왔다. 신호의 물리적 근거가 탄탄하다는 의미다.</p>
+      <ul class="b">
+        <li>리튬 삽입·가스 발생으로 셀 내부 <b>밀도·탄성률</b>이 변하면 <b>음속·반향(ToF)</b>이 변한다 → 비침습 진단 가능</li>
+        <li>이 원리는 <b>SOC·SOH 추정</b>에 활용되며 다수 후속 연구로 확장</li>
+        <li>즉 음향은 "실험적 시도"가 아니라 <b>물리적으로 검증된 신호원</b> → 우리 AI 입력 특징으로 정당성 충분</li>
+      </ul>
+    </div>
+    <div class="col-r">
+      <div class="sec-h">음향 진단 핵심 계보</div>
+      <div class="card">
+        <div class="ct">전기화학-음향 ToF (Steingart 그룹)</div>
+        <div class="cb">in-operando로 충전상태·열화를 음향 반향으로 추적. <br><i>Energy &amp; Environmental Science, 2015</i></div>
+      </div>
+      <div class="card">
+        <div class="ct">음향 ToF 기반 SOC·SOH 추정</div>
+        <div class="cb">음향 지표 + 전압을 머신러닝으로 결합해 상태 추정. <br><i>J. Electrochem. Soc., 2017</i></div>
+      </div>
+      <div class="card">
+        <div class="ct">비침습 초음파 건전성 진단</div>
+        <div class="cb">셀을 열지 않고 내부 구조·SOC 진단 (리뷰·후속 다수)</div>
+      </div>
+      <div class="caption">AE/초음파 = 내부 상태까지 보는 검증된 채널</div>
+    </div>
+  </div>
+  <div class="foot">출처: Hsieh et al., Energy Environ. Sci., 2015 · State of Charge/Health via Electrochemical-Acoustic ToF, J. Electrochem. Soc., 2017 (IOP 10.1149/2.1411712jes)</div>
+</section>
+
+<!-- 10. 적용 방안 -->
+<section class="slide">
+  <div class="topbar"></div><div class="pageno">10</div>
+  <h1 class="title">적용 방안 — 센서 후보와 시스템 통합</h1>
+  <div class="cols">
+    <div class="col-l">
+      <div class="sec-h">센서 후보 비교</div>
+      <table class="k">
+        <tr><th>항목</th><th>MEMS I2S 마이크</th><th>접촉 AE 피에조</th></tr>
+        <tr><td>잡는 신호</td><td>벤팅 "쉭/팡"음</td><td>내부 균열·기포 초음파</td></tr>
+        <tr><td>Pi 연동</td><td><span class="ok">I2S 직결</span></td><td>보조MCU+고속ADC 필요</td></tr>
+        <tr><td>신호 시점</td><td>⑤ 벤팅(다소 늦음)</td><td><span class="ok">① 내부(가장 빠름)</span></td></tr>
+        <tr><td>난이도</td><td><span class="ok">낮음</span></td><td><span class="warn">높음</span></td></tr>
+        <tr><td>예시</td><td>SPH0645 / INMP441</td><td>압전 디스크 + 앰프</td></tr>
+      </table>
+      <p class="sub" style="margin-top:8px;">난이도를 감수한다면 둘을 <b>병행</b>해 내부(AE)→벤팅(마이크) 단계를 모두 커버하는 구성이 이상적.</p>
+    </div>
+    <div class="col-r">
+      <div class="sec-h">파이프라인 통합 (기존 구조 유지)</div>
+      <ul class="b">
+        <li><b>스키마</b>: <code>battery-raw-metrics</code>에 음향 파생 필드만 확장 (Kafka 토픽 구조 무변경)</li>
+        <li><b>AI 특징</b>: 기존 7개에 <b>음향 에너지·대역 RMS·이벤트율(hit rate)</b>을 100ms 윈도우 집계로 추가</li>
+        <li><b>대시보드</b>: "음향 이벤트" 카드 1개 + 신호등 반영</li>
+      </ul>
+      <div class="codebox"><span class="c">// battery-raw-metrics 확장 (예시)</span>
+{
+  <span class="k">"acoustic_rms"</span>     : 0.012,  <span class="c">// 대역 에너지</span>
+  <span class="k">"acoustic_hits"</span>    : 0,      <span class="c">// AE 이벤트 수</span>
+  <span class="k">"acoustic_peak_hz"</span> : 0       <span class="c">// 피크 주파수</span>
+}</div>
+    </div>
+  </div>
+</section>
+
+<!-- 11. 선택 옵션 -->
+<section class="slide">
+  <div class="topbar"></div><div class="pageno">11</div>
+  <h1 class="title">선택 가능한 옵션 — 회의에서 결정할 사항</h1>
+  <p class="lead">open 환경·음향 도입은 합의됨. 아래 <span class="hi">음향 구성(A/B/C)</span>과 <span class="hi">가스센서 부가 여부</span>를 결정하면 된다.</p>
+  <div class="opts">
+    <div class="opt">
+      <span class="tag">옵션 A</span>
+      <div class="oh" style="margin-top:8px;">MEMS 마이크만</div>
+      <ul>
+        <li>저비용, 라즈베리파이 직결</li>
+        <li>특허·grid 논문이 검증한 방식</li>
+        <li>벤팅(⑤) 단계라 다소 늦은 신호</li>
+        <li>난이도 낮음 / 빠른 구현</li>
+      </ul>
+    </div>
+    <div class="opt">
+      <span class="tag">옵션 B</span>
+      <div class="oh" style="margin-top:8px;">접촉 AE 피에조만</div>
+      <ul>
+        <li>가장 빠른 내부 전조 신호</li>
+        <li>보조MCU+고속ADC 필요</li>
+        <li>신호처리 난이도 최상</li>
+        <li>open에서도 유효(접촉식)</li>
+      </ul>
+    </div>
+    <div class="opt rec">
+      <span class="tag">옵션 C · 권장</span>
+      <div class="oh" style="margin-top:8px;">A + B 동시</div>
+      <ul>
+        <li>내부 탄성파 → 벤팅음 <b>단계별 커버</b></li>
+        <li>발표·논문 차별화 "끝판왕"</li>
+        <li>난이도 높음(감수 합의됨)</li>
+        <li>멀티모달 융합 = 오탐↓</li>
+      </ul>
+    </div>
+  </div>
+  <div class="addon">
+    <b>부가 결정 — 가스센서</b> : open 환경이라 효용 제한. ⓐ <b>제외</b> 하거나, ⓑ <b>BME680만</b> 두어 VOC·습도·기압을 "변화율 보조 신호"로만 활용(저비용·I2C 직결). MQ 계열(ADC·예열 부담)은 비권장.
+  </div>
+  <div class="foot">권장: <b>옵션 C</b> + 가스센서는 <b>BME680 보조(ⓑ)</b> — 음향 멀티모달을 핵심 신규 신호로, 가스는 저비용 보조로. 최종 결정은 회의 합의에 따름.</div>
+</section>
+
+</body>
+</html>

@@ -1,0 +1,195 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1960" height="1320" viewBox="0 0 1960 1320" font-family="'Noto Sans KR', Arial, sans-serif">
+<rect width="1960" height="1320" fill="#F8FAFC"/>
+<text x="980" y="20" text-anchor="middle" dominant-baseline="central" font-size="17" font-weight="bold" fill="#1E293B">AI 배터리 열폭주 관제 시스템 — 유저 플로우 (v2, 검토 반영)</text>
+<defs><marker id="arr" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0,8 3,0 6" fill="#94A3B8"/></marker><marker id="arr-red" markerWidth="9" markerHeight="7" refX="8" refY="3.5" orient="auto"><polygon points="0 0,9 3.5,0 7" fill="#DC2626"/></marker><marker id="arr-green" markerWidth="9" markerHeight="7" refX="8" refY="3.5" orient="auto"><polygon points="0 0,9 3.5,0 7" fill="#16A34A"/></marker></defs>
+<rect x="20" y="30" width="1880" height="300" rx="12" fill="#EDE9FE" stroke="#7C3AED" stroke-width="1.5" opacity="0.9"/>
+<text x="34" y="50" dominant-baseline="central" font-size="12" font-weight="bold" fill="#7C3AED">인증 / 온보딩</text>
+<rect x="20" y="350" width="1880" height="210" rx="12" fill="#DBEAFE" stroke="#1D4ED8" stroke-width="1.5" opacity="0.9"/>
+<text x="34" y="370" dominant-baseline="central" font-size="12" font-weight="bold" fill="#1D4ED8">디바이스 관리</text>
+<rect x="20" y="580" width="1880" height="230" rx="12" fill="#D1FAE5" stroke="#065F46" stroke-width="1.5" opacity="0.9"/>
+<text x="34" y="600" dominant-baseline="central" font-size="12" font-weight="bold" fill="#065F46">모니터링 대시보드</text>
+<rect x="20" y="830" width="660" height="350" rx="12" fill="#FEE2E2" stroke="#991B1B" stroke-width="1.5" opacity="0.9"/>
+<text x="34" y="850" dominant-baseline="central" font-size="12" font-weight="bold" fill="#991B1B">이상 탐지</text>
+<rect x="700" y="830" width="540" height="350" rx="12" fill="#FEF9C3" stroke="#78350F" stroke-width="1.5" opacity="0.9"/>
+<text x="714" y="850" dominant-baseline="central" font-size="12" font-weight="bold" fill="#78350F">알림 관리</text>
+<rect x="1260" y="830" width="690" height="350" rx="12" fill="#FFEDD5" stroke="#7C2D12" stroke-width="1.5" opacity="0.9"/>
+<text x="1274" y="850" dominant-baseline="central" font-size="12" font-weight="bold" fill="#7C2D12">관리자 설정</text>
+<line x1="97.0" y1="150.0" x2="195.0" y2="150.0" stroke="#94A3B8" stroke-width="1.5" marker-end="url(#arr)"/>
+<line x1="345.0" y1="136.0" x2="410.0" y2="124.0" stroke="#94A3B8" stroke-width="1.5" marker-end="url(#arr)"/>
+<line x1="345.0" y1="155.2" x2="410.0" y2="159.8" stroke="#94A3B8" stroke-width="1.5" marker-end="url(#arr)"/>
+<line x1="327.3" y1="170.0" x2="427.7" y2="205.0" stroke="#94A3B8" stroke-width="1.5" marker-end="url(#arr)"/>
+<line x1="300.7" y1="170.0" x2="454.3" y2="270.0" stroke="#94A3B8" stroke-width="1.5" marker-end="url(#arr)"/>
+<line x1="560.0" y1="225.0" x2="630.0" y2="225.0" stroke="#94A3B8" stroke-width="1.5" marker-end="url(#arr)"/>
+<path d="M 705.0 245.0 C 705.0 310 270.0 310 270.0 170.0" stroke="#EF4444" stroke-width="1.5" fill="none" stroke-dasharray="6,3" marker-end="url(#arr-red)"/>
+<line x1="560.0" y1="290.0" x2="630.0" y2="290.0" stroke="#94A3B8" stroke-width="1.5" marker-end="url(#arr)"/>
+<line x1="560.0" y1="290.0" x2="830.0" y2="290.0" stroke="#94A3B8" stroke-width="1.5" marker-end="url(#arr)"/>
+<path d="M 705.0 310.0 C 705.0 350 270.0 350 270.0 170.0" stroke="#EF4444" stroke-width="1.5" fill="none" stroke-dasharray="6,3" marker-end="url(#arr-red)"/>
+<path d="M 905.0 310.0 C 905.0 385 270.0 385 270.0 170.0" stroke="#EF4444" stroke-width="1.5" fill="none" stroke-dasharray="6,3" marker-end="url(#arr-red)"/>
+<line x1="560.0" y1="118.5" x2="630.0" y2="126.5" stroke="#94A3B8" stroke-width="1.5" marker-end="url(#arr)"/>
+<line x1="560.0" y1="154.8" x2="630.0" y2="145.2" stroke="#94A3B8" stroke-width="1.5" marker-end="url(#arr)"/>
+<line x1="671.8" y1="155.0" x2="198.2" y2="440.0" stroke="#94A3B8" stroke-width="1.5" marker-end="url(#arr)"/>
+<line x1="240.0" y1="447.1" x2="335.0" y2="430.9" stroke="#94A3B8" stroke-width="1.5" marker-end="url(#arr)"/>
+<line x1="240.0" y1="463.1" x2="335.0" y2="466.9" stroke="#94A3B8" stroke-width="1.5" marker-end="url(#arr)"/>
+<path d="M 410.0 438.0 C 410.0 530 165.0 530 165.0 480.0" stroke="#EF4444" stroke-width="1.5" fill="none" stroke-dasharray="6,3" marker-end="url(#arr-red)"/>
+<line x1="485.0" y1="466.9" x2="580.0" y2="463.1" stroke="#94A3B8" stroke-width="1.5" marker-end="url(#arr)"/>
+<line x1="730.0" y1="444.4" x2="820.0" y2="425.6" stroke="#94A3B8" stroke-width="1.5" marker-end="url(#arr)"/>
+<line x1="730.0" y1="460.0" x2="820.0" y2="460.0" stroke="#94A3B8" stroke-width="1.5" marker-end="url(#arr)"/>
+<line x1="730.0" y1="475.6" x2="820.0" y2="494.4" stroke="#94A3B8" stroke-width="1.5" marker-end="url(#arr)"/>
+<line x1="970.0" y1="425.3" x2="1065.0" y2="444.7" stroke="#94A3B8" stroke-width="1.5" marker-end="url(#arr)"/>
+<line x1="970.0" y1="460.0" x2="1065.0" y2="460.0" stroke="#94A3B8" stroke-width="1.5" marker-end="url(#arr)"/>
+<line x1="970.0" y1="494.7" x2="1065.0" y2="475.3" stroke="#94A3B8" stroke-width="1.5" marker-end="url(#arr)"/>
+<line x1="1065.0" y1="478.1" x2="240.0" y2="676.9" stroke="#94A3B8" stroke-width="1.5" marker-end="url(#arr)"/>
+<line x1="240.0" y1="682.4" x2="345.0" y2="664.6" stroke="#94A3B8" stroke-width="1.5" marker-end="url(#arr)"/>
+<line x1="240.0" y1="697.6" x2="345.0" y2="701.4" stroke="#94A3B8" stroke-width="1.5" marker-end="url(#arr)"/>
+<line x1="240.0" y1="688.1" x2="600.0" y2="654.9" stroke="#94A3B8" stroke-width="1.5" marker-end="url(#arr)"/>
+<line x1="240.0" y1="702.8" x2="600.0" y2="740.2" stroke="#94A3B8" stroke-width="1.5" marker-end="url(#arr)"/>
+<line x1="750.0" y1="640.2" x2="840.0" y2="630.8" stroke="#94A3B8" stroke-width="1.5" marker-end="url(#arr)"/>
+<line x1="750.0" y1="656.4" x2="840.0" y2="666.6" stroke="#94A3B8" stroke-width="1.5" marker-end="url(#arr)"/>
+<line x1="750.0" y1="748.0" x2="840.0" y2="748.0" stroke="#94A3B8" stroke-width="1.5" marker-end="url(#arr)"/>
+<line x1="163.8" y1="715.0" x2="151.2" y2="930.0" stroke="#94A3B8" stroke-width="1.5" marker-end="url(#arr)"/>
+<line x1="217.4" y1="715.0" x2="767.6" y2="925.0" stroke="#94A3B8" stroke-width="1.5" marker-end="url(#arr)"/>
+<line x1="240.0" y1="702.0" x2="1105.0" y2="783.0" stroke="#94A3B8" stroke-width="1.5" marker-end="url(#arr)"/>
+<line x1="1196.3" y1="810.0" x2="1318.7" y2="960.0" stroke="#94A3B8" stroke-width="1.5" marker-end="url(#arr)"/>
+<line x1="165.0" y1="715.0" x2="165.0" y2="770.0" stroke="#94A3B8" stroke-width="1.5" marker-end="url(#arr)"/>
+<line x1="318.9" y1="770.0" x2="206.1" y2="715.0" stroke="#16A34A" stroke-width="2" stroke-dasharray="6,3" marker-end="url(#arr-green)"/>
+<line x1="225.0" y1="932.6" x2="325.0" y2="909.4" stroke="#94A3B8" stroke-width="1.5" marker-end="url(#arr)"/>
+<line x1="225.0" y1="948.2" x2="325.0" y2="945.8" stroke="#94A3B8" stroke-width="1.5" marker-end="url(#arr)"/>
+<line x1="190.0" y1="970.0" x2="360.0" y2="1055.0" stroke="#94A3B8" stroke-width="1.5" marker-end="url(#arr)"/>
+<line x1="475.0" y1="1075.0" x2="515.0" y2="1075.0" stroke="#94A3B8" stroke-width="1.5" marker-end="url(#arr)"/>
+<line x1="400.0" y1="964.0" x2="400.0" y2="980.0" stroke="#94A3B8" stroke-width="1.5" marker-end="url(#arr)"/>
+<path d="M 400.0 1020.0 C 400.0 1248 1845.0 1248 1845.0 910.0" stroke="#DC2626" stroke-width="2.6" fill="none" marker-end="url(#arr-red)"/>
+<path d="M 400.0 1020.0 C 400.0 1248 820.0 1248 820.0 965.0" stroke="#DC2626" stroke-width="2.6" fill="none" marker-end="url(#arr-red)"/>
+<line x1="895.0" y1="927.7" x2="975.0" y2="909.3" stroke="#94A3B8" stroke-width="1.5" marker-end="url(#arr)"/>
+<line x1="895.0" y1="944.7" x2="975.0" y2="944.3" stroke="#94A3B8" stroke-width="1.5" marker-end="url(#arr)"/>
+<line x1="895.0" y1="962.9" x2="975.0" y2="982.1" stroke="#94A3B8" stroke-width="1.5" marker-end="url(#arr)"/>
+<line x1="1082.7" y1="1020.0" x2="1107.3" y2="1035.0" stroke="#94A3B8" stroke-width="1.5" marker-end="url(#arr)"/>
+<line x1="1382.7" y1="960.0" x2="1442.3" y2="935.0" stroke="#94A3B8" stroke-width="1.5" marker-end="url(#arr)"/>
+<line x1="1379.3" y1="1000.0" x2="1445.7" y2="1030.0" stroke="#94A3B8" stroke-width="1.5" marker-end="url(#arr)"/>
+<line x1="1565.0" y1="904.0" x2="1585.0" y2="901.0" stroke="#94A3B8" stroke-width="1.5" marker-end="url(#arr)"/>
+<line x1="1735.0" y1="890.0" x2="1770.0" y2="890.0" stroke="#94A3B8" stroke-width="1.5" marker-end="url(#arr)"/>
+<line x1="1565.0" y1="928.2" x2="1585.0" y2="931.8" stroke="#94A3B8" stroke-width="1.5" marker-end="url(#arr)"/>
+<line x1="1735.0" y1="945.0" x2="1770.0" y2="945.0" stroke="#94A3B8" stroke-width="1.5" marker-end="url(#arr)"/>
+<line x1="1565.0" y1="1050.0" x2="1585.0" y2="1050.0" stroke="#94A3B8" stroke-width="1.5" marker-end="url(#arr)"/>
+<line x1="1735.0" y1="1050.0" x2="1770.0" y2="1050.0" stroke="#94A3B8" stroke-width="1.5" marker-end="url(#arr)"/>
+<circle cx="75" cy="150" r="22" fill="#22C55E" stroke="#15803D" stroke-width="2.5"/>
+<text x="75" y="150" text-anchor="middle" dominant-baseline="central" fill="white" font-size="11" font-weight="bold">시작</text>
+<rect x="195" y="130" width="150" height="40" rx="5" fill="#3B82F6" stroke="#1D4ED8" stroke-width="2.5"/>
+<text x="270" y="150" text-anchor="middle" dominant-baseline="central" fill="white" font-size="11">로그인 페이지</text>
+<rect x="410" y="90" width="150" height="40" rx="10" fill="#F1F5F9" stroke="#94A3B8" stroke-width="1.5"/>
+<text x="485" y="110" text-anchor="middle" dominant-baseline="central" fill="#334155" font-size="11">일반 로그인</text>
+<rect x="410" y="145" width="150" height="40" rx="10" fill="#F1F5F9" stroke="#94A3B8" stroke-width="1.5"/>
+<text x="485" y="165" text-anchor="middle" dominant-baseline="central" fill="#334155" font-size="11">소셜 로그인</text>
+<rect x="630" y="115" width="150" height="40" rx="10" fill="#FEF3C7" stroke="#D97706" stroke-width="1.5"/>
+<text x="705" y="135" text-anchor="middle" dominant-baseline="central" fill="#92400E" font-size="11">역할 확인</text>
+<rect x="410" y="205" width="150" height="40" rx="5" fill="#BAE6FD" stroke="#0284C7" stroke-width="1.5"/>
+<text x="485" y="225" text-anchor="middle" dominant-baseline="central" fill="#0C4A6E" font-size="11">회원가입 페이지</text>
+<rect x="630" y="205" width="150" height="40" rx="10" fill="#F1F5F9" stroke="#94A3B8" stroke-width="1.5"/>
+<text x="705" y="225" text-anchor="middle" dominant-baseline="central" fill="#334155" font-size="11">회원가입 완료</text>
+<rect x="410" y="270" width="150" height="40" rx="5" fill="#BAE6FD" stroke="#0284C7" stroke-width="1.5"/>
+<text x="485" y="290" text-anchor="middle" dominant-baseline="central" fill="#0C4A6E" font-size="11">계정 찾기 페이지</text>
+<rect x="630" y="270" width="150" height="40" rx="10" fill="#F1F5F9" stroke="#94A3B8" stroke-width="1.5"/>
+<text x="705" y="290" text-anchor="middle" dominant-baseline="central" fill="#334155" font-size="11">아이디 찾기</text>
+<rect x="830" y="270" width="150" height="40" rx="10" fill="#F1F5F9" stroke="#94A3B8" stroke-width="1.5"/>
+<text x="905" y="290" text-anchor="middle" dominant-baseline="central" fill="#334155" font-size="11">비밀번호 재설정</text>
+<rect x="90" y="440" width="150" height="40" rx="5" fill="#3B82F6" stroke="#1D4ED8" stroke-width="2.5"/>
+<text x="165" y="460" text-anchor="middle" dominant-baseline="central" fill="white" font-size="11">디바이스 관리</text>
+<rect x="335" y="398" width="150" height="40" rx="10" fill="#F1F5F9" stroke="#94A3B8" stroke-width="1.5"/>
+<text x="410" y="418" text-anchor="middle" dominant-baseline="central" fill="#334155" font-size="11">디바이스 등록</text>
+<rect x="335" y="450" width="150" height="40" rx="10" fill="#F1F5F9" stroke="#94A3B8" stroke-width="1.5"/>
+<text x="410" y="470" text-anchor="middle" dominant-baseline="central" fill="#334155" font-size="11">디바이스 선택</text>
+<rect x="580" y="440" width="150" height="40" rx="5" fill="#BAE6FD" stroke="#0284C7" stroke-width="1.5"/>
+<text x="655" y="460" text-anchor="middle" dominant-baseline="central" fill="#0C4A6E" font-size="11">측정 모드 선택</text>
+<rect x="820" y="390" width="150" height="40" rx="10" fill="#F1F5F9" stroke="#94A3B8" stroke-width="1.5"/>
+<text x="895" y="410" text-anchor="middle" dominant-baseline="central" fill="#334155" font-size="11">내장 배터리 모드</text>
+<rect x="820" y="440" width="150" height="40" rx="10" fill="#F1F5F9" stroke="#94A3B8" stroke-width="1.5"/>
+<text x="895" y="460" text-anchor="middle" dominant-baseline="central" fill="#334155" font-size="11">외부 셀 모드</text>
+<rect x="820" y="490" width="150" height="40" rx="10" fill="#F1F5F9" stroke="#94A3B8" stroke-width="1.5"/>
+<text x="895" y="510" text-anchor="middle" dominant-baseline="central" fill="#334155" font-size="11">보조배터리 모드</text>
+<rect x="1065" y="440" width="150" height="40" rx="10" fill="#FEF3C7" stroke="#D97706" stroke-width="1.5"/>
+<text x="1140" y="460" text-anchor="middle" dominant-baseline="central" fill="#92400E" font-size="11">모드 인터락 차단</text>
+<rect x="90" y="675" width="150" height="40" rx="5" fill="#3B82F6" stroke="#1D4ED8" stroke-width="2.5"/>
+<text x="165" y="695" text-anchor="middle" dominant-baseline="central" fill="white" font-size="11">실시간 대시보드</text>
+<rect x="345" y="632" width="150" height="40" rx="10" fill="#F1F5F9" stroke="#94A3B8" stroke-width="1.5"/>
+<text x="420" y="652" text-anchor="middle" dominant-baseline="central" fill="#334155" font-size="11">상태 게이지 확인</text>
+<rect x="345" y="684" width="150" height="40" rx="10" fill="#F1F5F9" stroke="#94A3B8" stroke-width="1.5"/>
+<text x="420" y="704" text-anchor="middle" dominant-baseline="central" fill="#334155" font-size="11">실시간 갱신</text>
+<rect x="600" y="628" width="150" height="40" rx="5" fill="#BAE6FD" stroke="#0284C7" stroke-width="1.5"/>
+<text x="675" y="648" text-anchor="middle" dominant-baseline="central" fill="#0C4A6E" font-size="11">추세 차트 페이지</text>
+<rect x="840" y="603" width="150" height="40" rx="10" fill="#F1F5F9" stroke="#94A3B8" stroke-width="1.5"/>
+<text x="915" y="623" text-anchor="middle" dominant-baseline="central" fill="#334155" font-size="11">기간 선택 조회</text>
+<rect x="840" y="655" width="150" height="40" rx="10" fill="#F1F5F9" stroke="#94A3B8" stroke-width="1.5"/>
+<text x="915" y="675" text-anchor="middle" dominant-baseline="central" fill="#334155" font-size="11">지표별 필터링</text>
+<rect x="600" y="728" width="150" height="40" rx="5" fill="#BAE6FD" stroke="#0284C7" stroke-width="1.5"/>
+<text x="675" y="748" text-anchor="middle" dominant-baseline="central" fill="#0C4A6E" font-size="11">이벤트 이력 페이지</text>
+<rect x="840" y="728" width="150" height="40" rx="10" fill="#F1F5F9" stroke="#94A3B8" stroke-width="1.5"/>
+<text x="915" y="748" text-anchor="middle" dominant-baseline="central" fill="#334155" font-size="11">이벤트 상세 확인</text>
+<rect x="1105" y="770" width="150" height="40" rx="10" fill="#FEF3C7" stroke="#D97706" stroke-width="1.5"/>
+<text x="1180" y="790" text-anchor="middle" dominant-baseline="central" fill="#92400E" font-size="11">관리자 권한 확인</text>
+<rect x="285" y="770" width="150" height="40" rx="10" fill="#BBF7D0" stroke="#16A34A" stroke-width="1.5" stroke-dasharray="5,3"/>
+<text x="360" y="790" text-anchor="middle" dominant-baseline="central" fill="#14532D" font-size="11">카톡 알림 진입</text>
+<rect x="90" y="770" width="150" height="40" rx="10" fill="#F1F5F9" stroke="#94A3B8" stroke-width="1.5"/>
+<text x="165" y="790" text-anchor="middle" dominant-baseline="central" fill="#334155" font-size="11">로그아웃</text>
+<rect x="75" y="930" width="150" height="40" rx="5" fill="#3B82F6" stroke="#1D4ED8" stroke-width="2.5"/>
+<text x="150" y="950" text-anchor="middle" dominant-baseline="central" fill="white" font-size="11">이상 탐지 관리</text>
+<rect x="325" y="872" width="150" height="40" rx="10" fill="#F1F5F9" stroke="#94A3B8" stroke-width="1.5"/>
+<text x="400" y="892" text-anchor="middle" dominant-baseline="central" fill="#334155" font-size="11">이상점수 확인</text>
+<rect x="325" y="924" width="150" height="40" rx="10" fill="#F1F5F9" stroke="#94A3B8" stroke-width="1.5"/>
+<text x="400" y="944" text-anchor="middle" dominant-baseline="central" fill="#334155" font-size="11">경고 상태 확인</text>
+<rect x="325" y="980" width="150" height="40" rx="10" fill="#FCA5A5" stroke="#DC2626" stroke-width="2.5"/>
+<text x="400" y="1000" text-anchor="middle" dominant-baseline="central" fill="#7F1D1D" font-size="11" font-weight="bold">위험 등급 감지</text>
+<rect x="325" y="1055" width="150" height="40" rx="5" fill="#BAE6FD" stroke="#0284C7" stroke-width="1.5"/>
+<text x="400" y="1075" text-anchor="middle" dominant-baseline="central" fill="#0C4A6E" font-size="11">임계치 설정 페이지</text>
+<rect x="515" y="1055" width="150" height="40" rx="10" fill="#F1F5F9" stroke="#94A3B8" stroke-width="1.5"/>
+<text x="590" y="1075" text-anchor="middle" dominant-baseline="central" fill="#334155" font-size="11">임계치 수정</text>
+<rect x="745" y="925" width="150" height="40" rx="5" fill="#3B82F6" stroke="#1D4ED8" stroke-width="2.5"/>
+<text x="820" y="945" text-anchor="middle" dominant-baseline="central" fill="white" font-size="11">알림 설정</text>
+<rect x="975" y="872" width="150" height="40" rx="10" fill="#F1F5F9" stroke="#94A3B8" stroke-width="1.5"/>
+<text x="1050" y="892" text-anchor="middle" dominant-baseline="central" fill="#334155" font-size="11">카카오톡 연동</text>
+<rect x="975" y="924" width="150" height="40" rx="10" fill="#F1F5F9" stroke="#94A3B8" stroke-width="1.5"/>
+<text x="1050" y="944" text-anchor="middle" dominant-baseline="central" fill="#334155" font-size="11">알림 조건 설정</text>
+<rect x="975" y="980" width="150" height="40" rx="5" fill="#BAE6FD" stroke="#0284C7" stroke-width="1.5"/>
+<text x="1050" y="1000" text-anchor="middle" dominant-baseline="central" fill="#0C4A6E" font-size="11">알림 이력 페이지</text>
+<rect x="1065" y="1035" width="150" height="40" rx="10" fill="#F1F5F9" stroke="#94A3B8" stroke-width="1.5"/>
+<text x="1140" y="1055" text-anchor="middle" dominant-baseline="central" fill="#334155" font-size="11">알림 이력 조회</text>
+<rect x="1260" y="960" width="150" height="40" rx="5" fill="#3B82F6" stroke="#1D4ED8" stroke-width="2.5"/>
+<text x="1335" y="980" text-anchor="middle" dominant-baseline="central" fill="white" font-size="11">관리자 제어 패널</text>
+<rect x="1415" y="895" width="150" height="40" rx="5" fill="#BAE6FD" stroke="#0284C7" stroke-width="1.5"/>
+<text x="1490" y="915" text-anchor="middle" dominant-baseline="central" fill="#0C4A6E" font-size="11">릴레이 제어 페이지</text>
+<rect x="1585" y="870" width="150" height="40" rx="10" fill="#FEF3C7" stroke="#D97706" stroke-width="1.5"/>
+<text x="1660" y="890" text-anchor="middle" dominant-baseline="central" fill="#92400E" font-size="11">차단 확인</text>
+<rect x="1770" y="870" width="150" height="40" rx="10" fill="#FCA5A5" stroke="#DC2626" stroke-width="2.5"/>
+<text x="1845" y="890" text-anchor="middle" dominant-baseline="central" fill="#7F1D1D" font-size="11" font-weight="bold">Kill-Switch 차단</text>
+<rect x="1585" y="925" width="150" height="40" rx="10" fill="#FEF3C7" stroke="#D97706" stroke-width="1.5"/>
+<text x="1660" y="945" text-anchor="middle" dominant-baseline="central" fill="#92400E" font-size="11">복구 확인</text>
+<rect x="1770" y="925" width="150" height="40" rx="10" fill="#F1F5F9" stroke="#94A3B8" stroke-width="1.5"/>
+<text x="1845" y="945" text-anchor="middle" dominant-baseline="central" fill="#334155" font-size="11">회로 복구</text>
+<rect x="1415" y="1030" width="150" height="40" rx="5" fill="#BAE6FD" stroke="#0284C7" stroke-width="1.5"/>
+<text x="1490" y="1050" text-anchor="middle" dominant-baseline="central" fill="#0C4A6E" font-size="11">사용자 권한 관리</text>
+<rect x="1585" y="1030" width="150" height="40" rx="10" fill="#FEF3C7" stroke="#D97706" stroke-width="1.5"/>
+<text x="1660" y="1050" text-anchor="middle" dominant-baseline="central" fill="#92400E" font-size="11">권한변경 확인</text>
+<rect x="1770" y="1030" width="150" height="40" rx="10" fill="#F1F5F9" stroke="#94A3B8" stroke-width="1.5"/>
+<text x="1845" y="1050" text-anchor="middle" dominant-baseline="central" fill="#334155" font-size="11">권한 변경</text>
+<rect x="1488" y="48" width="252" height="246" rx="8" fill="white" stroke="#CBD5E1" stroke-width="1" opacity="0.97"/>
+<text x="1500" y="64" dominant-baseline="central" font-size="11" font-weight="bold" fill="#334155">범례</text>
+<circle cx="1510" cy="86" r="9" fill="#22C55E" stroke="#15803D" stroke-width="1.5"/>
+<text x="1528" y="86" dominant-baseline="central" font-size="10" fill="#334155">시작점</text>
+<rect x="1501" y="99" width="18" height="18" rx="3" fill="#3B82F6" stroke="#1D4ED8" stroke-width="1.5"/>
+<text x="1528" y="108" dominant-baseline="central" font-size="10" fill="#334155">주요 화면</text>
+<rect x="1501" y="121" width="18" height="18" rx="3" fill="#BAE6FD" stroke="#0284C7" stroke-width="1.5"/>
+<text x="1528" y="130" dominant-baseline="central" font-size="10" fill="#334155">서브 화면</text>
+<rect x="1501" y="143" width="18" height="18" rx="3" fill="#F1F5F9" stroke="#94A3B8" stroke-width="1.5"/>
+<text x="1528" y="152" dominant-baseline="central" font-size="10" fill="#334155">사용자 액션</text>
+<rect x="1501" y="165" width="18" height="18" rx="3" fill="#FEF3C7" stroke="#D97706" stroke-width="1.5"/>
+<text x="1528" y="174" dominant-baseline="central" font-size="10" fill="#334155">확인 / 권한 게이트</text>
+<rect x="1501" y="187" width="18" height="18" rx="3" fill="#FCA5A5" stroke="#DC2626" stroke-width="1.5"/>
+<text x="1528" y="196" dominant-baseline="central" font-size="10" fill="#334155">위험 / 물리 차단</text>
+<rect x="1501" y="209" width="18" height="18" rx="3" fill="#BBF7D0" stroke="#16A34A" stroke-width="1.5"/>
+<text x="1528" y="218" dominant-baseline="central" font-size="10" fill="#334155">외부 진입 (알림)</text>
+<line x1="1500" y1="242" x2="1520" y2="242" stroke="#EF4444" stroke-width="1.6" stroke-dasharray="6,3" marker-end="url(#arr-red)"/>
+<text x="1528" y="242" dominant-baseline="central" font-size="10" fill="#334155">복귀 흐름</text>
+<line x1="1500" y1="264" x2="1520" y2="264" stroke="#DC2626" stroke-width="2.4" marker-end="url(#arr-red)"/>
+<text x="1528" y="264" dominant-baseline="central" font-size="10" fill="#334155">위험 시 자동 차단/알림</text>
+<line x1="1500" y1="286" x2="1520" y2="286" stroke="#16A34A" stroke-width="1.6" stroke-dasharray="6,3" marker-end="url(#arr-green)"/>
+<text x="1528" y="286" dominant-baseline="central" font-size="10" fill="#334155">알림 딥링크 진입</text>
+</svg>
