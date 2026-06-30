@@ -15,7 +15,7 @@ This file provides guidance to Codex (Codex.ai/code) when working with code in t
 - Claude 전용 지침은 `CLAUDE.md`, Codex 전용 지침은 `AGENTS.md`에 분리해 관리한다. 공통 프로젝트 계획과 변경 이력은 `PLAN.md`에 반영한다.
 - 백업 파일은 루트나 작업 산출물 폴더에 남기지 않고 `archive/발표자료_구버전/`에 저장한다. 설계 산출물 백업본도 같은 위치로 이동한다.
 - Codex는 작업이 끝나면 변경분을 항상 로컬 git 커밋으로 남긴다. 원격 push는 사용자가 명시적으로 요청한 경우에만 수행한다.
-- Claude Code status line은 `.claude/statusline-command.sh`와 `.claude/settings.local.json`에서 관리하며, `모델 | [----------] | 5h/7d 사용률 | git 브랜치 | 프로젝트명` 형식을 유지한다.
+- Claude Code status line은 전역 `~/.claude/statusline-command.sh`를 기본으로 사용하며, 프로젝트 로컬 `.claude/statusline-command.sh`는 같은 표시 규칙을 유지한다. `모델 | [----------] | 5h/7d 사용률 | git 브랜치 | 프로젝트명` 형식을 유지하고, 사용률 옆에는 초기화까지 남은 시간을 `→1h01m` 형식으로 표시한다. 색상은 모델명 청록, 구분자/막대 회색, 사용률 녹색/노랑/빨강, 브랜치 초록, 프로젝트명 보라를 기준으로 하고, 토큰/사용률 한도는 남은 양이 아니라 사용량 기준으로 표시한다.
 
 ## 아키텍처
 
