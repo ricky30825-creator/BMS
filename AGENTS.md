@@ -14,6 +14,7 @@ This file provides guidance to Codex (Codex.ai/code) when working with code in t
 - 기존 구현 방식과 문서 표현을 먼저 확인한 뒤 그 스타일에 맞춰 최소 범위로 수정한다.
 - Claude 전용 지침은 `CLAUDE.md`, Codex 전용 지침은 `AGENTS.md`에 분리해 관리한다. 공통 프로젝트 계획과 변경 이력은 `PLAN.md`에 반영한다.
 - 백업 파일은 루트나 작업 산출물 폴더에 남기지 않고 `archive/발표자료_구버전/`에 저장한다. 설계 산출물 백업본도 같은 위치로 이동한다.
+- Codex는 작업이 끝나면 변경분을 항상 로컬 git 커밋으로 남긴다. 원격 push는 사용자가 명시적으로 요청한 경우에만 수행한다.
 
 ## 아키텍처
 
