@@ -15,6 +15,7 @@ This file provides guidance to Codex (Codex.ai/code) when working with code in t
 - Claude 전용 지침은 `CLAUDE.md`, Codex 전용 지침은 `AGENTS.md`에 분리해 관리한다. 공통 프로젝트 계획과 변경 이력은 `PLAN.md`에 반영한다.
 - 백업 파일은 루트나 작업 산출물 폴더에 남기지 않고 `archive/발표자료_구버전/`에 저장한다. 설계 산출물 백업본도 같은 위치로 이동한다.
 - Codex는 작업이 끝나면 변경분을 항상 로컬 git 커밋으로 남긴다. 원격 push는 사용자가 명시적으로 요청한 경우에만 수행한다.
+- Claude Code status line은 `.claude/statusline-command.sh`와 `.claude/settings.local.json`에서 관리하며, `모델 | [----------] | 5h/7d 사용률 | git 브랜치 | 프로젝트명` 형식을 유지한다.
 
 ## 아키텍처
 
