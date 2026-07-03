@@ -1,7 +1,7 @@
 # AI 배터리 열폭주 조기감지 관제 시스템 — PLAN.md
 
 > 프로젝트 ID: 7241ba62-d21a-4de4-ba45-fe572dd0f4de  
-> 최종 업데이트: 2026-06-30
+> 최종 업데이트: 2026-07-03
 
 ---
 
@@ -203,7 +203,7 @@ ADS1115         TLS/SASL  battery-anomaly-alerts  테이블)           (학습·
 - **명칭 통일**: "배터리 선택/등록" 페이지·기능을 **"배터리 자산관리"**로 통일한다(자산 모델 `battery_asset`과 일관). "새 배터리 등록"·"저장된 배터리 선택"은 자산관리 화면의 하위 액션으로 유지, "배터리 상세/이력"은 별도 페이지로 유지.
 - **반응형 웹**: 대시보드를 데스크톱/태블릿/모바일 **반응형 웹**으로 제공한다. 데스크톱은 사이드바+다중 컬럼 관제 화면, 태블릿은 2컬럼 중심, 모바일은 하단 내비게이션+단일 컬럼 카드/차트로 재배치한다(브레이크포인트 대응, 터치 조작, 다크모드·접근성 포함).
 - **유저/관리자 기능 분리**: 일반 사용자 기능과 관리자 기능을 화면·라우팅·권한 기준으로 분리한다. 일반 사용자 흐름은 `docs/userflow.md`, 관리자 전용 흐름은 `docs/admin_userflow.md`를 기준 문서로 관리한다.
-- **관리자 기능 MVP(신규)**: 일반 사용자 권한과 별도로 단일 `ADMIN` 역할을 둔다. 초기 운영 MVP 범위는 사용자/계정 조회 및 정지·해제, 전체 배터리 조회, 배터리 운영 상태(`NORMAL`/`WATCH`/`BLOCKED`)와 관리자 메모, 배터리 통계, 디바이스 상태, 감사 로그로 한정한다. 비밀번호 초기화, 관리자 권한 세분화, 전역 임계치 변경, 공지 관리, 데이터 삭제, 릴레이/Kill-Switch 원격 제어는 MVP 이후로 미룬다.
+- **관리자 기능 MVP(신규)**: 일반 사용자 권한과 별도로 단일 `ADMIN` 역할을 둔다. 초기 운영 MVP 범위는 HTML 프로토타입을 우선 기준으로 사용자/계정 조회 및 정지·해제, 비밀번호 재설정, 전체 배터리 조회, 배터리 운영 상태(`NORMAL`/`WATCH`/`BLOCKED`)와 관리자 메모, 배터리 통계, 디바이스 상태, 공지사항 관리, 감사 로그로 둔다. 관리자 권한 세분화, 전역 임계치 변경, 데이터 삭제, 릴레이/Kill-Switch 원격 제어는 MVP 이후로 미룬다.
 - **운영·복원력 보강**: MVP에서는 WebSocket 자동 재연결·하트비트, 단순 헬스체크 카드(Kafka·Consumer·DB·AI 정상/비정상/확인불가), 감사 로깅을 우선한다. 인앱 알림 고도화와 데이터 내보내기(CSV/PDF)는 후속 기능으로 둔다.
 - **추가 제안 요구사항 표 추가(슬라이드 33 오른쪽)**: 기존 `SRS-WEB-039~053` 표는 유지하고, 오른쪽 별도 표에 `SRS-WEB-054~062`를 추가 제안으로 정리했다. 범위는 측정 전 안전 점검, 제어 이중 승인, 센서 캘리브레이션 이력, 데이터 품질 관리, 배터리 매칭 검증, 실험 조건 템플릿, 원격 진단 번들, 감사·접근 추적, 백업·복구 정책이다.
 - **추가 제안 기능 표 추가(슬라이드 35 오른쪽)**: 기존 `REQ-WEB-043~055` 표는 유지하고, 오른쪽 별도 표에 `REQ-WEB-056~064`를 추가 제안으로 정리했다. 기능은 안전 점검 마법사, 위험 제어 승인 모달, 캘리브레이션 관리 화면, 데이터 품질 배지, QR/라벨 매칭 확인, 실험 레시피 템플릿, 진단 패키지 내보내기, 감사 로그 탐색기, 백업/복구 관리다.
@@ -214,12 +214,13 @@ ADS1115         TLS/SASL  battery-anomaly-alerts  테이블)           (학습·
 - **요구사항 표 형식 통일(2026-06-30)**: 설계 산출물 v4 PPT 32~33쪽의 요구사항 표를 32쪽 왼쪽 표 기준의 5열 형식, 열 너비, 행 높이로 통일했다. 현재 보이는 요구사항 행은 누락 행을 복구하지 않고 `SRS-WEB-001~060`으로 연속 재번호화했다.
 - **요구사항 표 빈칸 보완(2026-06-30)**: 설계 산출물 v4 PPT 32~33쪽 요구사항 표의 빈 ID, 중요도, 비고 칸을 현재 보이는 행 기준으로 보완했다. 33쪽 오른쪽 추가 요구사항은 안전/승인/보정/품질/검증/템플릿/진단/감사/복구 비고와 중요도를 채웠고, 내부 중복 표 개체를 정리했다.
 - **일반 사용자 유저 플로우 갱신(2026-06-30)**: `docs/userflow.md`를 슬라이드 31~35 기준으로 재정리했다. 기존 16페이지 Flow chart 기준을 제거하고, 안전 점검 마법사, QR/라벨 매칭, 실험 레시피, WebSocket 재연결, 데이터 품질 배지, XAI, SOH/RUL, 알림 Ack, SOP, 위험 제어 승인, 포렌식/내보내기 흐름을 일반 사용자 여정에 반영했다.
+- **HTML 프로토타입 기능정의서 작성(2026-07-03)**: `/Users/jungjeahwan/Downloads/셀가드 프로토타입 (standalone).html`에 실제 표시된 화면·버튼·입력·탭·필터·모달·카드·상태값을 기준으로 일반 사용자 기능정의서 `docs/feature_definition.md`(72개)와 관리자 기능정의서 `docs/admin_feature_definition.md`(36개)를 분리 작성했다. 사용자 흐름은 `docs/userflow.md`, 관리자 흐름은 `docs/admin_userflow.md`에 HTML 확인 흐름으로 보강했다. `PLAN.md`와 HTML이 충돌하는 관리자 공지사항 관리, 관리자 비밀번호 재설정은 HTML을 우선 기준으로 MVP 포함 기능에 반영했다. 추가 정의 필요 항목은 랜딩 메뉴 목적지, 데모 영상 동작, 프로필 사진 변경 동작이다.
 
 > 위 확장은 R-GTAZLF(웹 대시보드 관제) 범위의 설계 상세화이며, Manyfast 등록 요구사항/기능/스펙 카운트(아래 10절)는 기존 체계를 유지한다.
 
 ### 관리자 MVP 상세 범위 (초기 운영용)
 
-관리자 MVP의 목적은 발표용 화면보다 한 단계 높은 초기 운영 콘솔이다. 관리자는 전체 사용자, 배터리, 디바이스, 이상 상태를 한곳에서 확인하고, 계정 정지/해제와 배터리 운영 상태 표시를 수행한다. 데이터 삭제, 위험 제어, 임계치 변경처럼 안전장치가 필요한 기능은 제외한다.
+관리자 MVP의 목적은 발표용 화면보다 한 단계 높은 초기 운영 콘솔이다. 관리자는 전체 사용자, 배터리, 디바이스, 이상 상태를 한곳에서 확인하고, 계정 정지/해제, 비밀번호 재설정, 배터리 운영 상태 표시, 공지사항 게시 관리를 수행한다. 데이터 삭제, 위험 제어, 임계치 변경처럼 안전장치가 필요한 기능은 제외한다.
 
 **관리자 대시보드**
 - 전체 유저 수, 전체 배터리 수, 활성 측정 세션 수, 위험/경고 상태 배터리 수, 오프라인 디바이스 수를 요약 카드로 제공한다.
@@ -232,7 +233,8 @@ ADS1115         TLS/SASL  battery-anomaly-alerts  테이블)           (학습·
 - 이름/이메일 검색, 상태(전체/활성/정지), 권한(전체/일반/관리자) 필터를 제공한다.
 - 유저 상세에서 기본 정보, 등록 배터리, 최근 측정 세션, 최근 이상 이벤트, 최근 관리자 조작 이력을 확인한다.
 - 관리자는 계정을 활성/정지 상태로 변경할 수 있고, 상태 변경 사유는 필수로 입력한다.
-- 계정 삭제, 비밀번호 강제 초기화, 이메일 변경, 관리자 권한 부여/회수 화면은 MVP 제외다.
+- HTML 프로토타입 기준으로 유저 수정 모달에서 새 비밀번호를 입력해 비밀번호를 재설정할 수 있다.
+- 계정 삭제, 이메일 변경, 관리자 권한 부여/회수 화면은 MVP 제외다.
 
 **배터리 관리**
 - 전체 배터리 목록에서 배터리 이름, 소유자, 제조사/모델, 용량, 측정 모드, 화학 타입, 최근 측정일, 최근 위험 상태, 관리자 운영 상태를 조회한다.
@@ -260,15 +262,21 @@ ADS1115         TLS/SASL  battery-anomaly-alerts  테이블)           (학습·
 - 기간, 관리자, 행위 타입, 대상 타입 기준 조회를 제공한다.
 - 감사 로그는 수정/삭제할 수 없고, 민감 정보는 저장하지 않는다.
 
+**공지사항 관리**
+- HTML 프로토타입 기준으로 관리자는 공지사항 목록에서 카테고리, 제목, 상태, 관리 동작을 확인한다.
+- 새 공지 작성과 기존 공지 수정 모달에서 카테고리, 공개 범위, 제목, 내용을 입력한다.
+- 공지는 임시 저장하거나 게시할 수 있으며, 게시와 동시에 웹푸시·카카오 알림 발송 여부를 선택할 수 있다.
+- 공지 보관/삭제는 확인 모달을 거쳐 처리한다.
+
 **관리자 데이터 모델/API**
 - `users`: `role`(`USER`/`ADMIN`), `status`(`ACTIVE`/`SUSPENDED`), `suspended_reason`, `suspended_at`
 - `battery_asset`: `admin_status`(`NORMAL`/`WATCH`/`BLOCKED`), `admin_memo`, `admin_status_updated_at`, `admin_status_updated_by`
 - `device`: `device_id`, `display_name`, `last_seen_at`, `status`(`ONLINE`/`DELAYED`/`OFFLINE`/`UNKNOWN`)
 - `audit_log`: `log_id`, `actor_id`, `action`, `target_type`, `target_id`, `before_value`, `after_value`, `reason`, `created_at`
-- 관리자 API: `GET /admin/users`, `GET /admin/users/{userId}`, `PATCH /admin/users/{userId}/status`, `GET /admin/batteries`, `GET /admin/batteries/{batteryId}`, `PATCH /admin/batteries/{batteryId}/admin-status`, `GET /admin/stats/summary`, `GET /admin/stats/batteries`, `GET /admin/stats/anomalies`, `GET /admin/devices`, `GET /admin/devices/{deviceId}`, `GET /admin/system-health`, `GET /admin/audit-logs`
+- 관리자 API: `GET /admin/users`, `GET /admin/users/{userId}`, `PATCH /admin/users/{userId}/status`, `PATCH /admin/users/{userId}/password`, `GET /admin/batteries`, `GET /admin/batteries/{batteryId}`, `PATCH /admin/batteries/{batteryId}/admin-status`, `GET /admin/stats/summary`, `GET /admin/stats/batteries`, `GET /admin/stats/anomalies`, `GET /admin/devices`, `GET /admin/devices/{deviceId}`, `GET /admin/system-health`, `GET /admin/notices`, `POST /admin/notices`, `PATCH /admin/notices/{noticeId}`, `PATCH /admin/notices/{noticeId}/archive`, `GET /admin/audit-logs`
 
 **MVP 제외 항목**
-- 공지사항 관리, 문의/고객지원 관리, 관리자 권한 세분화, 비밀번호 초기화, 계정 삭제
+- 문의/고객지원 관리, 관리자 권한 세분화, 계정 삭제
 - 배터리 삭제, 센서/측정 데이터 수정, CSV/PDF 내보내기, 전역 임계치 수정
 - 릴레이/Kill-Switch 원격 제어, AI 모델/드리프트 관리, Kafka lag 상세 분석, 백업/복구 관리
 
@@ -352,6 +360,8 @@ ADS1115         TLS/SASL  battery-anomaly-alerts  테이블)           (학습·
 
 - 일반 사용자 상세: `docs/userflow.md`
 - 관리자 상세: `docs/admin_userflow.md`
+- 일반 사용자 기능정의서: `docs/feature_definition.md` — HTML 프로토타입 기준 72개
+- 관리자 기능정의서: `docs/admin_feature_definition.md` — HTML 프로토타입 기준 36개
 
 ### 일반 사용자 플로우 섹션 (8개)
 
@@ -422,7 +432,7 @@ ADS1115         TLS/SASL  battery-anomaly-alerts  테이블)           (학습·
 
 ---
 
-### 관리자 전용 플로우 섹션 (6개)
+### 관리자 전용 플로우 섹션 (7개)
 
 ```
 [관리자 인증/진입]
@@ -439,7 +449,8 @@ ADS1115         TLS/SASL  battery-anomaly-alerts  테이블)           (학습·
 
 [유저 계정 관리]
 유저 목록 → 검색/필터 → 유저 상세
-└── 계정 정지·해제 → 사유 입력 → 변경 확인 → 감사 로그 기록
+├── 계정 정지·해제 → 사유 입력 → 변경 확인 → 감사 로그 기록
+└── 비밀번호 재설정 → 변경 저장 → 감사 로그 기록
 
 [배터리 운영 관리]
 배터리 목록 → 검색/필터 → 배터리 상세
@@ -451,13 +462,19 @@ ADS1115         TLS/SASL  battery-anomaly-alerts  테이블)           (학습·
 └── 디바이스 상태 → ONLINE/DELAYED/OFFLINE 확인
 └── 시스템 헬스 카드 → Kafka/Consumer/DB/AI 정상·비정상·확인불가 확인
 
+[공지사항 관리]
+공지사항 목록 → 새 공지 작성/공지 수정
+├── 카테고리·공개 범위·제목·내용 입력
+├── 임시 저장 또는 게시
+└── 게시와 동시에 웹푸시·카카오 알림 발송 선택
+
 [감사 로그]
 감사 로그 목록 → 기간/관리자/행위/대상 필터
 └── 감사 로그 상세 확인
 └── 수정·삭제 차단
 ```
 
-> 관리자 MVP에서는 조회·상태 관리·감사 추적만 제공한다. 계정 삭제, 비밀번호 초기화, 권한 세분화, 전역 임계치/공지, 데이터 삭제, 원격 Kill-Switch, 백업/복구 관리는 MVP 이후 기능이다.
+> 관리자 MVP에서는 HTML 프로토타입에 표시된 조회·상태 관리·비밀번호 재설정·공지사항 관리·감사 추적을 제공한다. 계정 삭제, 권한 세분화, 전역 임계치, 데이터 삭제, 원격 Kill-Switch, 백업/복구 관리는 MVP 이후 기능이다.
 
 ---
 
@@ -465,6 +482,7 @@ ADS1115         TLS/SASL  battery-anomaly-alerts  테이블)           (학습·
 
 > "측정 모드 선택"은 "배터리 자산관리"에 흡수됨(배터리의 `target_mode` 자동 적용).
 > 모든 웹 화면은 같은 React 반응형 레이아웃 기준을 따른다. 데스크톱은 관제 밀도, 태블릿은 터치 조작, 모바일은 경고 확인·알림·긴급 제어의 빠른 접근성을 우선한다.
+> 2026-07-03 HTML 프로토타입 분석에서는 기존 목록 외에 랜딩, 관리자 이벤트 추이, 관리자 공지사항 관리가 명확히 확인되었다. 기능정의서와 플로우 문서에는 HTML 기준으로 반영한다.
 
 | 페이지 | 노드 수 | 주요 내용 |
 |---|---|---|
