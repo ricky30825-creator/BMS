@@ -6,6 +6,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 리튬이온 배터리의 전압·전류·온도·SOC 시계열 데이터를 Kafka 파이프라인으로 수집하고, LSTM-AutoEncoder 기반 AI로 열폭주 전조를 조기 탐지하여 React 반응형 웹 대시보드에서 실시간 관제하는 시스템이다. 임계치 차단(사후 대응)이 아니라 정상패턴 학습 기반 이상탐지(사전 예측)가 핵심 차별점이다.
 
+## 문서 작성 기준
+
+- 기능정의서나 화면 흐름을 와이어프레임 HTML에서 추출할 때는 HTML에 명확히 표시된 화면·버튼·입력·탭·필터·모달·카드·상태값을 우선한다.
+- `PLAN.md`와 사용자가 제공한 최신 HTML 와이어프레임이 충돌하면 HTML을 기준으로 `PLAN.md`, `docs/userflow.md`, `docs/admin_userflow.md`, `docs/feature_definition.md`, `docs/admin_feature_definition.md`를 맞춘다.
+- HTML만으로 동작이 불명확한 항목은 추정하지 않고 `정의 필요`로 표시한다.
+
 ## 아키텍처
 
 ```
@@ -78,8 +84,8 @@ Raspberry Pi        Kafka  → Consumer → PostgreSQL            Google Colab  
 ## 관리자 기능
 
 - 일반 사용자와 별도로 관리자 역할(RBAC)을 둔다.
-- 제공 기능: 사용자/계정 관리(권한 부여·회수, 계정 활성/정지, 비밀번호 초기화), 전체 배터리·디바이스 **통합 관제**, **감사 로그**(제어·접근 이력), **시스템 상태 모니터링**(Kafka·Consumer·DB·AI 헬스), 전역 임계치·공지 관리.
-- 상세 요구사항·기능·산출물 목록은 `PLAN.md`와 설계 산출물 PPT(`설계 산출물/설계 산출물_v4_6.29.pptx` 슬라이드 31~35)를 단일 출처로 한다.
+- 제공 기능: 사용자/계정 조회, 계정 활성/정지, 비밀번호 재설정, 전체 배터리·디바이스 **통합 관제**, 배터리 운영 상태·관리자 메모, 공지사항 관리, **감사 로그**(제어·접근 이력), **시스템 상태 모니터링**(Kafka·Consumer·DB·AI 헬스).
+- 상세 요구사항·기능·산출물 목록은 `PLAN.md`, `docs/feature_definition.md`, `docs/admin_feature_definition.md`, 설계 산출물 PPT(`설계 산출물/설계 산출물_v4_6.29.pptx` 슬라이드 31~35)를 기준으로 하되, 사용자가 제공한 최신 HTML 와이어프레임과 충돌하면 HTML을 우선한다.
 
 ## Kafka 토픽 규약
 

@@ -13,6 +13,7 @@ This file provides guidance to Codex (Codex.ai/code) when working with code in t
 - Codex가 코드, 설정, 산출물, 요구사항을 변경하면 관련 문서를 함께 업데이트한다. 기본 추적 문서는 `PLAN.md`이며, Codex 작업 방식 자체는 `AGENTS.md`에 기록한다.
 - 기존 구현 방식과 문서 표현을 먼저 확인한 뒤 그 스타일에 맞춰 최소 범위로 수정한다.
 - Claude 전용 지침은 `CLAUDE.md`, Codex 전용 지침은 `AGENTS.md`에 분리해 관리한다. 공통 프로젝트 계획과 변경 이력은 `PLAN.md`에 반영한다.
+- 와이어프레임 HTML을 기준으로 기능정의서나 화면 흐름을 정리할 때는 HTML에 명확히 표시된 화면·버튼·입력·탭·필터·모달·카드·상태값을 우선한다. `PLAN.md`와 충돌하면 사용자가 제공한 HTML을 기준으로 `PLAN.md`, `docs/userflow.md`, `docs/admin_userflow.md`, `docs/feature_definition.md`, `docs/admin_feature_definition.md`를 맞춘다. HTML만으로 동작이 불명확한 항목은 `정의 필요`로 표시한다.
 - 백업 파일은 루트나 작업 산출물 폴더에 남기지 않고 `archive/발표자료_구버전/`에 저장한다. 설계 산출물 백업본도 같은 위치로 이동한다.
 - Codex는 작업이 끝나면 변경분을 항상 로컬 git 커밋으로 남긴다. 원격 push는 사용자가 명시적으로 요청한 경우에만 수행한다.
 
@@ -88,8 +89,8 @@ Raspberry Pi        Kafka  → Consumer → PostgreSQL            Google Colab  
 ## 관리자 기능
 
 - 일반 사용자와 별도로 관리자 역할(RBAC)을 둔다.
-- 제공 기능: 사용자/계정 관리(권한 부여·회수, 계정 활성/정지, 비밀번호 초기화), 전체 배터리·디바이스 **통합 관제**, **감사 로그**(제어·접근 이력), **시스템 상태 모니터링**(Kafka·Consumer·DB·AI 헬스), 전역 임계치·공지 관리.
-- 상세 요구사항·기능·산출물 목록은 `PLAN.md`와 설계 산출물 PPT(`설계 산출물/설계 산출물_v4_6.29.pptx` 슬라이드 31~35)를 단일 출처로 한다.
+- 제공 기능: 사용자/계정 조회, 계정 활성/정지, 비밀번호 재설정, 전체 배터리·디바이스 **통합 관제**, 배터리 운영 상태·관리자 메모, 공지사항 관리, **감사 로그**(제어·접근 이력), **시스템 상태 모니터링**(Kafka·Consumer·DB·AI 헬스).
+- 상세 요구사항·기능·산출물 목록은 `PLAN.md`, `docs/feature_definition.md`, `docs/admin_feature_definition.md`, 설계 산출물 PPT(`설계 산출물/설계 산출물_v4_6.29.pptx` 슬라이드 31~35)를 기준으로 하되, 사용자가 제공한 최신 HTML 와이어프레임과 충돌하면 HTML을 우선한다.
 
 ## Kafka 토픽 규약
 
