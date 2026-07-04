@@ -214,7 +214,7 @@ ADS1115         TLS/SASL  battery-anomaly-alerts  테이블)           (학습·
 - **일반 사용자 유저 플로우 갱신(2026-06-30)**: `docs/userflow.md`를 HTML 프로토타입 기준으로 재정리했다. 랜딩/인증, 디바이스·배터리, 배터리 연결 확인, 실시간 관제, XAI, SOH/RUL, 알림 Ack, SOP, 위험 제어 승인, 추세/이벤트/내보내기 흐름을 일반 사용자 여정에 반영했다.
 - **HTML 프로토타입 기능정의서 작성(2026-07-03)**: `/Users/jungjeahwan/Downloads/셀가드 프로토타입 (standalone).html`에 실제 표시된 화면·버튼·입력·탭·필터·모달·카드·상태값을 기준으로 일반 사용자 기능정의서 `docs/feature_definition.md`(72개)와 관리자 기능정의서 `docs/admin_feature_definition.md`(36개)를 분리 작성했다. 사용자 흐름은 `docs/userflow.md`, 관리자 흐름은 `docs/admin_userflow.md`에 HTML 확인 흐름으로 보강했다. `PLAN.md`와 HTML이 충돌하는 관리자 공지사항 관리, 관리자 비밀번호 재설정은 HTML을 우선 기준으로 MVP 포함 기능에 반영했다. 추가 정의 필요 항목은 랜딩 메뉴 목적지, 데모 영상 동작, 프로필 사진 변경 동작이다.
 - **설계 산출물 기능정의서 표 반영(2026-07-03)**: 설계 산출물 v4 PPT 34~38쪽 기능정의서 표를 `docs/feature_definition.md`의 일반 사용자 72개 항목과 `docs/admin_feature_definition.md`의 관리자 36개 항목 기준으로 갱신했다. 기존 34~35쪽 표 형식을 복제해 연속 슬라이드로 확장했으며, MD 표의 기능 사항 ID·기능 사항 명·기능 세부 설명·비고 문구를 누락 없이 반영했다.
-- **중간 보고서 유즈케이스 정의서 보강(2026-07-03)**: `설계 산출물/중간 보고서-내파트.pptx` 8쪽 뒤에 실제 프로젝트 핵심 유즈케이스 6개(배터리 자산 등록/측정 시작, 실시간 관제, AI 이상탐지 근거 확인, 알림·릴레이 대응, 추세·이벤트 분석, 관리자 통합 관제)를 페이지당 1개씩 추가했다. 내용은 `docs/userflow.md`, `docs/feature_definition.md`, `docs/admin_userflow.md`, `docs/admin_feature_definition.md` 기준으로 작성했다.
+- **중간 보고서 유즈케이스 정의서 보강(2026-07-04)**: `설계 산출물/중간 보고서-내파트.pptx` 8쪽 뒤에 실제 프로젝트 핵심 유즈케이스 6개(배터리 자산 등록/측정 시작, 실시간 관제, AI 이상탐지 근거 확인, 알림·릴레이 대응, 추세·이벤트 분석, 관리자 통합 관제)를 페이지당 1개씩 추가하고, 각 유즈케이스에 목적·관련 액터·우선순위/중요도·선행조건·트리거·기본 흐름·대안/예외 흐름·후행조건·관련 데이터·추적 요구사항을 포함했다. 내용은 `docs/userflow.md`, `docs/feature_definition.md`, `docs/admin_userflow.md`, `docs/admin_feature_definition.md` 기준으로 작성했다.
 
 > 위 확장은 R-GTAZLF(웹 대시보드 관제) 범위의 설계 상세화이며, Manyfast 등록 요구사항/기능/스펙 카운트(아래 10절)는 기존 체계를 유지한다.
 
