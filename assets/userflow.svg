@@ -55,8 +55,6 @@
 <line x1="318.9" y1="770.0" x2="206.1" y2="715.0" stroke="#16A34A" stroke-width="2" stroke-dasharray="6,3" marker-end="url(#arr-green)"/>
 <line x1="225.0" y1="932.6" x2="325.0" y2="909.4" stroke="#94A3B8" stroke-width="1.5" marker-end="url(#arr)"/>
 <line x1="225.0" y1="948.2" x2="325.0" y2="945.8" stroke="#94A3B8" stroke-width="1.5" marker-end="url(#arr)"/>
-<line x1="190.0" y1="970.0" x2="360.0" y2="1055.0" stroke="#94A3B8" stroke-width="1.5" marker-end="url(#arr)"/>
-<line x1="475.0" y1="1075.0" x2="515.0" y2="1075.0" stroke="#94A3B8" stroke-width="1.5" marker-end="url(#arr)"/>
 <line x1="400.0" y1="964.0" x2="400.0" y2="980.0" stroke="#94A3B8" stroke-width="1.5" marker-end="url(#arr)"/>
 <path d="M 400.0 1020.0 C 400.0 1248 1845.0 1248 1845.0 910.0" stroke="#DC2626" stroke-width="2.6" fill="none" marker-end="url(#arr-red)"/>
 <path d="M 400.0 1020.0 C 400.0 1248 820.0 1248 820.0 965.0" stroke="#DC2626" stroke-width="2.6" fill="none" marker-end="url(#arr-red)"/>
@@ -138,10 +136,6 @@
 <text x="400" y="944" text-anchor="middle" dominant-baseline="central" fill="#334155" font-size="11">경고 상태 확인</text>
 <rect x="325" y="980" width="150" height="40" rx="10" fill="#FCA5A5" stroke="#DC2626" stroke-width="2.5"/>
 <text x="400" y="1000" text-anchor="middle" dominant-baseline="central" fill="#7F1D1D" font-size="11" font-weight="bold">위험 등급 감지</text>
-<rect x="325" y="1055" width="150" height="40" rx="5" fill="#BAE6FD" stroke="#0284C7" stroke-width="1.5"/>
-<text x="400" y="1075" text-anchor="middle" dominant-baseline="central" fill="#0C4A6E" font-size="11">임계치 설정 페이지</text>
-<rect x="515" y="1055" width="150" height="40" rx="10" fill="#F1F5F9" stroke="#94A3B8" stroke-width="1.5"/>
-<text x="590" y="1075" text-anchor="middle" dominant-baseline="central" fill="#334155" font-size="11">임계치 수정</text>
 <rect x="745" y="925" width="150" height="40" rx="5" fill="#3B82F6" stroke="#1D4ED8" stroke-width="2.5"/>
 <text x="820" y="945" text-anchor="middle" dominant-baseline="central" fill="white" font-size="11">알림 설정</text>
 <rect x="975" y="872" width="150" height="40" rx="10" fill="#F1F5F9" stroke="#94A3B8" stroke-width="1.5"/>

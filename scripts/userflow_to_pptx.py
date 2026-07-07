@@ -72,11 +72,9 @@ N = {
 
  'admin':{'cx':742,'cy':1245,'lane':6,'s':'main','l':'관리자 콘솔'},
  'permMgmt':{'cx':930,'cy':1195,'lane':6,'s':'action','l':'권한 관리'},
- 'thresh':{'cx':930,'cy':1245,'lane':6,'s':'action','l':'임계치 설정'},
  'relayRec':{'cx':930,'cy':1295,'lane':6,'s':'action','l':'릴레이 복구'},
  'permGate':{'cx':1120,'cy':1195,'lane':6,'s':'accent','l':'권한변경 확인(gate)'},
  'permApply':{'cx':1305,'cy':1195,'lane':6,'s':'action','l':'권한 변경 적용'},
- 'threshSave':{'cx':1120,'cy':1245,'lane':6,'s':'action','l':'임계치 저장'},
  'recGate':{'cx':1120,'cy':1295,'lane':6,'s':'accent','l':'복구 확인(gate)'},
  'relayBlock':{'cx':1490,'cy':1245,'lane':6,'s':'action','l':'릴레이 차단'},
  'blockGate':{'cx':1680,'cy':1245,'lane':6,'s':'accent','l':'차단 확인(gate)'},
@@ -97,8 +95,8 @@ E = [
  ('danger','killAuto'),('danger','alertNow'),('alertNow','notif'),
  ('notif','sns'),('sns','notifHist'),('notifHist','notifDet'),
  ('katalk','dash','deeplink'),
- ('admin','permMgmt'),('admin','thresh'),('admin','relayRec'),
- ('permMgmt','permGate'),('permGate','permApply'),('thresh','threshSave'),
+ ('admin','permMgmt'),('admin','relayRec'),
+ ('permMgmt','permGate'),('permGate','permApply'),
  ('relayRec','recGate'),('admin','relayBlock'),('relayBlock','blockGate'),
 ]
 

@@ -135,9 +135,9 @@ def build_account_settings(sl):
     for sh in to_remove:
         sh._element.getparent().remove(sh._element)
 
-    # ── 상단 서브 탭 (릴레이 제어 | 임계치 설정 | 계정 설정) ──────────
+    # ── 상단 서브 탭 (릴레이 제어 | 알림 설정 | 계정 설정) ──────────
     add_text(sl, 3.05, 1.05, 0.65, 0.16, "릴레이 제어", 7.5, C['sub'])
-    add_text(sl, 3.84, 1.05, 0.65, 0.16, "임계치 설정", 7.5, C['sub'])
+    add_text(sl, 3.84, 1.05, 0.65, 0.16, "알림 설정", 7.5, C['sub'])
     add_text(sl, 4.63, 1.04, 0.58, 0.16, "계정 설정",   7.5, C['ink'], bold=True)
     # 활성 탭 밑줄
     add_rrect(sl, 4.63, 1.18, 0.58, 0.02, C['dark'], None, radius=0.0)
@@ -217,7 +217,7 @@ def build_edit_popup(sl, title, fields, confirm_label):
 def main():
     pr = Presentation(PPTX)
 
-    # 슬라이드 25(임계치 설정)를 베이스로 슬라이드 26 생성
+    # 슬라이드 25를 베이스로 계정 설정 슬라이드 생성
     base = pr.slides[24]
     sl26 = copy_slide(pr, base)
     build_account_settings(sl26)
