@@ -1,7 +1,7 @@
 # AI 배터리 열폭주 조기감지 관제 시스템 — PLAN.md
 
 > 프로젝트 ID: 7241ba62-d21a-4de4-ba45-fe572dd0f4de  
-> 최종 업데이트: 2026-07-07
+> 최종 업데이트: 2026-07-09
 
 ---
 
@@ -43,17 +43,17 @@
 ```
 [에지 계층]              [AWS EC2 (클라우드 서버)]                 [분석]            [웹]
 Raspberry Pi 5          Apache Kafka → Consumer → PostgreSQL      Google Colab     React
-INA226·BQ27441          (토픽 3개)               + TimescaleDB    LSTM-            대시보드
-DS18B20·MLX90614          battery-raw-metrics    (시계열 하이퍼     AutoEncoder
-ADS1115         TLS/SASL  battery-anomaly-alerts  테이블)           (학습·추론)
-└가스·압력·음향  ──────▶  battery-events                              │
-   │                     백엔드(REST/WebSocket)  ◀── alerts 발행 ─────┘
+INA226·BQ27441          (토픽 3개)               + TimescaleDB    LSTM-AE +        대시보드
+DS18B20·MLX90614          battery-raw-metrics    (시계열 하이퍼     Informer
+ADS1115         TLS/SASL  battery-anomaly-alerts  테이블)           이중 모델
+└가스·압력·음향  ──────▶  battery-events                          (학습·추론,
+   │                     백엔드(REST/WebSocket)  ◀── alerts 발행 ── Score Fusion)
    │                       │                         ▲ raw-metrics 구독 (TLS)
    ↓ 릴레이/Kill-Switch     └ WebSocket ─▶ React / 카카오톡 알림
    (에지측 물리 차단)
 ```
 
-> 에지→AWS Kafka는 TLS/SASL 직접 연결이며, AI 추론은 Google Colab이 Kafka에서 `battery-raw-metrics`를 구독해 추론한 뒤 `battery-anomaly-alerts`를 다시 발행한다. Kafka·PostgreSQL·백엔드는 모두 AWS EC2에서 호스팅된다.
+> 에지→AWS Kafka는 TLS/SASL 직접 연결이며, AI 추론은 Google Colab의 LSTM-AutoEncoder + Informer 이중 모델이 Kafka에서 `battery-raw-metrics`를 구독해 추론(AE Score + Informer Score → Score Fusion)한 뒤 `battery-anomaly-alerts`를 다시 발행한다. Kafka·PostgreSQL·백엔드는 모두 AWS EC2에서 호스팅된다.
 
 ### 기술 스택 요약
 
@@ -64,7 +64,7 @@ ADS1115         TLS/SASL  battery-anomaly-alerts  테이블)           (학습·
 | 클라우드/인프라 | AWS EC2 | Kafka·DB·백엔드 호스팅, TLS/SASL 보안 연결 |
 | 스트리밍 | Apache Kafka | 토픽 3개 (raw/alerts/events) — AWS EC2에서 운영, 에지는 TLS 직접 연결 |
 | DB | PostgreSQL + TimescaleDB | 시계열 하이퍼테이블 |
-| AI | LSTM-AutoEncoder | 재구성 오차 기반 이상점수 — Google Colab에서 학습·실시간 추론 |
+| AI | LSTM-AutoEncoder + Informer (이중 모델) | AE 재구성 오차 + Informer 예측 오차를 Score Fusion(가중합)으로 결합한 최종 이상점수 — Google Colab에서 학습·실시간 추론 |
 | 백엔드 | Spring Boot 또는 Python Flask | REST API |
 | 프론트엔드 | React | 반응형 웹 대시보드(데스크톱/태블릿/모바일) |
 | 알림 | Kakao Talk API | SNS 알림 |
@@ -75,7 +75,7 @@ ADS1115         TLS/SASL  battery-anomaly-alerts  테이블)           (학습·
 | 토픽 | 용도 |
 |---|---|
 | `battery-raw-metrics` | 에지 센서 Raw 데이터 |
-| `battery-anomaly-alerts` | AI 추론 결과 (이상점수, 파생 온도) |
+| `battery-anomaly-alerts` | AI 추론 결과 (최종 이상점수·AE/Informer 개별 점수, 파생 온도) |
 | `battery-events` | 센서 오류/인터락/릴레이 제어 이벤트 |
 
 ### 측정 모드
@@ -84,7 +84,7 @@ ADS1115         TLS/SASL  battery-anomaly-alerts  테이블)           (학습·
 |---|---|---|---|---|
 | 모드 1 | 내장 배터리 | 접촉식(temp_contact) + IR 표면(temp_ir_surface) | ○ | ○ |
 | 모드 2 | 외부 셀 | 접촉식(temp_contact) + IR 표면(temp_ir_surface) | ○ | ○ |
-| 모드 3 | 외부 보조배터리 | IR 표면 + 외부/주변(temp_ambient) | ○ | ✕ |
+| 모드 3 | 외부 보조배터리 | IR 표면(temp_ir_surface) | ○ | ✕ |
 
 > AI 서버 전처리: 칼만 필터(temp_ir_filtered), 내부 셀 추정(temp_cell_estimated)
 > 가스 센서는 전 모드, 압력·음향 센서는 모드 1·2에만 적용(보조배터리는 물리 부착이 어려워 제외).
@@ -100,14 +100,15 @@ ADS1115         TLS/SASL  battery-anomaly-alerts  테이블)           (학습·
 | INA226 | 전압·전류·전력 측정 | `voltage_v`, `current_a`, `power_w` | I2C | 1·2·3 |
 | BQ27441 | Fuel Gauge (SOC) | `soc_pct` | I2C | 1·2·3 |
 | DS18B20 | 접촉식 표면 온도 | `temp_contact` | 1-Wire | 1·2 |
-| MLX90614 | 비접촉 IR 표면 온도 (구 'IR 카메라' 대체) — 모드 3에선 칩의 주변온도(Ta)로 `temp_ambient`도 제공 | `temp_ir_surface` | I2C | 1·2·3 |
+| MLX90614 | 비접촉 IR 표면 온도 (구 'IR 카메라' 대체) | `temp_ir_surface` | I2C | 1·2·3 |
 | ADS1115 | 16비트 4ch ADC — 아날로그 센서 → I2C 브리지 | — | I2C | 1·2·3 |
 | 가스 센서 (MQ-2) | 오프가스(가연성가스·연기·H₂ 등) 누출 감지 → 열폭주 조기경보 | `gas_raw` | ADS1115 아날로그 | **1·2·3** |
 | 압력 센서 (FSR-402) | 스웰링(부풀음) 압력/스트레인 변형률 | `pressure_raw` | ADS1115 아날로그 | **1·2** |
 | 음향 센서 | 미세 크랙(균열) 음향 신호 | `acoustic_raw` | ADS1115 아날로그 / GPIO | **1·2** |
 
-- **가스(전 모드)**: 전압·온도가 정상이어도 가스 농도 급상승만으로 수 분 내 폭발 전조를 포착하는 강력한 Early-Detection 신호. 논문에서도 주목받는 지표라 모드 1·2·3 전부 적용.
-- **압력·음향(모드 1·2)**: 셀/내장 배터리의 물리적 부풀음·내부 균열을 직접 측정. 보조배터리(모드 3)는 외장 케이스에 가려 부착이 어려워 제외.
+- **가스·압력·음향은 사후 대응(임계 탐지 → 즉시 릴레이 차단) 안전계층**이며 AI 예측 입력 특징이 아니다. 가스 검출은 이미 열폭주가 시작된 신호이므로, 각 센서가 임계값을 초과하면 AI 판정과 무관하게 즉시 릴레이를 차단한다.
+- **가스(전 모드)**: 가연성가스·연기·H₂ 등 오프가스 급상승을 감지하면 즉시 차단. 모드 1·2·3 전부 적용.
+- **압력·음향(모드 1·2)**: 셀/내장 배터리의 물리적 부풀음·내부 균열을 직접 측정해 임계 초과 시 즉시 차단. 보조배터리(모드 3)는 외장 케이스에 가려 부착이 어려워 제외.
 - **아날로그→I2C**: MQ 계열·FSR-402는 아날로그 출력이라 ADS1115(16비트 ADC)를 거쳐 수집한다.
 
 **보조·실험 장비(BOM)**: 4채널 5V 릴레이 모듈(SZH-RLBG-012), 전자부하 테스터(U6214), 충전모듈(TP4056), PD USB-C 트리거(ZY12PDN), 실리콘 전력선(18~20AWG), 점퍼·악어클립, 캡톤 테이프·서멀 패드(접촉 온도 센서 고정·열전도), 납땜 도구 일체, 외장 케이스, C타입 어댑터(5V 3A+).
@@ -134,7 +135,7 @@ ADS1115         TLS/SASL  battery-anomaly-alerts  테이블)           (학습·
 | `created_at` / `last_measured_at` | 메타 |
 
 - **`target_mode` 고정**: 배터리에 모드를 묶어, 재연결 시 모드를 다시 고를 필요 없이 자동 적용된다(잘못된 모드 측정 방지). 유저 플로우에서 "측정 모드 선택" 단계는 "배터리 자산관리"에 흡수된다.
-- **종류·직렬 셀 수**: 등록 시 `chemistry`(리튬이온/리튬폴리머)는 필수, `series_count`(직렬 셀 수 S)는 선택으로 받는다. 보조배터리 BMS 대상이라 대중적인 리튬이온·리튬폴리머 2종만 둔다. 두 값은 LSTM 이상탐지의 입력 컨텍스트이자 전압 임계값 해석 기준이며, 임계값 자체는 정상패턴 학습으로 추정한다(셀당 전압×셀 수 공식의 자동계산이 아니라 AI 추정).
+- **종류·직렬 셀 수**: 등록 시 `chemistry`(리튬이온/리튬폴리머)는 필수, `series_count`(직렬 셀 수 S)는 선택으로 받는다. 보조배터리 BMS 대상이라 대중적인 리튬이온·리튬폴리머 2종만 둔다. 두 값은 LSTM-AutoEncoder + Informer 이상탐지의 입력 컨텍스트이자 전압 임계값 해석 기준이며, 임계값 자체는 정상패턴 학습으로 추정한다(셀당 전압×셀 수 공식의 자동계산이 아니라 AI 추정).
 
 **측정 세션과 백엔드 태깅 (`measurement_session`)**
 
@@ -186,8 +187,8 @@ ADS1115         TLS/SASL  battery-anomaly-alerts  테이블)           (학습·
 - **F-DZEIOV** — 시계열 DB 스키마/인덱스(TimescaleDB)
 
 ### AI 이상 탐지 (R-PKCMPP)
-- **F-MAPLGA** — 학습 데이터 준비 및 모델 학습 (LSTM-AutoEncoder)
-- **F-VTQMVE** — 실시간 추론 및 이상점수 계산
+- **F-MAPLGA** — 학습 데이터 준비 및 모델 학습 (LSTM-AutoEncoder + Informer 이중 모델)
+- **F-VTQMVE** — 실시간 추론 및 이상점수 계산 (AE Score + Informer Score → Score Fusion)
 - **F-EKKSKT** — 이상 이벤트 저장
 
 ### 웹 대시보드 & 관제 (R-GTAZLF)
@@ -217,6 +218,7 @@ ADS1115         TLS/SASL  battery-anomaly-alerts  테이블)           (학습·
 - **중간 보고서 유즈케이스 정의서 보강(2026-07-04)**: `설계 산출물/중간 보고서-내파트.pptx` 8쪽 뒤에 실제 프로젝트 핵심 유즈케이스 6개(배터리 자산 등록/측정 시작, 실시간 관제, AI 이상탐지 근거 확인, 알림·릴레이 대응, 추세·이벤트 분석, 관리자 통합 관제)를 페이지당 1개씩 추가하고, 각 유즈케이스에 목적·관련 액터·우선순위/중요도·선행조건·트리거·기본 흐름·대안/예외 흐름·후행조건·관련 데이터·추적 요구사항을 포함했다. 내용은 `docs/userflow.md`, `docs/feature_definition.md`, `docs/admin_userflow.md`, `docs/admin_feature_definition.md` 기준으로 작성했다.
 - **개발보고서 양식 2·4·5·6쪽 작성(2026-07-05)**: `설계 산출물/[서식1] 2026 한이음 드림업 개발보고서 양식.docx`의 요약본, 프로젝트 구성도, S/W·H/W 주요 기능, 주요 적용 기술, 개발 환경, 기타 가치 항목을 수행계획서 PDF, `PLAN.md`, 기능정의서, 유저 플로우 문서 기준으로 채웠다. 원본 백업은 `archive/발표자료_구버전/`에 보관했다.
 - **웹서버 기준값 변경 기능 제거(2026-07-07)**: 웹서버/대시보드 범위에서 사용자가 직접 기준값을 변경하는 화면, UI, API 산출물 항목을 제외했다. 남는 `임계값 초과` 표현은 이벤트/Fail-Safe 상태 설명으로만 사용하며, 설정 기능으로 추적하지 않는다.
+- **AI 알고리즘 이중 모델 업데이트(2026-07-09)**: `설계 산출물/중간 보고서.pptx` "알고리즘 명세서" 슬라이드를 기준으로 AI 아키텍처를 단일 LSTM-AutoEncoder에서 **LSTM-AutoEncoder(현재 상태 진단) + Informer(미래 상태 예측) 이중 모델**로 갱신했다. 두 모델은 정규화·Sliding Window로 생성한 동일 Sequence를 공유 입력으로 받고, AE Score(재구성 오차)와 Informer Score(예측 오차)를 Score Fusion(`Final Score = α × AE Score + β × Informer Score`)으로 결합해 최종 이상점수를 산출한다. 상태 등급 4단계(정상/주의/경고/위험, 0.0–1.0 구간)는 이 최종 이상점수 기준으로 유지하며, 아키텍처는 3개 측정 모드(내장 배터리/외부 셀/보조배터리) 공통 적용이다. 입력 특징 목록(V_scaled 등 파생 특징)은 기존과 동일하다. Score Fusion 가중치 α·β는 고정값이 아니라 테스트를 통해 튜닝하며 찾아간다. `CLAUDE.md`, `AGENTS.md`, `PLAN.md`를 함께 갱신했다.
 
 > 위 확장은 R-GTAZLF(웹 대시보드 관제) 범위의 설계 상세화이며, Manyfast 등록 요구사항/기능/스펙 카운트(아래 10절)는 기존 체계를 유지한다.
 
@@ -326,12 +328,13 @@ ADS1115         TLS/SASL  battery-anomaly-alerts  테이블)           (학습·
 ### AI 모델 (4개)
 | ID | 스펙 |
 |---|---|
-| S-LUTREM | 정상 데이터 수집/라벨링 방침 |
-| S-WKCPVK | 특징 추출 및 윈도우링 (30 time-steps) — V_scaled, V_delta, V_drop, I_smooth, dT_dt, d2T_dt2, Wh_cumsum |
-| S-FGKMXE | 재구성 오차 기반 이상점수 계산 |
-| S-WJYKSS | 상태 등급 판정 — 정상(0.0–0.3) / 주의(0.3–0.6) / 경고(0.6–0.8) / 위험(0.8–1.0) |
+| S-LUTREM | 정상 데이터 수집/라벨링 방침 (LSTM-AutoEncoder·Informer 공통) |
+| S-WKCPVK | 특징 추출 및 윈도우링 (30 time-steps, 정규화 + Sliding Window로 Sequence 생성) — V_scaled, V_delta, V_drop, I_smooth, dT_dt, d2T_dt2, Wh_cumsum. 동일 Sequence를 LSTM-AutoEncoder·Informer에 동시 입력 |
+| S-FGKMXE | 이중 모델 이상점수 계산 — LSTM-AutoEncoder 재구성 오차(AE Score) + Informer 예측 오차(Informer Score)를 Score Fusion(가중합 `Final Score = α × AE Score + β × Informer Score`)으로 결합해 최종 이상점수 산출 |
+| S-WJYKSS | 상태 등급 판정 (최종 이상점수 Final Score 기준) — 정상(0.0–0.3) / 주의(0.3–0.6) / 경고(0.6–0.8) / 위험(0.8–1.0) |
 
-> 가스(`gas_raw`)·압력(`pressure_raw`)·음향(`acoustic_raw`)은 V/I/T 외 추가 입력 특징 후보(멀티모달 확장). 각 센서의 적용 모드(가스 1·2·3, 압력·음향 1·2)에 한해 가용하며, 미적용 모드에서는 결측 처리한다.
+> 가스(`gas_raw`)·압력(`pressure_raw`)·음향(`acoustic_raw`)은 AI 예측 입력 특징이 아니라 **사후 대응 안전계층**이다. 각 센서가 임계값을 초과하면 AI 판정과 무관하게 즉시 릴레이를 차단한다(적용 모드: 가스 1·2·3, 압력·음향 1·2). AI 이중 모델 입력은 전압·전류·온도·SOC 기반 특징만 사용한다.
+> Score Fusion 가중치 α·β는 고정값이 아니라 테스트를 통해 튜닝하며 결정한다(모델 학습/검증 단계에서 그리드서치 등으로 탐색).
 
 ### 이벤트 (1개)
 | ID | 스펙 |
@@ -559,10 +562,11 @@ ADS1115         TLS/SASL  battery-anomaly-alerts  테이블)           (학습·
 
 ### Phase 4 — AI 이상 탐지
 - [ ] 정상 데이터 수집 및 라벨링 (S-LUTREM)
-- [ ] 특징 추출 및 윈도우링 (30 time-steps) 파이프라인 (S-WKCPVK)
+- [ ] 특징 추출 및 윈도우링 (30 time-steps, LSTM-AutoEncoder·Informer 공통 입력) 파이프라인 (S-WKCPVK)
 - [ ] LSTM-AutoEncoder 모델 학습 (F-MAPLGA) — Google Colab
+- [ ] Informer 모델 학습 (F-MAPLGA) — Google Colab
 - [ ] Colab ↔ AWS Kafka 연동 (raw-metrics 구독 / anomaly-alerts 발행, TLS)
-- [ ] 실시간 추론 서비스 및 이상점수 계산 (S-FGKMXE, F-VTQMVE)
+- [ ] 실시간 추론 서비스 — AE Score·Informer Score 계산 및 Score Fusion으로 최종 이상점수 산출 (S-FGKMXE, F-VTQMVE)
 - [ ] 상태 등급 판정 및 이벤트 저장 (S-WJYKSS, S-RMXMCJ)
 
 ### Phase 5 — 웹 대시보드 & 관제

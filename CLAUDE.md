@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 프로젝트 소개
 
-리튬이온 배터리의 전압·전류·온도·SOC 시계열 데이터를 Kafka 파이프라인으로 수집하고, LSTM-AutoEncoder 기반 AI로 열폭주 전조를 조기 탐지하여 React 반응형 웹 대시보드에서 실시간 관제하는 시스템이다. 임계치 차단(사후 대응)이 아니라 정상패턴 학습 기반 이상탐지(사전 예측)가 핵심 차별점이다.
+리튬이온 배터리의 전압·전류·온도·SOC 시계열 데이터를 Kafka 파이프라인으로 수집하고, LSTM-AutoEncoder(현재 상태 진단)와 Informer(미래 상태 예측)를 결합한 이중 모델 AI로 열폭주 전조를 조기 탐지하여 React 반응형 웹 대시보드에서 실시간 관제하는 시스템이다. 임계치 차단(사후 대응)이 아니라 정상패턴 학습 기반 이상탐지(사전 예측)가 핵심 차별점이다.
 
 ## 문서 작성 기준
 
@@ -15,13 +15,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## 아키텍처
 
 ```
-[Edge]              [AWS EC2 (클라우드 서버)]                 [AI]               [Web]
-Raspberry Pi        Kafka  → Consumer → PostgreSQL            Google Colab       React
-(센서 수집·          battery-raw-       + TimescaleDB          LSTM-AutoEncoder   대시보드
- Kafka 프로듀서)     metrics            (시계열 하이퍼테이블)    (학습·실시간 추론)
-   │                battery-anomaly-                                │
-   │  TLS/SASL       alerts  ◀───────── 추론결과 발행 ──────────────┘
-   └───────────────▶ battery-events            ▲
+[Edge]              [AWS EC2 (클라우드 서버)]                 [AI]                    [Web]
+Raspberry Pi        Kafka  → Consumer → PostgreSQL            Google Colab            React
+(센서 수집·          battery-raw-       + TimescaleDB          LSTM-AutoEncoder        대시보드
+ Kafka 프로듀서)     metrics            (시계열 하이퍼테이블)    + Informer 이중 모델
+   │                battery-anomaly-                          (학습·실시간 추론,
+   │  TLS/SASL       alerts  ◀───────── 추론결과 발행 ─────────  Score Fusion)
+   └───────────────▶ battery-events            ▲                     │
                      백엔드(REST/WebSocket)     └ raw-metrics 구독 (TLS)
                        │
                        └ WebSocket ─▶ React 대시보드
@@ -30,7 +30,7 @@ Raspberry Pi        Kafka  → Consumer → PostgreSQL            Google Colab  
 릴레이/Kill-Switch(물리 차단)는 에지(Raspberry Pi)측에서 동작
 ```
 
-데이터 흐름: 에지(라즈베리파이)가 Raw 값만 **AWS EC2의 Kafka 브로커에 TLS로 직접 발행** → EC2의 Consumer가 TimescaleDB 적재 → **Google Colab의 AI가 Kafka에서 raw-metrics를 구독·추론 후 anomaly-alerts 토픽 발행** → EC2 백엔드가 WebSocket으로 프론트엔드에 푸시
+데이터 흐름: 에지(라즈베리파이)가 Raw 값만 **AWS EC2의 Kafka 브로커에 TLS로 직접 발행** → EC2의 Consumer가 TimescaleDB 적재 → **Google Colab의 AI(LSTM-AutoEncoder + Informer)가 Kafka에서 raw-metrics를 구독·추론 후 두 모델의 점수를 Score Fusion으로 결합해 anomaly-alerts 토픽 발행** → EC2 백엔드가 WebSocket으로 프론트엔드에 푸시
 
 ## 레포 구조 (예정)
 
@@ -46,15 +46,15 @@ Raspberry Pi        Kafka  → Consumer → PostgreSQL            Google Colab  
 │   ├── consumer/   # Kafka Consumer → TimescaleDB 적재
 │   ├── relay/      # 릴레이/Kill-Switch 제어 API
 │   └── notify/     # 카카오톡 알림 발송
-├── ai/             # LSTM-AutoEncoder 이상 탐지 서비스 (Python)
-│   ├── train/      # 모델 학습
-│   ├── inference/  # 실시간 추론 서버
+├── ai/             # LSTM-AutoEncoder + Informer 이중 모델 이상 탐지 서비스 (Python)
+│   ├── train/      # 모델 학습 (LSTM-AutoEncoder, Informer 개별 학습)
+│   ├── inference/  # 실시간 추론 서버 (AE/Informer 점수 계산 + Score Fusion)
 │   └── features/   # 특징 추출·윈도우링
 └── frontend/       # React 반응형 웹 대시보드
     ├── dashboard/  # 실시간 게이지·요약 카드
     ├── charts/     # 추세 차트 (전압/온도/전류)
     ├── events/     # 이벤트 이력·이상 탐지 목록
-    ├── settings/   # 임계치·알림 설정
+    ├── settings/   # 알림 설정
     └── control/    # 릴레이/Kill-Switch 제어
 ```
 
@@ -67,7 +67,7 @@ Raspberry Pi        Kafka  → Consumer → PostgreSQL            Google Colab  
 | 스트리밍 | Apache Kafka |
 | DB | PostgreSQL + TimescaleDB (시계열 하이퍼테이블) |
 | 백엔드 | Spring Boot 또는 Python Flask |
-| AI | PyTorch 또는 TensorFlow (LSTM-AutoEncoder) — Google Colab에서 학습·추론 |
+| AI | PyTorch 또는 TensorFlow (LSTM-AutoEncoder + Informer 이중 모델, Score Fusion) — Google Colab에서 학습·추론 |
 | 프론트엔드 | React (반응형 웹: 데스크톱/태블릿/모바일) |
 | 알림 | Kakao Talk API |
 | 센서 | INA226(V·I·W), BQ27441(SOC), DS18B20(접촉 온도), MLX90614(IR 온도), ADS1115 경유 가스(MQ-2)·압력(FSR-402)·음향 |
@@ -92,7 +92,7 @@ Raspberry Pi        Kafka  → Consumer → PostgreSQL            Google Colab  
 | 토픽 | 발행자 | 용도 |
 |---|---|---|
 | `battery-raw-metrics` | 에지 (Raspberry Pi) | 센서 Raw 데이터 (100ms 주기) |
-| `battery-anomaly-alerts` | AI 추론 서버 (Google Colab) | 이상점수, 파생 온도(칼만 필터, 내부 셀 추정) |
+| `battery-anomaly-alerts` | AI 추론 서버 (Google Colab) | 최종 이상점수(Score Fusion) 및 AE/Informer 개별 점수, 파생 온도(칼만 필터, 내부 셀 추정) |
 | `battery-events` | 에지/백엔드 | 센서 오류, 인터락 발생, 릴레이 제어 이벤트 |
 
 > Kafka 브로커는 AWS EC2에서 운영하며, 모든 클라이언트(에지·Colab·백엔드)는 TLS/SASL로 접속한다.
@@ -114,7 +114,6 @@ Raspberry Pi        Kafka  → Consumer → PostgreSQL            Google Colab  
   "soc_pct": 81,
   "temp_contact": 34.1,
   "temp_ir_surface": 35.2,
-  "temp_ambient": 25.0,
   "insulation_mohm": 2.4,
   "gas_raw": 180,
   "pressure_raw": 420,
@@ -124,20 +123,32 @@ Raspberry Pi        Kafka  → Consumer → PostgreSQL            Google Colab  
 
 모드별 온도 필드:
 - 모드 1·2 (내장 배터리/외부 셀): `temp_contact` + `temp_ir_surface`
-- 모드 3 (보조배터리): `temp_ir_surface` + `temp_ambient`
+- 모드 3 (보조배터리): `temp_ir_surface`
 
-모드별 추가 센서 필드 (아날로그 → ADS1115 → I2C 수집):
+> 온도는 IR 표면온도(및 모드 1·2의 접촉온도)만 측정한다. 주변/외부 온도(`temp_ambient`)는 측정하지 않는다.
+
+모드별 추가 센서 필드 (아날로그 → ADS1115 → I2C 수집) — **사후 대응(임계 탐지 → 즉시 릴레이 차단) 안전계층**:
 - `gas_raw` (오프가스, MQ-2): **모드 1·2·3 전부**
 - `pressure_raw` (스웰링 압력, FSR-402): **모드 1·2**
 - `acoustic_raw` (미세 크랙 음향): **모드 1·2**
 
+> 가스·압력·음향은 AI 예측 입력 특징이 아니다. 가스 검출은 이미 열폭주가 시작된 신호이므로, 각 센서가 임계값을 초과하면 AI 판정과 무관하게 즉시 릴레이를 차단하는 독립 안전계층으로 동작한다.
+
 ## AI 모델 핵심 파라미터
 
-- **모델**: LSTM-AutoEncoder
+이중 모델 구조 — LSTM-AutoEncoder(현재 상태 진단)와 Informer(미래 상태 예측)가 동일 Sequence 입력을 공유하고, 두 모델의 점수를 Score Fusion(가중합)으로 결합해 최종 이상점수를 산출한다. 3개 측정 모드(내장 배터리/외부 셀/보조배터리) 공통 아키텍처다.
+
+- **모델 구성**:
+  - **LSTM-AutoEncoder** (현재 상태 진단): Encoder → Latent Space → Decoder로 현재 센서 패턴을 복원
+  - **Informer** (미래 상태 예측): Encoder(ProbSparse Attention) → Decoder(Generative Decoder)로 미래 센서 변화 흐름을 예측
+- **전처리**: 정규화 + Sliding Window로 일정 길이의 Sequence 데이터 생성 → 두 모델에 동시 입력
 - **윈도우**: 30 time-steps
-- **특징**: `V_scaled`, `V_delta`, `V_drop`, `I_smooth`, `dT_dt`, `d2T_dt2`, `Wh_cumsum`
-- **이상점수**: 재구성 오차(MSE)
-- **상태 등급**:
+- **특징**: `V_scaled`, `V_delta`, `V_drop`, `I_smooth`, `dT_dt`, `d2T_dt2`, `Wh_cumsum` (전압·전류·온도·SOC 원시값을 전처리해 산출, 두 모델 공통 입력)
+- **AE Score**: 입력값과 LSTM-AutoEncoder 복원값의 차이 = Reconstruction Error(재구성 오차, MSE) 기반 현재 이상점수
+- **Informer Score**: Informer의 미래 예측값과 실제값의 차이 = Prediction Error(예측 오차) 기반 미래 위험점수
+- **Score Fusion(최종 이상점수)**: `Final Score = α × AE Score + β × Informer Score` (가중합, α·β는 고정값이 아니라 테스트하며 튜닝해 결정)
+- **판정**: 최종 이상점수가 기준값 이하면 정상(대시보드 반입 가능 표시), 초과하면 위험(대시보드 경고·사용자 알림 발생), 위험등급이 높으면 Relay Kill-Switch로 전원 차단
+- **상태 등급** (최종 이상점수 Final Score 기준):
 
 | 등급 | 이상점수 범위 |
 |---|---|
@@ -158,7 +169,7 @@ Raspberry Pi        Kafka  → Consumer → PostgreSQL            Google Colab  
 
 ## 배터리 자산(Battery Asset)과 이력 추적
 
-측정 **장비**(`device_id`, 라즈베리파이)와 측정 **대상**(`battery_id`, 셀/보조배터리)을 분리한다. 보조배터리는 자동 인식이 불가하므로 사용자가 자산으로 등록해두고 재연결 시 목록에서 **수동 선택**해 이전 이력을 잇는다. 배터리에는 `target_mode`가 고정되어 재연결 시 모드 재선택이 불필요하다. 등록 시 배터리 종류(`chemistry`: 리튬이온/리튬폴리머, **필수**)와 직렬 셀 수(`series_count`, 선택)를 함께 받아 전압 임계값 해석·AI 이상탐지 추정의 기준으로 쓴다(임계값은 LSTM 정상패턴 학습으로 추정). `battery_id` 귀속은 에지가 아니라 백엔드 세션 태깅으로 부여한다.
+측정 **장비**(`device_id`, 라즈베리파이)와 측정 **대상**(`battery_id`, 셀/보조배터리)을 분리한다. 보조배터리는 자동 인식이 불가하므로 사용자가 자산으로 등록해두고 재연결 시 목록에서 **수동 선택**해 이전 이력을 잇는다. 배터리에는 `target_mode`가 고정되어 재연결 시 모드 재선택이 불필요하다. 등록 시 배터리 종류(`chemistry`: 리튬이온/리튬폴리머, **필수**)와 직렬 셀 수(`series_count`, 선택)를 함께 받아 전압 임계값 해석·AI 이상탐지 추정의 기준으로 쓴다(임계값은 LSTM-AutoEncoder + Informer 정상패턴 학습으로 추정). `battery_id` 귀속은 에지가 아니라 백엔드 세션 태깅으로 부여한다.
 
 > 웹에서 이 기능의 화면/메뉴 명칭은 **"배터리 자산관리"**다(하위 액션: 새 배터리 등록 / 저장된 배터리 선택, 별도 페이지: 배터리 상세/이력).
 
