@@ -1,16 +1,15 @@
 @startuml
 !pragma layout smetana
-skinparam backgroundColor #FEFCF8
+skinparam backgroundColor transparent
 skinparam shadowing false
 skinparam dpi 180
 skinparam defaultFontName "AppleGothic"
-skinparam defaultFontSize 18
-skinparam TitleFontSize 22
-skinparam ActorFontSize 17
-skinparam UsecaseFontSize 18
-skinparam NoteFontSize 15
-skinparam ArrowFontSize 14
-skinparam roundcorner 18
+skinparam defaultFontSize 17
+skinparam ActorFontSize 16
+skinparam UsecaseFontSize 17
+skinparam NoteFontSize 14
+skinparam ArrowFontSize 13
+skinparam roundcorner 16
 skinparam usecase {
   BackgroundColor #F8FAFC
   BorderColor #8EA7C2
@@ -37,7 +36,6 @@ skinparam usecase {
   BackgroundColor #F4E7FF
   BorderColor #AA8DCC
 }
-title UC-03\nAI 이상탐지 상세 및 근거 확인
 actor "연구·운영자" as A
 actor "AI 서버" as S1
 actor "DB" as S2
@@ -49,12 +47,14 @@ rectangle "AI 이상탐지 상세 및 근거 확인" {
   usecase "과거 세션 비교" as U4
   usecase "SOH/RUL 확인" as U5
   usecase "조치 판단 기록" as U6
+  usecase "분석 근거 저장" as U7
 }
 U1 -[hidden]down- U2
 U2 -[hidden]down- U3
 U3 -[hidden]down- U4
 U4 -[hidden]down- U5
 U5 -[hidden]down- U6
+U6 -[hidden]down- U7
 A -right-> U1
 S1 -left-> U2
 S2 -left-> U4
@@ -64,7 +64,8 @@ U2 ..> U3 : <<include>>
 U4 ..> U3 : <<extend>>
 U4 ..> U5 : <<include>>
 U5 ..> U6 : <<include>>
-note bottom of U6
+U7 ..> U6 : <<extend>>
+note bottom of U7
 경고를 설명 가능한 판단 근거로 전환한다
 end note
 @enduml

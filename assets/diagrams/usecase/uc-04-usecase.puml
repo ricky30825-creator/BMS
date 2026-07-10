@@ -1,16 +1,15 @@
 @startuml
 !pragma layout smetana
-skinparam backgroundColor #FEFCF8
+skinparam backgroundColor transparent
 skinparam shadowing false
 skinparam dpi 180
 skinparam defaultFontName "AppleGothic"
-skinparam defaultFontSize 18
-skinparam TitleFontSize 22
-skinparam ActorFontSize 17
-skinparam UsecaseFontSize 18
-skinparam NoteFontSize 15
-skinparam ArrowFontSize 14
-skinparam roundcorner 18
+skinparam defaultFontSize 17
+skinparam ActorFontSize 16
+skinparam UsecaseFontSize 17
+skinparam NoteFontSize 14
+skinparam ArrowFontSize 13
+skinparam roundcorner 16
 skinparam usecase {
   BackgroundColor #F8FAFC
   BorderColor #8EA7C2
@@ -37,7 +36,6 @@ skinparam usecase {
   BackgroundColor #FFF4C7
   BorderColor #C6A84F
 }
-title UC-04\n알림 확인 및 릴레이 차단 대응
 actor "현장 운영자" as A
 actor "알림 서버" as S1
 actor "Kakao" as S2

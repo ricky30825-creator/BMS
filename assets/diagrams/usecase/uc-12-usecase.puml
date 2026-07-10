@@ -1,16 +1,15 @@
 @startuml
 !pragma layout smetana
-skinparam backgroundColor #FEFCF8
+skinparam backgroundColor transparent
 skinparam shadowing false
 skinparam dpi 180
 skinparam defaultFontName "AppleGothic"
-skinparam defaultFontSize 18
-skinparam TitleFontSize 22
-skinparam ActorFontSize 17
-skinparam UsecaseFontSize 18
-skinparam NoteFontSize 15
-skinparam ArrowFontSize 14
-skinparam roundcorner 18
+skinparam defaultFontSize 17
+skinparam ActorFontSize 16
+skinparam UsecaseFontSize 17
+skinparam NoteFontSize 14
+skinparam ArrowFontSize 13
+skinparam roundcorner 16
 skinparam usecase {
   BackgroundColor #F8FAFC
   BorderColor #8EA7C2
@@ -37,7 +36,6 @@ skinparam usecase {
   BackgroundColor #D7E9FF
   BorderColor #7EA6CF
 }
-title UC-12\n배터리 상세 및 재연결 이력 조회
 actor "일반 사용자" as A
 actor "Battery API" as S1
 actor "DB" as S2
@@ -49,12 +47,14 @@ rectangle "배터리 상세 및 재연결 이력 조회" {
   usecase "세션 목록 조회" as U4
   usecase "이벤트/추세 확인" as U5
   usecase "메모 갱신" as U6
+  usecase "이력 연속 확인" as U7
 }
 U1 -[hidden]down- U2
 U2 -[hidden]down- U3
 U3 -[hidden]down- U4
 U4 -[hidden]down- U5
 U5 -[hidden]down- U6
+U6 -[hidden]down- U7
 A -right-> U1
 S1 -left-> U2
 S2 -left-> U4
@@ -64,7 +64,8 @@ U2 ..> U3 : <<include>>
 U4 ..> U3 : <<extend>>
 U4 ..> U5 : <<include>>
 U5 ..> U6 : <<include>>
-note bottom of U6
+U7 ..> U6 : <<extend>>
+note bottom of U7
 battery_id 기준으로 재연결 세션을 이어 조회한다
 end note
 @enduml
