@@ -3,8 +3,8 @@
 > 관리자 기능은 일반 사용자 기능과 분리된 `ADMIN` 권한 전용 흐름으로 설계한다. 관리자는 전체 사용자, 배터리, 디바이스, 이상 상태, 시스템 헬스, 감사 로그를 통합 관제한다.
 > MVP에서는 HTML 프로토타입에 표시된 조회·상태 관리·비밀번호 재설정·공지사항 관리·감사 추적을 우선하고, 데이터 삭제·원격 Kill-Switch 제어·권한 세분화는 제외한다.
 
-- **기준 자료**: `설계 산출물/설계 산출물_v4_6.29_가격기입.pptx` 슬라이드 31~35
-- **HTML 프로토타입 반영**: `/Users/jungjeahwan/Downloads/셀가드 프로토타입 (standalone).html` 기준 관리자 기능정의서는 `docs/admin_feature_definition.md`
+- **기준 문서**: `PLAN.md`, `docs/admin_feature_definition.md`
+- **HTML 프로토타입 반영**: `web/AI_배터리_열폭주_관제_시스템_v2.html` 기준 관리자 기능정의서는 `docs/admin_feature_definition.md`
 - **참조 요구사항**: `SRS-WEB-004`, `SRS-WEB-030`, `SRS-WEB-036~039`, `SRS-WEB-047`, `SRS-WEB-053`, `SRS-WEB-061`
 - **참조 기능**: `REQ-WEB-005`, `REQ-WEB-030`, `REQ-WEB-036~041`, `REQ-WEB-049`, `REQ-WEB-055`, `REQ-WEB-063`
 - **PLAN 기준**: 관리자 MVP 상세 범위, 관리자 데이터 모델/API, MVP 제외 항목

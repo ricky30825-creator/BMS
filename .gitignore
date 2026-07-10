@@ -2,7 +2,17 @@
 ~$*
 *.tmp
 .venv/
+.claude/
 __pycache__/
 *.pyc
 archive/
 node_modules/
+scripts/
+
+# Local-only presentation/report artifacts. Keep shared project state in Markdown docs.
+발표자료/
+설계 산출물/
+클로드 보고/
+*.pptx
+*.docx
+*.pdf

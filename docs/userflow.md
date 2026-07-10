@@ -5,8 +5,8 @@
 > 실시간 대시보드에서는 센서값, 이상점수, 상태 등급, 알림을 확인하고 위험 상황에서는 확인 절차를 거쳐 릴레이 차단/복구로 이동한다.
 > 관리자 전용 흐름은 `docs/admin_userflow.md`에서 별도로 관리한다.
 
-- **기준 슬라이드**: `설계 산출물/설계 산출물_v4_6.29.pptx` 31~35페이지
-- **HTML 프로토타입 반영**: `/Users/jungjeahwan/Downloads/셀가드 프로토타입 (standalone).html` 기준 일반 사용자 기능정의서는 `docs/feature_definition.md`
+- **기준 문서**: `PLAN.md`, `docs/feature_definition.md`
+- **HTML 프로토타입 반영**: `web/AI_배터리_열폭주_관제_시스템_v2.html` 기준 일반 사용자 기능정의서는 `docs/feature_definition.md`
 - **참조 기능**: `docs/feature_definition.md`의 `REQ-WEB-001~072`
 - **섹션**: 인증/계정 · 디바이스/배터리 · 실시간 관제 · 이상 분석 · 알림/릴레이 · 추세/이벤트 · 공지사항 · 설정
 - **반응형 기준**: 데스크톱 사이드바 · 태블릿 접힘 메뉴 · 모바일 하단 내비게이션
