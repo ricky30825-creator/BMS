@@ -1,0 +1,71 @@
+@startuml
+!pragma layout smetana
+skinparam backgroundColor transparent
+skinparam shadowing false
+skinparam dpi 180
+skinparam defaultFontName "AppleGothic"
+skinparam defaultFontSize 17
+skinparam ActorFontSize 16
+skinparam UsecaseFontSize 17
+skinparam NoteFontSize 14
+skinparam ArrowFontSize 13
+skinparam roundcorner 16
+skinparam usecase {
+  BackgroundColor #F8FAFC
+  BorderColor #8EA7C2
+  ArrowColor #6B7F99
+  FontColor #263238
+}
+skinparam actor {
+  BackgroundColor #FDEBD3
+  BorderColor #C58A50
+  FontColor #263238
+}
+skinparam rectangle {
+  BackgroundColor #F4F8FF
+  BorderColor #9BB6D6
+  FontColor #263238
+}
+skinparam note {
+  BackgroundColor #FFF7D6
+  BorderColor #D9C36A
+  FontColor #444444
+}
+top to bottom direction
+skinparam usecase {
+  BackgroundColor #FFF4C7
+  BorderColor #C6A84F
+}
+actor "운영자/관리자" as A
+actor "Relay API" as S1
+actor "진단기" as S2
+actor "감사 로그" as S3
+rectangle "릴레이 복구 승인 및 안전 점검" {
+  usecase "차단 상태 확인" as U1
+  usecase "원인 점검" as U2
+  usecase "안전 체크리스트" as U3
+  usecase "재인증" as U4
+  usecase "복구 사유 입력" as U5
+  usecase "복구 명령 전송" as U6
+  usecase "상태 재확인" as U7
+}
+U1 -[hidden]down- U2
+U2 -[hidden]down- U3
+U3 -[hidden]down- U4
+U4 -[hidden]down- U5
+U5 -[hidden]down- U6
+U6 -[hidden]down- U7
+A -right-> U1
+S1 -left-> U2
+S2 -left-> U4
+S3 -left-> U6
+U1 ..> U2 : <<include>>
+U2 ..> U3 : <<include>>
+U4 ..> U3 : <<extend>>
+U4 ..> U5 : <<include>>
+U5 ..> U6 : <<include>>
+U7 ..> U6 : <<extend>>
+note bottom of U7
+위험 지속 시 차단 유지 사유를 기록한다
+end note
+@enduml

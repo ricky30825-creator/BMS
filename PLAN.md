@@ -32,7 +32,7 @@
 
 - Claude를 메인 작업자로, Codex를 보조 작업자로 사용한다.
 - Codex는 Claude가 구성한 현재 폴더 구조와 문서 체계를 우선 유지하며, 불필요한 구조 변경을 하지 않는다.
-- 코드, 설정, 산출물, 요구사항 변경 시 관련 문서를 함께 갱신한다. 프로젝트 계획과 추적은 이 `PLAN.md`를 기준으로 한다.
+- 코드, 설정, 요구사항 변경 시 관련 문서를 함께 갱신한다. 프로젝트 계획과 추적은 이 `PLAN.md`를 기준으로 한다.
 - Claude 전용 지침은 `CLAUDE.md`, Codex 전용 지침은 `AGENTS.md`에 분리해 관리한다.
 - 공유 원격 저장소는 `https://github.com/ricky30825-creator/BMS`로 관리한다.
 - GitHub 공유 레포에는 팀 개발에 필요한 코드, 설정, Markdown 기준 문서, 웹/다이어그램 자산만 추적한다. 발표자료, 설계 산출물 원본, 클로드 보고, 백업 파일, 샘플 PDF/DOCX/PPTX는 로컬 보관 대상으로 보고 레포에서 제외한다.
@@ -67,7 +67,7 @@ ADS1115         TLS/SASL  battery-anomaly-alerts  테이블)           이중 �
 | 스트리밍 | Apache Kafka | 토픽 3개 (raw/alerts/events) — AWS EC2에서 운영, 에지는 TLS 직접 연결 |
 | DB | PostgreSQL + TimescaleDB | 시계열 하이퍼테이블 |
 | AI | LSTM-AutoEncoder + Informer (이중 모델) | AE 재구성 오차 + Informer 예측 오차를 Score Fusion(가중합)으로 결합한 최종 이상점수 — Google Colab에서 학습·실시간 추론 |
-| 백엔드 | Spring Boot 또는 Python Flask | REST API |
+| 백엔드 | Node.js + TypeScript + Express + Better Auth | REST API, WebSocket, 세션 기반 인증/RBAC |
 | 프론트엔드 | React | 반응형 웹 대시보드(데스크톱/태블릿/모바일) |
 | 알림 | Kakao Talk API | SNS 알림 |
 | 하드웨어 | 릴레이 모듈, 스피커 | Kill-Switch 물리 차단, 에지 로컬 음성 안내 |
@@ -178,6 +178,8 @@ ADS1115         TLS/SASL  battery-anomaly-alerts  테이블)           이중 �
 - **F-TFJKKF** — 소셜 로그인(SSO)
 - **F-HUYIXC** — 계정 찾기 및 비밀번호 재설정
 
+> 인증은 Better Auth를 백엔드 `/api/auth/*`에 마운트해 구현한다. 로그인 유지는 JWT 직접 발급이 아니라 Better Auth 세션 쿠키와 서버 세션 검증을 기준으로 하며, 일반 사용자와 관리자는 `USER`/`ADMIN` RBAC로 분리한다.
+
 ### 배터리 데이터 수집 (R-YZNPSL)
 - **F-IZUROQ** — 센서 데이터 수집(I2C/1-Wire/아날로그) — INA226, BQ27441, DS18B20, MLX90614, ADS1115 경유 가스(MQ-2)·압력(FSR-402)·음향
 - **F-QLXYRG** — 배터리 자산관리(등록/선택) 및 측정 모드 인터락 — 배터리에 `target_mode` 고정, 재연결 시 수동 선택으로 이력 연속
@@ -209,7 +211,6 @@ ADS1115         TLS/SASL  battery-anomaly-alerts  테이블)           이중 �
 - **유저/관리자 기능 분리**: 일반 사용자 기능과 관리자 기능을 화면·라우팅·권한 기준으로 분리한다. 일반 사용자 흐름은 `docs/userflow.md`, 관리자 전용 흐름은 `docs/admin_userflow.md`를 기준 문서로 관리한다.
 - **관리자 기능 MVP(신규)**: 일반 사용자 권한과 별도로 단일 `ADMIN` 역할을 둔다. 초기 운영 MVP 범위는 HTML 프로토타입을 우선 기준으로 사용자/계정 조회 및 정지·해제, 비밀번호 재설정, 전체 배터리 조회, 배터리 운영 상태(`NORMAL`/`WATCH`/`BLOCKED`)와 관리자 메모, 배터리 통계, 디바이스 상태, 공지사항 관리, 감사 로그로 둔다. 관리자 권한 세분화, 데이터 삭제, 릴레이/Kill-Switch 원격 제어는 MVP 이후로 미룬다.
 - **운영·복원력 보강**: MVP에서는 WebSocket 자동 재연결·하트비트, 단순 헬스체크 카드(Kafka·Consumer·DB·AI 정상/비정상/확인불가), 감사 로깅을 우선한다. 인앱 알림 고도화와 데이터 내보내기(CSV/PDF)는 후속 기능으로 둔다.
-- **설계 산출물 v4 정비(2026-06-30)**: 과거 PPT 산출물의 웹 요구사항·기능 표를 HTML 프로토타입에서 확인되는 화면 기능 중심으로 정리했다.
 - **요구사항 정의서 사용자 관점 정비(2026-06-30)**: 웹 요구사항 정의서를 기능정의서형 문구에서 사용자·운영자 기대 중심 문구로 수정했다. 기존 SRS-WEB ID, 중요도, 비고 체계는 유지하고, HTML에서 확인되는 기능을 "사용자가 원하는 기능/운영자가 필요한 관리 기능" 관점으로 재서술했다.
 - **요구사항 상세설명 간결화(2026-06-30)**: 요구사항 상세설명 문구에서 "~싶다/원한다" 형태를 제거하고, "이메일로 안전하게 로그인."처럼 짧은 요구 동작 중심 문구로 정리했다.
 - **요구사항명 간결화(2026-06-30)**: 요구사항명을 "이메일 로그인", "소셜 로그인", "배터리 등록"처럼 짧은 명사형 이름으로 정리했다.
@@ -217,9 +218,6 @@ ADS1115         TLS/SASL  battery-anomaly-alerts  테이블)           이중 �
 - **요구사항 표 빈칸 보완(2026-06-30)**: 요구사항 표의 빈 ID, 중요도, 비고 칸을 현재 보이는 행 기준으로 보완했고, 내부 중복 항목을 정리했다.
 - **일반 사용자 유저 플로우 갱신(2026-06-30)**: `docs/userflow.md`를 HTML 프로토타입 기준으로 재정리했다. 랜딩/인증, 디바이스·배터리, 배터리 연결 확인, 실시간 관제, XAI, SOH/RUL, 알림 Ack, SOP, 위험 제어 승인, 추세/이벤트/내보내기 흐름을 일반 사용자 여정에 반영했다.
 - **HTML 프로토타입 기능정의서 작성(2026-07-03)**: `/Users/jungjeahwan/Downloads/셀가드 프로토타입 (standalone).html`에 실제 표시된 화면·버튼·입력·탭·필터·모달·카드·상태값을 기준으로 일반 사용자 기능정의서 `docs/feature_definition.md`(72개)와 관리자 기능정의서 `docs/admin_feature_definition.md`(36개)를 분리 작성했다. 사용자 흐름은 `docs/userflow.md`, 관리자 흐름은 `docs/admin_userflow.md`에 HTML 확인 흐름으로 보강했다. `PLAN.md`와 HTML이 충돌하는 관리자 공지사항 관리, 관리자 비밀번호 재설정은 HTML을 우선 기준으로 MVP 포함 기능에 반영했다. 추가 정의 필요 항목은 랜딩 메뉴 목적지, 데모 영상 동작, 프로필 사진 변경 동작이다.
-- **설계 산출물 기능정의서 표 반영(2026-07-03)**: `docs/feature_definition.md`의 일반 사용자 72개 항목과 `docs/admin_feature_definition.md`의 관리자 36개 항목 기준으로 기능정의서 표를 갱신했다.
-- **중간 보고서 유즈케이스 정의서 보강(2026-07-04)**: 실제 프로젝트 핵심 유즈케이스 6개(배터리 자산 등록/측정 시작, 실시간 관제, AI 이상탐지 근거 확인, 알림·릴레이 대응, 추세·이벤트 분석, 관리자 통합 관제)를 정리했다. 내용은 `docs/userflow.md`, `docs/feature_definition.md`, `docs/admin_userflow.md`, `docs/admin_feature_definition.md` 기준으로 작성했다.
-- **개발보고서 내용 정리(2026-07-05)**: 프로젝트 요약, 구성도, S/W·H/W 주요 기능, 주요 적용 기술, 개발 환경, 기타 가치 항목을 `PLAN.md`, 기능정의서, 유저 플로우 문서 기준으로 정리했다.
 - **웹서버 기준값 변경 기능 제거(2026-07-07)**: 웹서버/대시보드 범위에서 사용자가 직접 기준값을 변경하는 화면, UI, API 산출물 항목을 제외했다. 남는 `임계값 초과` 표현은 이벤트/Fail-Safe 상태 설명으로만 사용하며, 설정 기능으로 추적하지 않는다.
 - **GitHub 공유 레포 정리(2026-07-10)**: 원격 저장소를 `https://github.com/ricky30825-creator/BMS`로 정리하고, 발표자료·설계 산출물 원본·클로드 보고·백업·샘플 PDF/DOCX/PPTX를 레포 추적 대상에서 제외했다. 이후 공유 기준 문서는 `PLAN.md`와 `docs/*.md`, 화면 참고 산출물은 `web/*.html`과 `assets/*.svg`를 우선한다.
 - **AI 알고리즘 이중 모델 업데이트(2026-07-09)**: AI 아키텍처를 단일 LSTM-AutoEncoder에서 **LSTM-AutoEncoder(현재 상태 진단) + Informer(미래 상태 예측) 이중 모델**로 갱신했다. 두 모델은 정규화·Sliding Window로 생성한 동일 Sequence를 공유 입력으로 받고, AE Score(재구성 오차)와 Informer Score(예측 오차)를 Score Fusion(`Final Score = α × AE Score + β × Informer Score`)으로 결합해 최종 이상점수를 산출한다. 상태 등급 4단계(정상/주의/경고/위험, 0.0–1.0 구간)는 이 최종 이상점수 기준으로 유지하며, 아키텍처는 3개 측정 모드(내장 배터리/외부 셀/보조배터리) 공통 적용이다. 입력 특징 목록(V_scaled 등 파생 특징)은 기존과 동일하다. Score Fusion 가중치 α·β는 고정값이 아니라 테스트를 통해 튜닝하며 찾아간다. `CLAUDE.md`, `AGENTS.md`, `PLAN.md`를 함께 갱신했다.
@@ -297,7 +295,7 @@ ADS1115         TLS/SASL  battery-anomaly-alerts  테이블)           이중 �
 | ID | 스펙 |
 |---|---|
 | S-IQOGHO | 회원가입 입력 검증 |
-| S-ABZLNC | 세션/토큰 기반 로그인 유지 |
+| S-ABZLNC | Better Auth 세션 쿠키 기반 로그인 유지 |
 | S-VCGWIK | OAuth 리다이렉트 및 콜백 처리 |
 | S-OKBMSS | 아이디 찾기 |
 | S-TAGOLP | 비밀번호 재설정 이메일 발송 |
@@ -387,7 +385,7 @@ ADS1115         TLS/SASL  battery-anomaly-alerts  테이블)           이중 �
 ├── 소셜 로그인(OAuth)
 ├── 회원가입
 ├── 계정 찾기 → 아이디 찾기 / 비밀번호 재설정
-└── 토큰 발급/갱신 → 로그아웃/세션 만료
+└── Better Auth 세션 생성/검증 → 로그아웃/세션 만료
 
 [디바이스/배터리]
 디바이스 관리 페이지 → 디바이스 등록/선택
@@ -557,8 +555,8 @@ ADS1115         TLS/SASL  battery-anomaly-alerts  테이블)           이중 �
 - [ ] Kafka 브로커 TLS/SASL 보안 연결 구성 (에지·Colab·백엔드 인증)
 - [ ] PostgreSQL + TimescaleDB 설치 및 시계열 스키마 설계 (S-NFEETD)
 - [ ] Apache Kafka 클러스터 구성 (AWS EC2 상) 및 토픽 3개 생성 (S-BYYPVQ)
-- [ ] 백엔드 프로젝트 초기화 (Spring Boot 또는 Flask)
-- [ ] 사용자 인증 API 구현 (R-HBLCDS — F-SDSVND, F-TFJKKF, F-HUYIXC)
+- [x] 백엔드 프로젝트 초기화 (Node.js + TypeScript + Express)
+- [x] Better Auth 기반 사용자 인증 골격 구현 (R-HBLCDS — F-SDSVND, F-TFJKKF, F-HUYIXC)
 
 ### Phase 2 — 에지 데이터 수집
 - [ ] Raspberry Pi 센서 드라이버 구현 (S-DPVOCW — I2C/1-Wire/ADS1115 아날로그 추상화, 가스·압력·음향 포함)
@@ -643,7 +641,6 @@ ADS1115         TLS/SASL  battery-anomaly-alerts  테이블)           이중 �
 | 완료된 항목 | 0개 (0%) |
 | 중요도 High 요구사항 | 4개 |
 
-### 2026-07-10 Codex 작업 기록
-- 로컬 산출물 `설계 산출물/중간 보고서-내파트_다색포인트.pptx` 5페이지 일정표의 월별 진행 칸을 이전 파일(`중간 보고서_v2_7.9.pptx`) 기준 색상으로 보강했다.
-- 동일 PPT의 전체 슬라이드에서 본문 상단 반복 가로 바(`bodyAccentRule-*`)를 제거했다.
-- 유즈케이스 정의서 구간을 UC-01~UC-16 총 16장으로 확장하고, 각 장에 PlantUML 기반 유즈케이스 다이어그램 이미지를 삽입했다.
+---
+
+## 11. 변경 이력
