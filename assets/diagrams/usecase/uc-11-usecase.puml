@@ -4,6 +4,12 @@ skinparam backgroundColor #FEFCF8
 skinparam shadowing false
 skinparam dpi 180
 skinparam defaultFontName "AppleGothic"
+skinparam defaultFontSize 18
+skinparam TitleFontSize 22
+skinparam ActorFontSize 17
+skinparam UsecaseFontSize 18
+skinparam NoteFontSize 15
+skinparam ArrowFontSize 14
 skinparam roundcorner 18
 skinparam usecase {
   BackgroundColor #F8FAFC
@@ -33,8 +39,8 @@ skinparam usecase {
 }
 title UC-11\n알림 임계치 및 수신 설정
 actor "일반 사용자" as A
-actor "Notification API" as S1
-actor "Kakao API" as S2
+actor "알림 API" as S1
+actor "Kakao" as S2
 actor "설정 저장소" as S3
 rectangle "알림 임계치 및 수신 설정" {
   usecase "채널 선택" as U1
@@ -59,6 +65,6 @@ U4 ..> U3 : <<extend>>
 U4 ..> U5 : <<include>>
 U5 ..> U6 : <<include>>
 note bottom of U6
-위험도별 채널을 분리해 운영
+위험도별 채널을 분리해 운영한다
 end note
 @enduml

@@ -4,6 +4,12 @@ skinparam backgroundColor #FEFCF8
 skinparam shadowing false
 skinparam dpi 180
 skinparam defaultFontName "AppleGothic"
+skinparam defaultFontSize 18
+skinparam TitleFontSize 22
+skinparam ActorFontSize 17
+skinparam UsecaseFontSize 18
+skinparam NoteFontSize 15
+skinparam ArrowFontSize 14
 skinparam roundcorner 18
 skinparam usecase {
   BackgroundColor #F8FAFC
@@ -35,14 +41,14 @@ title UC-07\n로그인 및 역할 기반 접근
 actor "사용자/관리자" as A
 actor "Auth API" as S1
 actor "RBAC" as S2
-actor "세션 저장소" as S3
+actor "세션" as S3
 rectangle "로그인 및 역할 기반 접근" {
   usecase "이메일 로그인" as U1
   usecase "자격 검증" as U2
   usecase "계정 상태 확인" as U3
   usecase "역할 확인" as U4
   usecase "토큰 발급" as U5
-  usecase "역할별 화면 이동" as U6
+  usecase "화면 이동" as U6
   usecase "접근 거부 처리" as U7
 }
 U1 -[hidden]down- U2
@@ -62,6 +68,6 @@ U4 ..> U5 : <<include>>
 U5 ..> U6 : <<include>>
 U7 ..> U6 : <<extend>>
 note bottom of U7
-역할별 메뉴와 API 범위를 분리
+역할별 메뉴와 API 범위를 분리한다
 end note
 @enduml

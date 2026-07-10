@@ -4,6 +4,12 @@ skinparam backgroundColor #FEFCF8
 skinparam shadowing false
 skinparam dpi 180
 skinparam defaultFontName "AppleGothic"
+skinparam defaultFontSize 18
+skinparam TitleFontSize 22
+skinparam ActorFontSize 17
+skinparam UsecaseFontSize 18
+skinparam NoteFontSize 15
+skinparam ArrowFontSize 14
 skinparam roundcorner 18
 skinparam usecase {
   BackgroundColor #F8FAFC
@@ -43,7 +49,7 @@ rectangle "사용자 계정 활성·정지 관리" {
   usecase "비밀번호 재설정" as U4
   usecase "사유 입력" as U5
   usecase "접근 제어 반영" as U6
-  usecase "자기 계정\n 정지 차단" as U7
+  usecase "자기 정지 차단" as U7
 }
 U1 -[hidden]down- U2
 U2 -[hidden]down- U3
@@ -62,6 +68,6 @@ U4 ..> U5 : <<include>>
 U5 ..> U6 : <<include>>
 U7 ..> U6 : <<extend>>
 note bottom of U7
-계정 변경은 즉시 접근 제어에 반영
+계정 변경은 즉시 접근 제어에 반영한다
 end note
 @enduml

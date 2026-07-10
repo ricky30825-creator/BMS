@@ -4,6 +4,12 @@ skinparam backgroundColor #FEFCF8
 skinparam shadowing false
 skinparam dpi 180
 skinparam defaultFontName "AppleGothic"
+skinparam defaultFontSize 18
+skinparam TitleFontSize 22
+skinparam ActorFontSize 17
+skinparam UsecaseFontSize 18
+skinparam NoteFontSize 15
+skinparam ArrowFontSize 14
 skinparam roundcorner 18
 skinparam usecase {
   BackgroundColor #F8FAFC
@@ -32,7 +38,7 @@ skinparam usecase {
   BorderColor #C6A84F
 }
 title UC-10\nAI 이중 모델 추론 및 점수 융합
-actor "AI 추론 서버" as A
+actor "AI 서버" as A
 actor "Kafka" as S1
 actor "LSTM-AE" as S2
 actor "Informer" as S3
@@ -40,8 +46,8 @@ rectangle "AI 이중 모델 추론 및 점수 융합" {
   usecase "윈도우 형성" as U1
   usecase "특징 생성" as U2
   usecase "AE 오차 계산" as U3
-  usecase "Informe\nr 오차 계산" as U4
-  usecase "Score \nFusion" as U5
+  usecase "Informer 오차 계산" as U4
+  usecase "Score Fusion" as U5
   usecase "위험 등급 산정" as U6
   usecase "alerts 발행" as U7
 }
@@ -62,6 +68,6 @@ U4 ..> U5 : <<include>>
 U5 ..> U6 : <<include>>
 U7 ..> U6 : <<extend>>
 note bottom of U7
-현재 패턴과 미래 흐름 위험을 함께 반영
+현재 패턴과 미래 흐름 위험을 함께 반영한다
 end note
 @enduml

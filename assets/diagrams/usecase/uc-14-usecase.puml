@@ -4,6 +4,12 @@ skinparam backgroundColor #FEFCF8
 skinparam shadowing false
 skinparam dpi 180
 skinparam defaultFontName "AppleGothic"
+skinparam defaultFontSize 18
+skinparam TitleFontSize 22
+skinparam ActorFontSize 17
+skinparam UsecaseFontSize 18
+skinparam NoteFontSize 15
+skinparam ArrowFontSize 14
 skinparam roundcorner 18
 skinparam usecase {
   BackgroundColor #F8FAFC
@@ -62,6 +68,6 @@ U4 ..> U5 : <<include>>
 U5 ..> U6 : <<include>>
 U7 ..> U6 : <<extend>>
 note bottom of U7
-점검·장애·운영 안내를 사용자에게 노출
+점검·장애·운영 안내를 사용자에게 노출한다
 end note
 @enduml

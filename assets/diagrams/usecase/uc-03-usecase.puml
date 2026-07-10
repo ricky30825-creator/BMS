@@ -4,6 +4,12 @@ skinparam backgroundColor #FEFCF8
 skinparam shadowing false
 skinparam dpi 180
 skinparam defaultFontName "AppleGothic"
+skinparam defaultFontSize 18
+skinparam TitleFontSize 22
+skinparam ActorFontSize 17
+skinparam UsecaseFontSize 18
+skinparam NoteFontSize 15
+skinparam ArrowFontSize 14
 skinparam roundcorner 18
 skinparam usecase {
   BackgroundColor #F8FAFC
@@ -35,10 +41,10 @@ title UC-03\nAI 이상탐지 상세 및 근거 확인
 actor "연구·운영자" as A
 actor "AI 서버" as S1
 actor "DB" as S2
-actor "XAI 패널" as S3
+actor "XAI" as S3
 rectangle "AI 이상탐지 상세 및 근거 확인" {
   usecase "이상 이벤트 선택" as U1
-  usecase "AE/Infor\nmer 점수 분해" as U2
+  usecase "점수 분해" as U2
   usecase "기여 요인 확인" as U3
   usecase "과거 세션 비교" as U4
   usecase "SOH/RUL 확인" as U5
@@ -59,6 +65,6 @@ U4 ..> U3 : <<extend>>
 U4 ..> U5 : <<include>>
 U5 ..> U6 : <<include>>
 note bottom of U6
-경고를 설명 가능한 판단 근거로 전환
+경고를 설명 가능한 판단 근거로 전환한다
 end note
 @enduml

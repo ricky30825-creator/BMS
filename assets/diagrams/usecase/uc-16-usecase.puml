@@ -4,6 +4,12 @@ skinparam backgroundColor #FEFCF8
 skinparam shadowing false
 skinparam dpi 180
 skinparam defaultFontName "AppleGothic"
+skinparam defaultFontSize 18
+skinparam TitleFontSize 22
+skinparam ActorFontSize 17
+skinparam UsecaseFontSize 18
+skinparam NoteFontSize 15
+skinparam ArrowFontSize 14
 skinparam roundcorner 18
 skinparam usecase {
   BackgroundColor #F8FAFC
@@ -62,6 +68,6 @@ U4 ..> U5 : <<include>>
 U5 ..> U6 : <<include>>
 U7 ..> U6 : <<extend>>
 note bottom of U7
-위험 지속 시 차단 유지 사유를 기록
+위험 지속 시 차단 유지 사유를 기록한다
 end note
 @enduml

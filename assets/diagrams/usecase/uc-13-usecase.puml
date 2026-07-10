@@ -4,6 +4,12 @@ skinparam backgroundColor #FEFCF8
 skinparam shadowing false
 skinparam dpi 180
 skinparam defaultFontName "AppleGothic"
+skinparam defaultFontSize 18
+skinparam TitleFontSize 22
+skinparam ActorFontSize 17
+skinparam UsecaseFontSize 18
+skinparam NoteFontSize 15
+skinparam ArrowFontSize 14
 skinparam roundcorner 18
 skinparam usecase {
   BackgroundColor #F8FAFC
@@ -34,12 +40,12 @@ skinparam usecase {
 title UC-13\n시스템 헬스 모니터링
 actor "관리자" as A
 actor "Health API" as S1
-actor "인프라 모니터" as S2
+actor "인프라" as S2
 actor "운영 로그" as S3
 rectangle "시스템 헬스 모니터링" {
   usecase "헬스 화면 진입" as U1
-  usecase "Kafka \nlag 확인" as U2
-  usecase "Consume\nr 상태 확인" as U3
+  usecase "Kafka lag 확인" as U2
+  usecase "Consumer 확인" as U3
   usecase "DB 상태 확인" as U4
   usecase "AI 서버 확인" as U5
   usecase "상세 로그 이동" as U6
@@ -62,6 +68,6 @@ U4 ..> U5 : <<include>>
 U5 ..> U6 : <<include>>
 U7 ..> U6 : <<extend>>
 note bottom of U7
-데이터 지연과 추론 중단 원인을 분리
+데이터 지연과 추론 중단 원인을 분리한다
 end note
 @enduml
