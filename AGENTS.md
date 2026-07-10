@@ -33,10 +33,10 @@ Raspberry Pi        Kafka  → Consumer → PostgreSQL            Google Colab  
                        └ WebSocket ─▶ React 대시보드
                        └ 카카오톡 알림
 
-릴레이/Kill-Switch(물리 차단)는 에지(Raspberry Pi)측에서 동작
+릴레이/Kill-Switch(물리 차단)와 스피커 음성 안내는 에지(Raspberry Pi)측에서 동작
 ```
 
-데이터 흐름: 에지(라즈베리파이)가 Raw 값만 **AWS EC2의 Kafka 브로커에 TLS로 직접 발행** → EC2의 Consumer가 TimescaleDB 적재 → **Google Colab의 AI(LSTM-AutoEncoder + Informer)가 Kafka에서 raw-metrics를 구독·추론 후 두 모델의 점수를 Score Fusion으로 결합해 anomaly-alerts 토픽 발행** → EC2 백엔드가 WebSocket으로 프론트엔드에 푸시
+데이터 흐름: 에지(라즈베리파이)가 Raw 값만 **AWS EC2의 Kafka 브로커에 TLS로 직접 발행** → EC2의 Consumer가 TimescaleDB 적재 → **Google Colab의 AI(LSTM-AutoEncoder + Informer)가 Kafka에서 raw-metrics를 구독·추론 후 두 모델의 점수를 Score Fusion으로 결합해 anomaly-alerts 토픽 발행** → EC2 백엔드가 WebSocket으로 프론트엔드에 푸시. 에지는 보조배터리 연결, 측정 시작/종료, 이상·오류·릴레이 이벤트를 사전 생성된 로컬 음성파일로 안내한다.
 
 ## 레포 구조 (예정)
 
@@ -77,7 +77,7 @@ Raspberry Pi        Kafka  → Consumer → PostgreSQL            Google Colab  
 | 프론트엔드 | React (반응형 웹: 데스크톱/태블릿/모바일) |
 | 알림 | Kakao Talk API |
 | 센서 | INA226(V·I·W), BQ27441(SOC), DS18B20(접촉 온도), MLX90614(IR 온도), ADS1115 경유 가스(MQ-2)·압력(FSR-402)·음향 |
-| 하드웨어 | 릴레이 모듈 (GPIO 제어), 전자부하 테스터(U6214), 충전모듈(TP4056), PD 트리거(ZY12PDN) |
+| 하드웨어 | 릴레이 모듈 (GPIO 제어), 스피커 모듈(로컬 음성 안내), 전자부하 테스터(U6214), 충전모듈(TP4056), PD 트리거(ZY12PDN) |
 
 ## 웹 디자인 원칙
 
@@ -99,7 +99,7 @@ Raspberry Pi        Kafka  → Consumer → PostgreSQL            Google Colab  
 |---|---|---|
 | `battery-raw-metrics` | 에지 (Raspberry Pi) | 센서 Raw 데이터 (100ms 주기) |
 | `battery-anomaly-alerts` | AI 추론 서버 (Google Colab) | 최종 이상점수(Score Fusion) 및 AE/Informer 개별 점수, 파생 온도(칼만 필터, 내부 셀 추정) |
-| `battery-events` | 에지/백엔드 | 센서 오류, 인터락 발생, 릴레이 제어 이벤트 |
+| `battery-events` | 에지/백엔드 | 센서 오류, 인터락 발생, 릴레이 제어 이벤트, 음성 안내 대상 이벤트 |
 
 > Kafka 브로커는 AWS EC2에서 운영하며, 모든 클라이언트(에지·Colab·백엔드)는 TLS/SASL로 접속한다.
 
@@ -172,6 +172,12 @@ Raspberry Pi        Kafka  → Consumer → PostgreSQL            Google Colab  
 | 3 — 보조배터리 | USB 보조배터리 | 동일 |
 
 모드 변경 시 릴레이 채널 매핑이 바뀌며, 인터락 로직이 이전 모드의 릴레이를 반드시 먼저 차단한다.
+
+## 디바이스 스피커 음성 안내
+
+라즈베리파이에 스피커를 추가해 현장 음성 안내를 제공한다. 음성은 실시간 합성 TTS가 아니라 사전 생성된 한국어 MP3/WAV 파일을 에지에서 로컬 재생한다. 안내 대상은 보조배터리 물리 연결 감지, 웹 측정 세션 시작/종료, 이상 상태, Fail-Safe 차단, 릴레이 상태, 센서·디바이스 오류, 네트워크·서버 상태 이벤트다. 웹 설정은 전체 공통 정책으로 음성 안내 ON/OFF, 음량, 카테고리별 토글(연결/측정, 이상상태, Fail-Safe/릴레이, 센서/디바이스 오류, 네트워크/서버 상태)을 제공한다.
+
+> 음성 안내는 운영 보조 기능이며, 릴레이/Kill-Switch 판단에는 영향을 주지 않는다.
 
 ## 배터리 자산(Battery Asset)과 이력 추적
 

@@ -51,7 +51,8 @@ ADS1115         TLS/SASL  battery-anomaly-alerts  테이블)           이중 �
    │                     백엔드(REST/WebSocket)  ◀── alerts 발행 ── Score Fusion)
    │                       │                         ▲ raw-metrics 구독 (TLS)
    ↓ 릴레이/Kill-Switch     └ WebSocket ─▶ React / 카카오톡 알림
-   (에지측 물리 차단)
+   + 스피커 음성 안내
+   (에지측 물리 차단·현장 안내)
 ```
 
 > 에지→AWS Kafka는 TLS/SASL 직접 연결이며, AI 추론은 Google Colab의 LSTM-AutoEncoder + Informer 이중 모델이 Kafka에서 `battery-raw-metrics`를 구독해 추론(AE Score + Informer Score → Score Fusion)한 뒤 `battery-anomaly-alerts`를 다시 발행한다. Kafka·PostgreSQL·백엔드는 모두 AWS EC2에서 호스팅된다.
@@ -69,7 +70,7 @@ ADS1115         TLS/SASL  battery-anomaly-alerts  테이블)           이중 �
 | 백엔드 | Spring Boot 또는 Python Flask | REST API |
 | 프론트엔드 | React | 반응형 웹 대시보드(데스크톱/태블릿/모바일) |
 | 알림 | Kakao Talk API | SNS 알림 |
-| 하드웨어 | 릴레이 모듈 | Kill-Switch 물리 차단 |
+| 하드웨어 | 릴레이 모듈, 스피커 | Kill-Switch 물리 차단, 에지 로컬 음성 안내 |
 
 ### Kafka 토픽 설계
 
@@ -77,7 +78,7 @@ ADS1115         TLS/SASL  battery-anomaly-alerts  테이블)           이중 �
 |---|---|
 | `battery-raw-metrics` | 에지 센서 Raw 데이터 |
 | `battery-anomaly-alerts` | AI 추론 결과 (최종 이상점수·AE/Informer 개별 점수, 파생 온도) |
-| `battery-events` | 센서 오류/인터락/릴레이 제어 이벤트 |
+| `battery-events` | 센서 오류/인터락/릴레이 제어/음성 안내 대상 이벤트 |
 
 ### 측정 모드
 
@@ -112,7 +113,7 @@ ADS1115         TLS/SASL  battery-anomaly-alerts  테이블)           이중 �
 - **압력·음향(모드 1·2)**: 셀/내장 배터리의 물리적 부풀음·내부 균열을 직접 측정해 임계 초과 시 즉시 차단. 보조배터리(모드 3)는 외장 케이스에 가려 부착이 어려워 제외.
 - **아날로그→I2C**: MQ 계열·FSR-402는 아날로그 출력이라 ADS1115(16비트 ADC)를 거쳐 수집한다.
 
-**보조·실험 장비(BOM)**: 4채널 5V 릴레이 모듈(SZH-RLBG-012), 전자부하 테스터(U6214), 충전모듈(TP4056), PD USB-C 트리거(ZY12PDN), 실리콘 전력선(18~20AWG), 점퍼·악어클립, 캡톤 테이프·서멀 패드(접촉 온도 센서 고정·열전도), 납땜 도구 일체, 외장 케이스, C타입 어댑터(5V 3A+).
+**보조·실험 장비(BOM)**: 4채널 5V 릴레이 모듈(SZH-RLBG-012), 스피커 모듈(라즈베리파이 로컬 음성 안내), 전자부하 테스터(U6214), 충전모듈(TP4056), PD USB-C 트리거(ZY12PDN), 실리콘 전력선(18~20AWG), 점퍼·악어클립, 캡톤 테이프·서멀 패드(접촉 온도 센서 고정·열전도), 납땜 도구 일체, 외장 케이스, C타입 어댑터(5V 3A+).
 
 ### 배터리 자산(Battery Asset)과 이력 추적
 
@@ -166,11 +167,11 @@ ADS1115         TLS/SASL  battery-anomaly-alerts  테이블)           이중 �
 | R-YZNPSL | 배터리 데이터 수집 및 디바이스 연동 | **High** | 3 |
 | R-EOCOME | 스트리밍 파이프라인 및 데이터베이스 적재 | **High** | 3 |
 | R-PKCMPP | 시계열 AI 이상징후 탐지 및 위험도 산출 | **High** | 3 |
-| R-GTAZLF | 웹 대시보드 관제 및 알림/차단 | **High** | 4 |
+| R-GTAZLF | 웹 대시보드 관제 및 알림/차단 | **High** | 5 |
 
 ---
 
-## 4. 기능 목록 (16개)
+## 4. 기능 목록 (17개)
 
 ### 인증 (R-HBLCDS)
 - **F-SDSVND** — 일반 회원가입/로그인
@@ -197,6 +198,7 @@ ADS1115         TLS/SASL  battery-anomaly-alerts  테이블)           이중 �
 - **F-XEVQAR** — 추세 차트 및 이력 조회
 - **F-LZWTMZ** — SNS 알림(카카오톡 등)
 - **F-BLCZSQ** — 릴레이/Kill-Switch 제어
+- **F-VOICEA** — 디바이스 스피커 음성 안내 및 웹 설정
 
 ### 웹 대시보드 확장 결정 (2026-06-30)
 
@@ -221,6 +223,7 @@ ADS1115         TLS/SASL  battery-anomaly-alerts  테이블)           이중 �
 - **웹서버 기준값 변경 기능 제거(2026-07-07)**: 웹서버/대시보드 범위에서 사용자가 직접 기준값을 변경하는 화면, UI, API 산출물 항목을 제외했다. 남는 `임계값 초과` 표현은 이벤트/Fail-Safe 상태 설명으로만 사용하며, 설정 기능으로 추적하지 않는다.
 - **GitHub 공유 레포 정리(2026-07-10)**: 원격 저장소를 `https://github.com/ricky30825-creator/BMS`로 정리하고, 발표자료·설계 산출물 원본·클로드 보고·백업·샘플 PDF/DOCX/PPTX를 레포 추적 대상에서 제외했다. 이후 공유 기준 문서는 `PLAN.md`와 `docs/*.md`, 화면 참고 산출물은 `web/*.html`과 `assets/*.svg`를 우선한다.
 - **AI 알고리즘 이중 모델 업데이트(2026-07-09)**: AI 아키텍처를 단일 LSTM-AutoEncoder에서 **LSTM-AutoEncoder(현재 상태 진단) + Informer(미래 상태 예측) 이중 모델**로 갱신했다. 두 모델은 정규화·Sliding Window로 생성한 동일 Sequence를 공유 입력으로 받고, AE Score(재구성 오차)와 Informer Score(예측 오차)를 Score Fusion(`Final Score = α × AE Score + β × Informer Score`)으로 결합해 최종 이상점수를 산출한다. 상태 등급 4단계(정상/주의/경고/위험, 0.0–1.0 구간)는 이 최종 이상점수 기준으로 유지하며, 아키텍처는 3개 측정 모드(내장 배터리/외부 셀/보조배터리) 공통 적용이다. 입력 특징 목록(V_scaled 등 파생 특징)은 기존과 동일하다. Score Fusion 가중치 α·β는 고정값이 아니라 테스트를 통해 튜닝하며 찾아간다. `CLAUDE.md`, `AGENTS.md`, `PLAN.md`를 함께 갱신했다.
+- **디바이스 스피커 음성 안내 추가(2026-07-10)**: 라즈베리파이에 스피커를 추가해 현장 음성 안내를 제공한다. 음성은 실시간 합성 TTS가 아니라 사전 생성된 한국어 MP3/WAV 파일을 에지에서 로컬 재생하는 방식으로 둔다. 안내 대상은 보조배터리 물리 연결 감지, 웹 측정 세션 시작/종료, 이상 상태, Fail-Safe 차단, 릴레이 상태, 센서·디바이스 오류, 네트워크·서버 상태 이벤트다. 웹 설정에는 전체 공통 정책으로 음성 안내 ON/OFF, 음량, 카테고리별 토글(연결/측정, 이상상태, Fail-Safe/릴레이, 센서/디바이스 오류, 네트워크/서버 상태)을 제공한다. 음성 안내는 운영 보조 기능이며 릴레이/Kill-Switch 판단에는 영향을 주지 않는다.
 
 > 위 확장은 R-GTAZLF(웹 대시보드 관제) 범위의 설계 상세화이며, Manyfast 등록 요구사항/기능/스펙 카운트(아래 10절)는 기존 체계를 유지한다.
 
@@ -288,7 +291,7 @@ ADS1115         TLS/SASL  battery-anomaly-alerts  테이블)           이중 �
 
 ---
 
-## 5. 주요 스펙 상세 (32개)
+## 5. 주요 스펙 상세 (33개)
 
 ### 인증 (5개)
 | ID | 스펙 |
@@ -350,13 +353,19 @@ ADS1115         TLS/SASL  battery-anomaly-alerts  테이블)           이중 �
 | S-AEMMPM | 라이브 차트 (전압/온도 등) — 화면 폭에 따라 차트 높이·범례·필터 재배치 |
 | S-XEVPOF | 이상 이벤트 목록/상세 — 데스크톱 테이블, 모바일 카드 목록/상세 전환 |
 
-### 알림 & 차단 (4개)
+### 알림 & 차단 (5개)
 | ID | 스펙 |
 |---|---|
 | S-EOCLMX | 카카오톡 알림 메시지 템플릿 |
 | S-UZDNPT | 알림 발송 조건/레이트리밋 |
 | S-ELAUQJ | 릴레이 제어 API |
 | S-VMNNAM | 긴급 차단 자동화 (Fail-Safe) |
+| S-VOCALR | 디바이스 스피커 음성 안내 — 사전 생성된 로컬 음성파일 재생, 전체 공통 ON/OFF·음량·카테고리 토글 설정, 동일 이벤트 반복 안내 쿨다운 |
+
+**디바이스 음성 안내 설정 모델/API**
+- `voice_alert_settings`: `enabled`, `volume`, `connection_enabled`, `anomaly_enabled`, `failsafe_relay_enabled`, `device_error_enabled`, `network_enabled`, `updated_at`
+- API: `GET /settings/voice-alert`, `PATCH /settings/voice-alert`
+- 에지는 설정을 주기 조회하거나 설정 변경 이벤트를 반영하고, 네트워크 장애 시 마지막으로 확보한 설정과 로컬 음성파일로 최소 동작한다.
 
 ---
 
@@ -366,7 +375,7 @@ ADS1115         TLS/SASL  battery-anomaly-alerts  테이블)           이중 �
 
 - 일반 사용자 상세: `docs/userflow.md`
 - 관리자 상세: `docs/admin_userflow.md`
-- 일반 사용자 기능정의서: `docs/feature_definition.md` — HTML 프로토타입 기준 72개
+- 일반 사용자 기능정의서: `docs/feature_definition.md` — HTML 프로토타입 기준 72개 + 디바이스 음성 안내 설정 1개
 - 관리자 기능정의서: `docs/admin_feature_definition.md` — HTML 프로토타입 기준 36개
 
 ### 일반 사용자 플로우 섹션 (8개)
@@ -391,6 +400,7 @@ ADS1115         TLS/SASL  battery-anomaly-alerts  테이블)           이중 �
 [측정 세션]
 배터리 연결 확인
 └── 연결하고 측정 → 세션 시작 → 실시간 대시보드
+    └── 에지 스피커에서 측정 시작 음성 안내
 
 [실시간 관제]
 실시간 대시보드 → 요약 카드/게이지 확인
@@ -407,6 +417,7 @@ ADS1115         TLS/SASL  battery-anomaly-alerts  테이블)           이중 �
 [알림/대응]
 알림 센터
 ├── 인앱/카카오 알림 발송
+├── 에지 스피커 음성 안내(설정된 카테고리 기준)
 ├── 알림 조건/중복 제한 적용
 ├── 알림 확인(Ack)·대응상태 기록
 ├── 긴급 대응 SOP 런북
@@ -421,6 +432,7 @@ ADS1115         TLS/SASL  battery-anomaly-alerts  테이블)           이중 �
 [설정]
 설정 화면
 ├── 알림 수신 설정
+├── 디바이스 음성 안내 설정(전체 ON/OFF, 음량, 카테고리별 토글)
 ├── 계정 정보 수정
 ├── 다크모드/테마 전환
 └── 캘리브레이션 이력 조회
@@ -552,6 +564,7 @@ ADS1115         TLS/SASL  battery-anomaly-alerts  테이블)           이중 �
 - [ ] Raspberry Pi 센서 드라이버 구현 (S-DPVOCW — I2C/1-Wire/ADS1115 아날로그 추상화, 가스·압력·음향 포함)
 - [ ] 100ms 폴링 스케줄러 구현 (S-YUNAFH)
 - [ ] 모드별 릴레이 채널 매핑 및 인터락 로직 (S-QPLAYR, S-LWVJRY)
+- [ ] 스피커 로컬 음성파일 재생 모듈 및 이벤트-멘트 매핑 구현 (S-VOCALR)
 - [ ] 센서 JSON 스키마 정의 및 Kafka 프로듀서 발행 (S-IBQMVJ, S-TNASAB)
 
 ### Phase 3 — 스트리밍 파이프라인
@@ -585,6 +598,7 @@ ADS1115         TLS/SASL  battery-anomaly-alerts  테이블)           이중 �
 - [ ] 카카오톡 알림 연동 (S-EOCLMX, S-UZDNPT)
 - [ ] 릴레이/Kill-Switch 제어 API (S-ELAUQJ)
 - [ ] 긴급 차단 자동화 Fail-Safe (S-VMNNAM)
+- [ ] 디바이스 음성 안내 웹 설정 및 백엔드 API (S-VOCALR)
 - [ ] 알림 설정 및 이력 페이지
 
 ### Phase 7 — 통합 테스트 & 배포
@@ -623,8 +637,8 @@ ADS1115         TLS/SASL  battery-anomaly-alerts  테이블)           이중 �
 | 항목 | 수치 |
 |---|---|
 | 총 요구사항 | 5개 |
-| 총 기능 | 16개 |
-| 총 스펙 | 32개 |
+| 총 기능 | 17개 |
+| 총 스펙 | 33개 |
 | 와이어프레임 페이지 | 19개 |
 | 완료된 항목 | 0개 (0%) |
 | 중요도 High 요구사항 | 4개 |
