@@ -11,7 +11,7 @@ This file provides guidance to Codex (Codex.ai/code) when working with code in t
 - 이 프로젝트의 공유 원격 저장소는 `https://github.com/ricky30825-creator/BMS`다.
 - 이 프로젝트는 Claude를 메인 작업자로, Codex를 보조 작업자로 사용한다.
 - Codex는 Claude가 만든 현재 폴더 구조와 문서 체계를 우선 유지한다. 구조 변경, 파일 이동, 대규모 리팩터링은 사용자가 명시적으로 요청한 경우에만 수행한다.
-- Codex가 코드, 설정, 산출물, 요구사항을 변경하면 관련 문서를 함께 업데이트한다. 기본 추적 문서는 `PLAN.md`이며, Codex 작업 방식 자체는 `AGENTS.md`에 기록한다.
+- Codex가 코드, 설정, 요구사항을 변경하면 관련 문서를 함께 업데이트한다. `PLAN.md`는 `AGENTS.md`에 적기 어려운 전반적인 프로젝트 방향성·요구사항·계획을 담는 문서이며, 발표자료/PPT 등 산출물 편집 로그는 기록하지 않는다. Codex 작업 방식 자체는 `AGENTS.md`에 기록한다.
 - 기존 구현 방식과 문서 표현을 먼저 확인한 뒤 그 스타일에 맞춰 최소 범위로 수정한다.
 - Claude 전용 지침은 `CLAUDE.md`, Codex 전용 지침은 `AGENTS.md`에 분리해 관리한다. 공통 프로젝트 계획과 변경 이력은 `PLAN.md`에 반영한다.
 - 와이어프레임 HTML을 기준으로 기능정의서나 화면 흐름을 정리할 때는 HTML에 명확히 표시된 화면·버튼·입력·탭·필터·모달·카드·상태값을 우선한다. `PLAN.md`와 충돌하면 사용자가 제공한 HTML을 기준으로 `PLAN.md`, `docs/userflow.md`, `docs/admin_userflow.md`, `docs/feature_definition.md`, `docs/admin_feature_definition.md`를 맞춘다. HTML만으로 동작이 불명확한 항목은 `정의 필요`로 표시한다.
