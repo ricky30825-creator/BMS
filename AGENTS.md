@@ -47,8 +47,8 @@ Raspberry Pi        Kafka  → Consumer → PostgreSQL            Google Colab  
 │   ├── sensors/    # INA226, BQ27441, DS18B20, MLX90614, ADS1115(가스·압력·음향) 드라이버
 │   ├── modes/      # 측정 모드 선택 및 릴레이 인터락
 │   └── producer/   # Kafka 프로듀서
-├── backend/        # REST API 서버 (Spring Boot 또는 Flask)
-│   ├── auth/       # 인증
+├── backend/        # REST API 서버 (Node.js + TypeScript + Express)
+│   ├── auth/       # Better Auth 세션 인증/RBAC
 │   ├── devices/    # 디바이스 관리
 │   ├── consumer/   # Kafka Consumer → TimescaleDB 적재
 │   ├── relay/      # 릴레이/Kill-Switch 제어 API
@@ -73,7 +73,7 @@ Raspberry Pi        Kafka  → Consumer → PostgreSQL            Google Colab  
 | 클라우드/인프라 | AWS EC2 (Kafka·PostgreSQL·백엔드 호스팅), TLS/SASL |
 | 스트리밍 | Apache Kafka |
 | DB | PostgreSQL + TimescaleDB (시계열 하이퍼테이블) |
-| 백엔드 | Spring Boot 또는 Python Flask |
+| 백엔드 | Node.js + TypeScript + Express + Better Auth |
 | AI | PyTorch 또는 TensorFlow (LSTM-AutoEncoder + Informer 이중 모델, Score Fusion) — Google Colab에서 학습·추론 |
 | 프론트엔드 | React (반응형 웹: 데스크톱/태블릿/모바일) |
 | 알림 | Kakao Talk API |
@@ -91,6 +91,7 @@ Raspberry Pi        Kafka  → Consumer → PostgreSQL            Google Colab  
 ## 관리자 기능
 
 - 일반 사용자와 별도로 관리자 역할(RBAC)을 둔다.
+- 인증은 Better Auth 세션 쿠키와 서버 세션 검증을 기준으로 구현하며, `/api/auth/*`는 Better Auth 핸들러가 담당한다.
 - 제공 기능: 사용자/계정 조회, 계정 활성/정지, 비밀번호 재설정, 전체 배터리·디바이스 **통합 관제**, 배터리 운영 상태·관리자 메모, 공지사항 관리, **감사 로그**(제어·접근 이력), **시스템 상태 모니터링**(Kafka·Consumer·DB·AI 헬스).
 - 상세 요구사항·기능 목록은 `PLAN.md`, `docs/feature_definition.md`, `docs/admin_feature_definition.md`, `docs/userflow.md`, `docs/admin_userflow.md`를 기준으로 하되, 사용자가 제공한 최신 HTML 와이어프레임과 충돌하면 HTML을 우선한다.
 

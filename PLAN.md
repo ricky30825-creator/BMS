@@ -67,7 +67,7 @@ ADS1115         TLS/SASL  battery-anomaly-alerts  테이블)           이중 �
 | 스트리밍 | Apache Kafka | 토픽 3개 (raw/alerts/events) — AWS EC2에서 운영, 에지는 TLS 직접 연결 |
 | DB | PostgreSQL + TimescaleDB | 시계열 하이퍼테이블 |
 | AI | LSTM-AutoEncoder + Informer (이중 모델) | AE 재구성 오차 + Informer 예측 오차를 Score Fusion(가중합)으로 결합한 최종 이상점수 — Google Colab에서 학습·실시간 추론 |
-| 백엔드 | Spring Boot 또는 Python Flask | REST API |
+| 백엔드 | Node.js + TypeScript + Express + Better Auth | REST API, WebSocket, 세션 기반 인증/RBAC |
 | 프론트엔드 | React | 반응형 웹 대시보드(데스크톱/태블릿/모바일) |
 | 알림 | Kakao Talk API | SNS 알림 |
 | 하드웨어 | 릴레이 모듈, 스피커 | Kill-Switch 물리 차단, 에지 로컬 음성 안내 |
@@ -177,6 +177,8 @@ ADS1115         TLS/SASL  battery-anomaly-alerts  테이블)           이중 �
 - **F-SDSVND** — 일반 회원가입/로그인
 - **F-TFJKKF** — 소셜 로그인(SSO)
 - **F-HUYIXC** — 계정 찾기 및 비밀번호 재설정
+
+> 인증은 Better Auth를 백엔드 `/api/auth/*`에 마운트해 구현한다. 로그인 유지는 JWT 직접 발급이 아니라 Better Auth 세션 쿠키와 서버 세션 검증을 기준으로 하며, 일반 사용자와 관리자는 `USER`/`ADMIN` RBAC로 분리한다.
 
 ### 배터리 데이터 수집 (R-YZNPSL)
 - **F-IZUROQ** — 센서 데이터 수집(I2C/1-Wire/아날로그) — INA226, BQ27441, DS18B20, MLX90614, ADS1115 경유 가스(MQ-2)·압력(FSR-402)·음향
@@ -293,7 +295,7 @@ ADS1115         TLS/SASL  battery-anomaly-alerts  테이블)           이중 �
 | ID | 스펙 |
 |---|---|
 | S-IQOGHO | 회원가입 입력 검증 |
-| S-ABZLNC | 세션/토큰 기반 로그인 유지 |
+| S-ABZLNC | Better Auth 세션 쿠키 기반 로그인 유지 |
 | S-VCGWIK | OAuth 리다이렉트 및 콜백 처리 |
 | S-OKBMSS | 아이디 찾기 |
 | S-TAGOLP | 비밀번호 재설정 이메일 발송 |
@@ -383,7 +385,7 @@ ADS1115         TLS/SASL  battery-anomaly-alerts  테이블)           이중 �
 ├── 소셜 로그인(OAuth)
 ├── 회원가입
 ├── 계정 찾기 → 아이디 찾기 / 비밀번호 재설정
-└── 토큰 발급/갱신 → 로그아웃/세션 만료
+└── Better Auth 세션 생성/검증 → 로그아웃/세션 만료
 
 [디바이스/배터리]
 디바이스 관리 페이지 → 디바이스 등록/선택
@@ -553,8 +555,8 @@ ADS1115         TLS/SASL  battery-anomaly-alerts  테이블)           이중 �
 - [ ] Kafka 브로커 TLS/SASL 보안 연결 구성 (에지·Colab·백엔드 인증)
 - [ ] PostgreSQL + TimescaleDB 설치 및 시계열 스키마 설계 (S-NFEETD)
 - [ ] Apache Kafka 클러스터 구성 (AWS EC2 상) 및 토픽 3개 생성 (S-BYYPVQ)
-- [ ] 백엔드 프로젝트 초기화 (Spring Boot 또는 Flask)
-- [ ] 사용자 인증 API 구현 (R-HBLCDS — F-SDSVND, F-TFJKKF, F-HUYIXC)
+- [x] 백엔드 프로젝트 초기화 (Node.js + TypeScript + Express)
+- [x] Better Auth 기반 사용자 인증 골격 구현 (R-HBLCDS — F-SDSVND, F-TFJKKF, F-HUYIXC)
 
 ### Phase 2 — 에지 데이터 수집
 - [ ] Raspberry Pi 센서 드라이버 구현 (S-DPVOCW — I2C/1-Wire/ADS1115 아날로그 추상화, 가스·압력·음향 포함)
