@@ -16,6 +16,7 @@ This file provides guidance to Codex (Codex.ai/code) when working with code in t
 - Claude 전용 지침은 `CLAUDE.md`, Codex 전용 지침은 `AGENTS.md`에 분리해 관리한다. 공통 프로젝트 계획과 변경 이력은 `PLAN.md`에 반영한다.
 - 와이어프레임 HTML을 기준으로 기능정의서나 화면 흐름을 정리할 때는 HTML에 명확히 표시된 화면·버튼·입력·탭·필터·모달·카드·상태값을 우선한다. `PLAN.md`와 충돌하면 사용자가 제공한 HTML을 기준으로 `PLAN.md`, `docs/userflow.md`, `docs/admin_userflow.md`, `docs/feature_definition.md`, `docs/admin_feature_definition.md`를 맞춘다. HTML만으로 동작이 불명확한 항목은 `정의 필요`로 표시한다.
 - GitHub 공유 레포에는 팀원이 개발·검토에 직접 쓰는 코드, 설정, Markdown 문서, 웹/다이어그램 자산만 남긴다. 발표자료, 설계 산출물 원본, 클로드 보고, 백업 파일, 샘플 PDF/DOCX/PPTX는 로컬 보관 대상으로 보고 레포에 추적하지 않는다.
+- 백업본은 항상 아카이브로 이동한다. 특정 산출물 폴더에 `아카이브/`가 있으면 그 안에 두고, 없으면 루트 `archive/`를 사용한다. 백업 파일을 루트나 현재 작업 폴더에 흩어 두지 않는다.
 - Codex는 작업이 끝나면 변경분을 항상 로컬 git 커밋으로 남긴다. 원격 push는 사용자가 명시적으로 요청한 경우에만 수행한다.
 
 ## 아키텍처
