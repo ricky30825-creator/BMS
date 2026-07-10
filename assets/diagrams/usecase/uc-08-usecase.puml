@@ -1,0 +1,64 @@
+@startuml
+!pragma layout smetana
+skinparam backgroundColor #FEFCF8
+skinparam shadowing false
+skinparam dpi 180
+skinparam defaultFontName "AppleGothic"
+skinparam roundcorner 18
+skinparam usecase {
+  BackgroundColor #F8FAFC
+  BorderColor #8EA7C2
+  ArrowColor #6B7F99
+  FontColor #263238
+}
+skinparam actor {
+  BackgroundColor #FDEBD3
+  BorderColor #C58A50
+  FontColor #263238
+}
+skinparam rectangle {
+  BackgroundColor #F4F8FF
+  BorderColor #9BB6D6
+  FontColor #263238
+}
+skinparam note {
+  BackgroundColor #FFF7D6
+  BorderColor #D9C36A
+  FontColor #444444
+}
+top to bottom direction
+skinparam usecase {
+  BackgroundColor #FFE8D6
+  BorderColor #D79A6A
+}
+title UC-08\n디바이스 등록 및 연결 상태 관리
+actor "사용자/관리자" as A
+actor "Device API" as S1
+actor "WebSocket" as S2
+actor "Consumer" as S3
+rectangle "디바이스 등록 및 연결 상태 관리" {
+  usecase "device\n_id 등록" as U1
+  usecase "중복 검증" as U2
+  usecase "heartb\neat 수신" as U3
+  usecase "ONLINE/O\nFFLINE 표시" as U4
+  usecase "측정 가능 판단" as U5
+  usecase "오프라인 경고" as U6
+}
+U1 -[hidden]down- U2
+U2 -[hidden]down- U3
+U3 -[hidden]down- U4
+U4 -[hidden]down- U5
+U5 -[hidden]down- U6
+A -right-> U1
+S1 -left-> U2
+S2 -left-> U4
+S3 -left-> U6
+U1 ..> U2 : <<include>>
+U2 ..> U3 : <<include>>
+U4 ..> U3 : <<extend>>
+U4 ..> U5 : <<include>>
+U5 ..> U6 : <<include>>
+note bottom of U6
+측정 전 진단기 상태를 먼저 확인
+end note
+@enduml

@@ -1,0 +1,64 @@
+@startuml
+!pragma layout smetana
+skinparam backgroundColor #FEFCF8
+skinparam shadowing false
+skinparam dpi 180
+skinparam defaultFontName "AppleGothic"
+skinparam roundcorner 18
+skinparam usecase {
+  BackgroundColor #F8FAFC
+  BorderColor #8EA7C2
+  ArrowColor #6B7F99
+  FontColor #263238
+}
+skinparam actor {
+  BackgroundColor #FDEBD3
+  BorderColor #C58A50
+  FontColor #263238
+}
+skinparam rectangle {
+  BackgroundColor #F4F8FF
+  BorderColor #9BB6D6
+  FontColor #263238
+}
+skinparam note {
+  BackgroundColor #FFF7D6
+  BorderColor #D9C36A
+  FontColor #444444
+}
+top to bottom direction
+skinparam usecase {
+  BackgroundColor #E6F2F2
+  BorderColor #7FAAAA
+}
+title UC-11\n알림 임계치 및 수신 설정
+actor "일반 사용자" as A
+actor "Notification API" as S1
+actor "Kakao API" as S2
+actor "설정 저장소" as S3
+rectangle "알림 임계치 및 수신 설정" {
+  usecase "채널 선택" as U1
+  usecase "위험도 조건 설정" as U2
+  usecase "수신처 검증" as U3
+  usecase "설정 저장" as U4
+  usecase "테스트 알림" as U5
+  usecase "실패 원인 표시" as U6
+}
+U1 -[hidden]down- U2
+U2 -[hidden]down- U3
+U3 -[hidden]down- U4
+U4 -[hidden]down- U5
+U5 -[hidden]down- U6
+A -right-> U1
+S1 -left-> U2
+S2 -left-> U4
+S3 -left-> U6
+U1 ..> U2 : <<include>>
+U2 ..> U3 : <<include>>
+U4 ..> U3 : <<extend>>
+U4 ..> U5 : <<include>>
+U5 ..> U6 : <<include>>
+note bottom of U6
+위험도별 채널을 분리해 운영
+end note
+@enduml
