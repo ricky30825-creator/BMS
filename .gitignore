@@ -1,12 +1,14 @@
 .DS_Store
 ~$*
 *.tmp
+.env
 .venv/
 .claude/
 __pycache__/
 *.pyc
 archive/
 node_modules/
+dist/
 scripts/
 
 # Local-only presentation/report artifacts. Keep shared project state in Markdown docs.
