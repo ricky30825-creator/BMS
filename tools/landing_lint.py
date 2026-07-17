@@ -36,13 +36,26 @@ def check(markup):
     issues = []
 
     for color in BANNED_COLORS:
-        n = len(re.findall(re.escape(color), region, re.IGNORECASE))
+        # 뒤에 16진수 자리가 더 이어지면(예: #6B7280CC 알파 헥스) 다른 색이므로
+        # 경계 없는 부분 문자열 매칭으로 오탐하지 않도록 lookahead로 막는다.
+        pattern = re.escape(color) + r"(?![0-9A-Fa-f])"
+        n = len(re.findall(pattern, region, re.IGNORECASE))
         if n:
             issues.append(f"차가운 Tailwind 색 {color} {n}회 — 웜 뉴트럴 var(--ink*) 토큰으로 교체")
 
-    for radius in set(re.findall(r"border-radius:\s*([0-9]+(?:px|%))", region)):
-        if radius not in ALLOWED_RADII:
-            issues.append(f"허용되지 않은 border-radius {radius} — 12px/20px/999px 만 사용")
+    # border-radius 선언은 "12px 12px 4px 4px" 같은 다중값 축약형일 수 있으므로
+    # 콜론 뒤 선언 전체(세미콜론/따옴표/중괄호 전까지)를 잡아 모든 토큰을 검사한다.
+    radius_violations = set()
+    for decl in re.findall(r"border-radius:\s*([^;\"'}]+)", region):
+        for token in decl.split():
+            if not re.fullmatch(r"[0-9]+(?:px|%)?", token):
+                continue
+            if token in ("0", "0px", "0%"):
+                continue  # 0은 반경 스케일 위반이 아니다
+            if token not in ALLOWED_RADII:
+                radius_violations.add(token)
+    for radius in sorted(radius_violations):
+        issues.append(f"허용되지 않은 border-radius {radius} — 12px/20px/999px 만 사용")
 
     if re.search(r"radial-gradient\(\s*circle\s*,\s*#EEF0F3", region, re.IGNORECASE):
         issues.append("배경 도트 패턴이 남아 있다 — 제거 대상")
