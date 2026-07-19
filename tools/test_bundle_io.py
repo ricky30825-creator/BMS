@@ -46,6 +46,21 @@ class TestBundleIO(unittest.TestCase):
             line = f.readlines()[TEMPLATE_LINE_INDEX]
         self.assertEqual(json.loads(line.strip()), MARKUP)
 
+    def test_pack_escapes_closing_tags_for_html_safety(self):
+        # 템플릿 JSON은 <script type="__bundler/template"> 안에 들어간다.
+        # 마크업 내 리터럴 </script>(또는 임의의 </태그>)가 이스케이프되지
+        # 않으면 HTML 파서가 바깥 스크립트를 조기 종료시켜 JSON이 잘리고
+        # 브라우저 런타임이 "Unterminated string" 오류를 낸다.
+        markup = '<a><script src="x"></script></a>'
+        pack(self.bundle, markup)
+        with open(self.bundle, encoding="utf-8") as f:
+            line = f.readlines()[TEMPLATE_LINE_INDEX]
+        # HTML 파서에 노출되는 raw 닫는 태그가 없어야 한다
+        self.assertNotIn("</script>", line)
+        self.assertNotIn("</a>", line)
+        # 그럼에도 유효한 JSON이며 원래 마크업으로 복원돼야 한다
+        self.assertEqual(unpack(self.bundle), markup)
+
     def test_backup_creates_copy(self):
         dest = backup(self.bundle)
         self.assertTrue(os.path.exists(dest))

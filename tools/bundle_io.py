@@ -34,7 +34,12 @@ def pack(bundle_path, markup):
     lines = _read_lines(bundle_path)
     if len(lines) <= TEMPLATE_LINE_INDEX:
         raise ValueError(f"번들에 {TEMPLATE_LINE_INDEX + 1}번째 줄이 없다")
-    lines[TEMPLATE_LINE_INDEX] = json.dumps(markup, ensure_ascii=False) + "\n"
+    # 템플릿 JSON은 <script type="__bundler/template"> 안에 놓인다. 마크업
+    # 내 리터럴 </...>가 그대로면 HTML 파서가 바깥 스크립트를 조기 종료시켜
+    # JSON이 잘린다(브라우저 런타임의 "Unterminated string"). JSON에서 \/는
+    # /와 동일하게 유효하므로 </ 를 <\/ 로 이스케이프해 파서 노출을 막는다.
+    encoded = json.dumps(markup, ensure_ascii=False).replace("</", "<\\/")
+    lines[TEMPLATE_LINE_INDEX] = encoded + "\n"
     tmp = bundle_path + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         f.writelines(lines)
