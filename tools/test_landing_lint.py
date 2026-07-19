@@ -81,6 +81,21 @@ class TestCheck(unittest.TestCase):
         issues = check(wrap(CLEAN))
         self.assertFalse(any("STATS" in i for i in issues))
 
+    def test_flags_fabricated_metric_labels(self):
+        # STATS 섹션을 제거한 근거(실제 운영 배포가 없는데 지어낸 수치)는
+        # 같은 문구를 쓰는 CTA 통계 행에도 적용된다. 이 지표 라벨이 다시
+        # 유입되면 잡아야 한다.
+        for label in ("관제 가동률", "모니터링 중 배터리", "오늘 안전 차단"):
+            body = f'<div>{label}</div>'
+            issues = check(wrap(body))
+            self.assertTrue(
+                any("지어낸" in i for i in issues), f"'{label}' 는 지어낸 지표로 잡혀야 한다"
+            )
+
+    def test_clean_landing_has_no_fabricated_metric_violation(self):
+        issues = check(wrap(CLEAN))
+        self.assertFalse(any("지어낸 지표" in i for i in issues))
+
     def test_app_shell_violations_are_ignored(self):
         # wrap()이 SIGNUP 마커 뒤(앱 화면 구간)에 실제로 위반을 심어둔다는
         # 것을 먼저 확인하고, 그럼에도 check()가 이를 보고하지 않아야

@@ -20,6 +20,16 @@ ALLOWED_RADII = {"12px", "20px", "999px"}
 # 이 검사는 새로 유입되는 이모지만 잡는다.
 EMOJI = re.compile("[\U0001F300-\U0001FAFF☀-➿]")
 
+# 실제 운영 배포가 없는데 지어낸 운영 지표 라벨. STATS 섹션 제거의 근거가
+# 같은 문구를 쓰는 다른 섹션(예: CTA 통계 행)에도 적용되므로 재유입을 막는다.
+FABRICATED_METRIC_LABELS = [
+    "관제 가동률",
+    "모니터링 중 배터리",
+    "오늘 안전 차단",
+    "평균 조기 경고 리드타임",
+    "무중단 운영",
+]
+
 
 def landing_region(markup):
     start = markup.find(LANDING_START_MARK)
@@ -65,6 +75,10 @@ def check(markup):
 
     if "TRUSTED IN THE FIELD" in region:
         issues.append("STATS 트러스트 섹션이 남아 있다 — 지어낸 수치이므로 제거 대상")
+
+    for label in FABRICATED_METRIC_LABELS:
+        if label in region:
+            issues.append(f"지어낸 지표 라벨 '{label}' 이 남아 있다 — 실제 운영 배포가 없으므로 제거 대상")
 
     return issues
 
