@@ -84,6 +84,21 @@ def check_region(region):
     return issues
 
 
+def glass_misuse(region):
+    """본문 구간에 글래스가 쓰였는지 검사한다.
+    절제적 글래스 원칙: 글래스는 크롬(사이드바·상단바·모달·카드 헤더)에만.
+    본문 화면 구간을 이 함수로 검사하고, 크롬/모달 구간에는 적용하지 않는다.
+    """
+    issues = []
+    n_bf = len(re.findall(r"backdrop-filter\s*:", region, re.IGNORECASE))
+    if n_bf:
+        issues.append(f"본문에 backdrop-filter {n_bf}회 — 글래스는 크롬(사이드바·상단바·모달)에만, 본문은 .cg-surface")
+    n_cg = len(re.findall(r'class="[^"]*\bcg-glass\b', region))
+    if n_cg:
+        issues.append(f"본문에 cg-glass 클래스 {n_cg}회 — 글래스는 크롬에만, 본문은 .cg-surface")
+    return issues
+
+
 def check(markup):
     """랜딩 구간을 검사한다(하위호환)."""
     return check_region(landing_region(markup))

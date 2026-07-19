@@ -134,5 +134,22 @@ class TestCheckRegion(unittest.TestCase):
         self.assertTrue(any("#6B7280" in i for i in check(doc)))
 
 
+class TestGlassMisuse(unittest.TestCase):
+    def test_flags_backdrop_filter_in_body(self):
+        from landing_lint import glass_misuse
+        issues = glass_misuse('<div style="backdrop-filter:blur(20px)">표</div>')
+        self.assertTrue(any("글래스" in i for i in issues))
+
+    def test_flags_cg_glass_class_in_body(self):
+        from landing_lint import glass_misuse
+        issues = glass_misuse('<div class="cg-surface cg-glass">표</div>')
+        self.assertTrue(any("글래스" in i for i in issues))
+
+    def test_opaque_surface_passes(self):
+        from landing_lint import glass_misuse
+        issues = glass_misuse('<div class="cg-surface" style="background:var(--surface)">표</div>')
+        self.assertEqual(issues, [])
+
+
 if __name__ == "__main__":
     unittest.main()
