@@ -8,6 +8,7 @@ import re
 
 LANDING_START_MARK = "<!-- ============ LANDING (v3) ============ -->"
 LANDING_END_MARK = "<!-- ============ SIGNUP ============ -->"
+SIGNUP_MARK = LANDING_END_MARK
 
 # 차가운 Tailwind 기본 팔레트. 웜 뉴트럴 토큰으로 대체해야 한다.
 BANNED_COLORS = [
@@ -41,8 +42,8 @@ def landing_region(markup):
     return markup[start:end]
 
 
-def check(markup):
-    region = landing_region(markup)
+def check_region(region):
+    """이미 잘라낸 마크업 조각의 토큰 규칙 위반을 반환한다."""
     issues = []
 
     for color in BANNED_COLORS:
@@ -81,6 +82,19 @@ def check(markup):
             issues.append(f"지어낸 지표 라벨 '{label}' 이 남아 있다 — 실제 운영 배포가 없으므로 제거 대상")
 
     return issues
+
+
+def check(markup):
+    """랜딩 구간을 검사한다(하위호환)."""
+    return check_region(landing_region(markup))
+
+
+def app_region(markup):
+    """SIGNUP 마커부터 문서 끝까지(앱 구간)를 반환한다."""
+    start = markup.find(SIGNUP_MARK)
+    if start == -1:
+        raise ValueError("SIGNUP 마커를 찾을 수 없다")
+    return markup[start:]
 
 
 if __name__ == "__main__":
