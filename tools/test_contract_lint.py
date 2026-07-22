@@ -71,6 +71,26 @@ class TestExemptSections(unittest.TestCase):
         )
         self.assertTrue(any("접기" in v for v in lint(text)))
 
+    def test_closed_prohibition_list_does_not_swallow_following_prose(self):
+        """'하지 말 것' 절이 '---'로 곧바로 닫히면, 그 뒤에 오는 일반
+        조항까지 예외로 삼켜서는 안 된다."""
+        text = (
+            "### 하지 말 것\n"
+            "- 접기를 쓰지 않는다\n"
+            "\n"
+            "---\n"
+            "\n"
+            "이 영역은 메뉴 접기 구조를 제공한다.\n"
+            "\n"
+            "### F1. 랜딩\n내용\n"
+        )
+        self.assertTrue(any("접기" in v for v in lint(text)))
+
+    def test_prohibition_list_itself_still_exempt(self):
+        """'하지 말 것' 목록 안의 금지 어휘는 여전히 검사에서 빠져야 한다."""
+        text = "### 하지 말 것\n- 메뉴 접기를 쓰지 않는다\n\n---\n\n### F1. 랜딩\n내용\n"
+        self.assertFalse(any("접기" in v for v in lint(text)))
+
     def test_unclosed_prohibition_list_does_not_swallow_until_distant_dashes(self):
         """'하지 말 것' 절이 즉시 '---'로 닫히지 않으면, 다음 헤딩부터는
         더 이상 예외가 아니어야 한다."""
