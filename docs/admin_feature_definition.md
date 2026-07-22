@@ -1,6 +1,6 @@
 # 셀가드 웹 프로토타입 기능정의서 — 관리자
 
-> 기준 HTML: `/Users/jungjeahwan/Downloads/셀가드 프로토타입 (standalone).html`
+> 기준 HTML: `설계 산출물/셀가드 프로토타입_v3.html` (2026-07-22 확인)
 > 분석 기준: 관리자 화면에 명확히 표시된 메뉴, 버튼, 입력, 필터, 카드, 행 클릭, 모달, 상태값, 차트 요소만 반영한다.
 > 일반 사용자 기능은 `docs/feature_definition.md`에서 별도로 관리한다.
 
