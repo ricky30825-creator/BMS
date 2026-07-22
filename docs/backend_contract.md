@@ -7,11 +7,14 @@
 | 항목 | 값 |
 |---|---|
 | 작성일 | 2026-07-22 |
-| 근거 기준 | `설계 산출물/셀가드 프로토타입_v3.html`, `docs/feature_definition.md`(REQ-WEB-001~072), `docs/admin_feature_definition.md`(REQ-WEB-101~136), `PLAN.md` |
+| 근거 기준 | `설계 산출물/셀가드 프로토타입_v3.html`, `docs/feature_definition.md`(REQ-WEB-001~073, 069 결번), `docs/admin_feature_definition.md`(REQ-WEB-101~136), `PLAN.md` |
 | 검증 방법 | v3 번들에서 앱 소스 복원(코드 실측) + **로컬 HTTP로 띄워 전 화면 육안 확인**(2026-07-22, 사용자 10화면 + 관리자 6화면) |
 | 대상 화면 | 19개 영역 (공개 3 · 일반 사용자 10 · 관리자 6) |
 
-> **기능정의서보다 v3 화면이 우선한다.** `docs/feature_definition.md`는 v1(2026-07-10) 기준이라 v3와 어긋나는 항목이 여럿 확인됐다. 이 문서는 어긋난 곳마다 실측 결과를 명시했다 — §11에 모아 두었다.
+> **관련 문서**: `docs/product_contract.md`(디자인 무관 제품 계약서)가 같은 v3를 근거로 **과업 플로우 T0~T15**를 기술한다. 이 문서는 그 플로우를 지탱하는 **API 인터페이스**를 정의한다. 둘이 충돌하면 화면·플로우는 `product_contract.md`, 요청/응답 스키마는 이 문서가 우선한다.
+
+> **기능정의서와의 관계**: `docs/feature_definition.md`는 2026-07-22 커밋 `9bb6d8e`로 v3 기준에 맞춰졌고, 이상점수 0.0–1.0 스케일·4등급 임계·게이지 범례 버그를 이미 명시하고 있다. 이 문서의 §1.6은 그 문서와 **일치**한다.
+> 다만 기능 항목의 **화면 위치** 일부는 아직 v3와 어긋난다(§11). 충돌 시 v3 화면이 우선한다.
 
 ## 0. 표기 규칙
 
@@ -67,9 +70,9 @@ Better Auth 세션 쿠키 기반. `[PLAN]`
 ```json
 {
   "error": {
-    "code": "BATTERY_ALREADY_CONNECTED",
-    "message": "다른 배터리가 이미 측정 중입니다.",
-    "details": { "connectedBatteryId": "b1f2...", "sessionId": "s9a8..." }
+    "code": "INTERLOCK_LOCKED",
+    "message": "Fail-Safe 인터락이 유지 중이라 복구할 수 없습니다.",
+    "details": { "condition": "TEMP_OVER_CAP", "batteryId": "b1f2...", "since": "2026-07-22T14:32:10.000Z" }
   }
 }
 ```
@@ -80,21 +83,23 @@ Better Auth 세션 쿠키 기반. `[PLAN]`
 
 **공통 에러 코드**
 
-| HTTP | code | 상황 |
+| HTTP | code | 발생 지점 |
 |---|---|---|
-| 400 | `VALIDATION_FAILED` | 입력 검증 실패. `details.fields[]`에 필드별 사유 |
-| 401 | `UNAUTHENTICATED` | 세션 없음/만료 → 프론트는 로그인 화면으로 |
-| 401 | `REAUTH_REQUIRED` | 위험 제어 재인증 실패 (§3.4) |
-| 403 | `FORBIDDEN` | 권한 부족 |
-| 403 | `ACCOUNT_SUSPENDED` | 정지된 계정 `[REQ-WEB-117]` |
-| 404 | `NOT_FOUND` | 없거나 소유자가 아님 |
-| 409 | `BATTERY_ALREADY_CONNECTED` | active 세션 중복 (§3.2) |
-| 409 | `NO_ACTIVE_SESSION` | 세션 없이 측정 대상 동작 요청 |
-| 409 | `INTERLOCK_LOCKED` | Fail-Safe 인터락이 사용자 조작을 거부 (§3.3) |
-| 409 | `DEVICE_OFFLINE` | 대상 진단기 오프라인 → 릴레이 제어 불가 |
-| 422 | `REASON_REQUIRED` | 사유 입력 필수인 동작에 사유 누락 |
-| 429 | `RATE_LIMITED` | `Retry-After` 헤더 동반 |
+| 400 | `VALIDATION_FAILED` | 모든 쓰기 엔드포인트. `details.fields[]`에 필드별 사유. 허용 목록 밖 필드가 온 경우 포함(§4.12 `PATCH /admin/users`) |
+| 401 | `UNAUTHENTICATED` | 인증이 필요한 모든 경로. 프론트는 로그인 화면으로 |
+| 401 | `REAUTH_REQUIRED` | `POST /api/relay/cut`·`/restore` — 비밀번호 재인증 실패 (§3.4) |
+| 403 | `FORBIDDEN` | `/api/admin/*`에 `USER` 접근. **감사 기록 대상**(§3.6 `ADMIN_ACCESS_DENIED`) |
+| 403 | `ACCOUNT_SUSPENDED` | Better Auth 로그인 시. 세션 유지 중 정지되면 다음 요청에서 이 코드 |
+| 404 | `NOT_FOUND` | 리소스 없음 **또는 타인 소유**(§1.3 — 존재 은폐) |
+| 409 | `NO_ACTIVE_SESSION` | §3.1 표의 4개 경로군 |
+| 409 | `INTERLOCK_LOCKED` | `POST /api/relay/restore` — Fail-Safe 인터락 유지 중 (§3.3) |
+| 409 | `DEVICE_OFFLINE` | `POST /api/sessions`, `POST /api/relay/*` — 대상 진단기 오프라인 |
+| 409 | `NOTICE_NOT_DELETABLE` | `DELETE /api/admin/notices/{id}` — `DRAFT`가 아닌 공지 삭제 시도 |
+| 422 | `REASON_REQUIRED` | `/relay/cut`·`/restore`, `/users/{id}/suspend`·`/restore`, `/batteries/{id}/ops-status`(BLOCKED 전환 시) |
+| 429 | `RATE_LIMITED` | 인증 계열(`/api/auth/*`, `/api/me/password`)과 내보내기(`/api/trends/export`). `Retry-After` 헤더 동반 |
 | 500 | `INTERNAL_ERROR` | 그 외 |
+
+> **`BATTERY_ALREADY_CONNECTED`는 정의하지 않는다.** §3.2에 따라 새 연결 요청은 기존 세션을 **자동으로 종료하고** 성공하므로, 이 충돌 상태 자체가 발생하지 않는다. (타 사용자가 같은 배터리를 측정 중인 상황은 소유권 검증에서 `404`로 걸린다.)
 
 ### 1.5 목록 조회 공통 규약 `[제안]`
 
@@ -106,7 +111,7 @@ Better Auth 세션 쿠키 기반. `[PLAN]`
 |---|---|---|---|
 | `page` | int | `1` | 1-base |
 | `size` | int | `20` | 최대 100 |
-| `sort` | string | 엔드포인트별 | `필드,방향` 예: `score,desc` |
+| `sort` | string | 엔드포인트별 | **정렬 키 이름은 엔드포인트별로 정의한다.** `필드,방향`(`score,desc`)이든 의미 키(`recent`)든 해당 절의 표기를 따른다 |
 | `q` | string | — | 검색어. 대상 필드는 엔드포인트별로 명시 |
 | `from` / `to` | ISO8601 | — | 기간 필터 (`from` 이상, `to` 미만) |
 
@@ -120,6 +125,9 @@ Better Auth 세션 쿠키 기반. `[PLAN]`
 ```
 
 > v3 이벤트 이력이 `전체 116건 중 1–5`를 표시한다 `[v3]`. `total`은 필터 적용 후 건수다.
+
+**봉투 예외** — 아래는 길이가 고정이거나 상위 객체에 종속된 목록이라 `page` 없이 `items`만 내려준다:
+`GET /api/relay/history`, `GET /api/calibrations`, 상세 응답 안에 포함되는 하위 배열(`activityLogs`, `opsLogs`, `batteries`, `scoreTrend30d`, `contributions`)
 
 ### 1.6 이상점수(anomaly score) 스케일 규약 — **중요**
 
@@ -163,11 +171,11 @@ v3에는 판정 로직이 **세 벌** 존재하고 서로 어긋난다.
 
 **브라우저 실측 증거 (2026-07-22)**
 
-- 배터리 관리 화면의 **PACK-003은 이상점수 33인데 배지가 `정상`** 이다. 4등급이면 `주의`여야 한다. 3등급 버그가 화면에 그대로 드러난 사례.
+- 배터리 관리 화면의 **PACK-003은 이상점수 33인데 배지가 `정상`** 이다. 4등급이면 `주의`여야 한다. (엄밀히는 이 배지 문자열이 mock 하드코딩이고 판정 로직 산출물이 아니지만, **목업 데이터조차 4등급과 어긋나 있다**는 점에서 같은 혼선의 산물이다.)
 - 반대로 관리자 배터리 운영 로그에는 **`이상점수 위험 구간 진입 — 82 (위험 임계 80)`** 이라고 적혀 있다. **v3 자신도 일부 화면에서는 80을 정답으로 쓰고 있다.**
 - 대시보드 게이지 범례 `정상 0–39 / 주의 40–69 / 위험 70+` 는 화면에 실재하며, 4등급으로 교체해야 한다.
 
-**등급 판정은 서버가 한다.** 사용자가 설정 화면에서 임계치를 조정할 수 있기 때문이다(§4.4 임계치 탭 `[v3]`). 임계치가 사용자별로 다르므로 프론트가 하드코딩하면 반드시 어긋난다.
+> 위 표의 `관리자 배터리 목록 (scCol)` 행은 **등급 라벨이 아니라 점수 글자 색상**을 정하는 로직이다. 그래도 70/40 경계를 쓰는 건 같다.
 
 ### 1.7 상태·등급 enum 일람
 
@@ -188,6 +196,9 @@ v3에는 판정 로직이 **세 벌** 존재하고 서로 어긋난다.
 | 알림 채널 | `KAKAO` `EMAIL` `SMS` `WEBPUSH` `INAPP` `[v3]` `[REQ-WEB-065]` |
 | 공지 카테고리 | `IMPORTANT`(중요) `MAINTENANCE`(점검) `FEATURE`(기능) `INFO`(안내) `[v3]` |
 | 공지 게시 상태 | `PUBLISHED` `DRAFT` `ARCHIVED` `[v3]` `[REQ-WEB-131/132]` |
+| 공지 노출 대상 | `ALL`(전체 사용자) `USER`(일반 사용자) `ADMIN`(관리자) `[v3]` |
+| **알림** 심각도 | `DANGER`(위험) `WARNING`(경고) `NORMAL`(정상) `CHECK`(점검) `[v3: danger/warn/ok/idle]` |
+| 지표 상태 | `OK` `WARN` `CRIT` `[제안]` |
 
 > 이벤트 필터 칩은 v3에서 `전체·위험·경고·주의·차단·정상` 6종이다 `[v3]`. `차단`은 등급이 아니라 이벤트 종류(릴레이 차단)이므로 심각도 enum에 `CUT`을 추가했다.
 
@@ -206,6 +217,38 @@ v3에는 판정 로직이 **세 벌** 존재하고 서로 어긋난다.
 
 ---
 
+### 1.9 공용 타입
+
+여러 절에서 이름으로 참조하는 축약 객체들이다. **여기 정의된 필드가 전부이며, 참조하는 쪽이 임의로 늘리지 않는다.** `[제안]`
+
+**`NoticeSummary`** — 대시보드 공지 3건, 관리자 대시보드 공지 3건
+
+```json
+{ "id": "n_01H...", "category": "IMPORTANT", "title": "펌웨어 v5.2 긴급 업데이트 안내",
+  "summary": "릴레이 인터락 안정성이 개선됩니다. 7/5 02:00에 자동 반영되며…", "publishedAt": "2026-07-01T00:00:00.000Z" }
+```
+
+- `summary`는 `body`의 앞 120자 발췌 `[제안]`. 대시보드가 본문 한 줄을 요약으로 보여준다 `[v3]`. §4.9 목록의 `body` 전문과 다른 필드다.
+
+**`AdminBatteryRow`** — 관리자 대시보드 `최근 위험 배터리`
+
+```json
+{ "id": "b_01H...", "label": "PACK-001", "score": 0.82, "grade": "DANGER", "opsStatus": "BLOCKED" }
+```
+
+- v3 카드는 `PACK-001 / 82` 두 값만 보여준다 `[v3]`. `opsStatus`는 배지용으로 덧붙였다.
+- **§4.12 `GET /api/admin/batteries` 목록 항목과 다른(더 작은) 타입이다.** 같은 이름을 쓰지 않도록 주의.
+
+**`AuditEntry`** — 관리자 대시보드 `최근 관리자 조작`
+
+```json
+{ "id": "au_01H...", "at": "...", "actorName": "이연구", "actionLabel": "배터리 BLOCKED 변경" }
+```
+
+- v3 카드는 `배터리 BLOCKED 변경 / 관리자 · 12분 전` 두 줄뿐이다 `[v3]`. **§4.12 감사 로그의 11필드 전체를 싣지 않는다.**
+
+---
+
 ## 2. 리소스 식별자 규약 `[제안]`
 
 v3는 배터리를 `PACK-001` 문자열로 식별하지만, `PLAN.md`는 `battery_id`를 UUID로 규정한다. 둘 다 필요하다.
@@ -213,7 +256,7 @@ v3는 배터리를 `PACK-001` 문자열로 식별하지만, `PLAN.md`는 `batter
 | 필드 | 타입 | 용도 |
 |---|---|---|
 | `id` | UUID | **API 경로·참조에 쓰는 유일 키.** 사용자에게 노출하지 않음 |
-| `label` | string | 사용자가 보는 표시명. v3의 `PACK-001`에 해당. 사용자 내에서 유일 `[정의 필요 — Q4]` |
+| `label` | string | 사용자가 보는 표시명. v3의 `PACK-001`에 해당. **중복 허용** — 유일성 제약을 걸지 않는다 `[PLAN.md:123,131]` |
 
 동일 규칙을 `session`(v3 `SES-2041`), `device`(v3 `SN-00124`)에도 적용한다.
 
@@ -225,7 +268,7 @@ v3는 배터리를 `PACK-001` 문자열로 식별하지만, `PLAN.md`는 `batter
 
 프론트가 UI로 막더라도 **서버에서 다시 막아야 한다.** 아래는 전부 v3 화면 동작에서 실측한 규칙이다.
 
-### 3.1 배터리 미연결 시 기능 잠금 게이트 `[v3]` **← 기존 기능정의서에 없는 항목**
+### 3.1 배터리 미연결 시 기능 잠금 게이트 `[v3]` `[REQ-WEB-073]`
 
 v3 소스(내비게이션 항목 생성 함수 `item()`):
 
@@ -238,17 +281,30 @@ const locked = gated && r !== 'battery';
 
 안내 문구도 실재한다 — *"먼저 측정할 배터리를 선택하세요. — 배터리를 연결해야 대시보드·측정 세션·이상 탐지에 접근할 수 있습니다."* `[v3: T.pickFirst]`
 
-**서버 요구사항:** active 세션이 없는 사용자가 대시보드/이상탐지/릴레이 계열 엔드포인트를 호출하면 `409 NO_ACTIVE_SESSION`. 관리자는 예외.
+**서버 요구사항:** active 세션이 없는 일반 사용자가 아래 경로를 호출하면 `409 NO_ACTIVE_SESSION`. 관리자(`ADMIN`)는 예외.
 
-> 이 규칙은 `docs/` 문서 4종 어디에도 기록되어 있지 않다. 프론트 라우팅 가드와 서버 검증이 동시에 필요하다.
+| 409 대상 | 이유 |
+|---|---|
+| `GET /api/dashboard` | 세션이 없으면 보여줄 실시간 값 자체가 없다 |
+| `GET /api/anomaly/*` | 추론 대상이 없다 |
+| `GET /api/relay`, `POST /api/relay/cut`, `/restore`, `GET /api/relay/history` | 제어 대상 회로가 없다 |
+| WS `subscribe` (`metrics`·`anomaly`·`relay` 토픽) | 흘려보낼 스트림이 없다 |
+
+**409를 걸지 않는 경로** — UI에서는 메뉴가 잠기지만 API는 정상 응답한다:
+`/api/settings/*`, `/api/notices`, `/api/me`, `/api/batteries*`, `/api/alerts*`, `/api/events`, `/api/trends`
+
+> **UI 잠금 범위(8메뉴)와 서버 409 범위가 다르다.** 설정·공지·알림·이벤트·추세는 세션이 없어도 조회에 문제가 없고, 오히려 막으면 알림 이력조차 못 보게 된다. 잠금은 "지금 볼 게 없으니 먼저 배터리를 고르라"는 UX 유도이고, 409는 "데이터가 존재할 수 없다"는 무결성 방어다. 둘을 같은 목록으로 맞추지 말 것.
 
 ### 3.2 배터리 연결 단일성 (active 세션 1개) `[v3]` `[PLAN: S-MSESSN]`
 
 *"한 번에 하나의 배터리만 연결됩니다. 기존 연결은 해제됩니다."* `[v3: T.cnOneAtTime]`
 
-- 사용자당 `ACTIVE` 상태 `measurement_session`은 **최대 1개**.
-- 새 배터리 연결 요청 시 서버가 **기존 세션을 원자적으로 종료하고** 새 세션을 연다. 프론트가 "종료 → 시작" 2콜로 나누지 않는다(중간 실패 시 무세션 상태로 빠짐).
+- **`device_id`당 `ACTIVE` 상태 `measurement_session`은 최대 1개** `[PLAN.md:156, S-LWVJRY]`. 진단기 하나가 동시에 두 배터리를 측정할 수 없다는 물리적 제약이다.
+- 새 배터리 연결 요청 시 서버가 **해당 진단기의 기존 세션을 원자적으로 종료하고** 새 세션을 연다. 프론트가 "종료 → 시작" 2콜로 나누지 않는다(중간 실패 시 무세션 상태로 빠짐).
 - 모드 인터락: 새 세션의 `targetMode`가 이전과 다르면 **이전 모드 릴레이를 먼저 차단**한 뒤 전환한다. `[PLAN: S-LWVJRY]`
+
+> **"사용자당 1개"가 아니다.** 한 사용자가 진단기 2대를 가지면 동시 2세션이 정상이다. 다만 v3 UI는 진단기 개념을 노출하지 않고 단일 연결만 가정하므로(§3.1의 `connectedId` 단일값), **화면상으로는 사용자당 1세션처럼 보인다.**
+> 사용자당 진단기가 몇 대인지가 `[정의 필요 — Q7]`이며, 1대로 확정되면 두 규칙이 실질적으로 같아진다. **1대가 아니라면 `GET /api/me`의 `activeSession`을 `activeSessions[]` 배열로 바꾸고 대시보드에 진단기 선택이 필요하다** — 프론트 작업이 커지므로 Q7을 먼저 닫아야 한다.
 
 ### 3.3 Fail-Safe 우선순위 `[v3]` `[PLAN: S-VMNNAM]`
 
@@ -386,14 +442,24 @@ const locked = gated && r !== 'battery';
   "seriesCount": 3,
   "targetMode": 2,
   "maker": "Samsung SDI",
-  "model": "18650"
+  "model": "18650",
+  "capacityMah": 3000,
+  "memo": "측정 대상 특이사항…"
 }
 ```
 
+- `label` **필수**, 중복 허용 `[PLAN]`
 - `chemistry` **필수** `[PLAN]`
-- `seriesCount` 선택 `[PLAN]`
-- `targetMode` 필수 — 재연결 시 모드 재선택을 없애기 위해 배터리에 고정된다 `[PLAN]`
+- `targetMode` **필수** — 재연결 시 모드 재선택을 없애기 위해 배터리에 고정된다 `[PLAN]`
+- `seriesCount` / `maker` / `model` / `capacityMah` / `memo` **선택** `[PLAN.md:131-136]`
 - 201 응답 본문은 생성된 배터리 객체 전체 (프론트가 목록에 즉시 삽입)
+
+> **`memo`는 사용자 메모다.** v3 **배터리 수정** 모달에 `메모`(placeholder `측정 대상 특이사항…`) 입력이 있고 `PLAN.md:136`에도 선택 필드로 정의돼 있다 `[v3]` `[PLAN]`.
+> **관리자 메모(`REQ-WEB-124`, §4.12)와 완전히 다른 필드다.** 관리자 메모는 `battery_asset.admin_memo`이며 사용자에게 보이지 않는다 `[PLAN.md:280]`. 두 필드를 같은 컬럼에 합치지 말 것.
+
+#### `PATCH /api/batteries/{id}` `[REQ-WEB-038]`
+
+`POST`와 동일한 필드를 부분 수정한다. **단 `targetMode`는 변경 불가** — 재연결 시 모드 재선택을 없애려고 자산에 고정한 값이므로, 바꾸려면 새 자산으로 등록한다 `[PLAN]` `[정의 필요 — Q30]`.
 
 - `maker` / `model` **선택** — 카드·상세의 `18650 Li-ion · 3S` 표시에 쓴다.
 
@@ -409,6 +475,10 @@ const locked = gated && r !== 'battery';
   "chemistry": "LI_ION",
   "seriesCount": 3,
   "targetMode": 1,
+  "maker": "Samsung SDI",
+  "model": "18650",
+  "capacityMah": 3000,
+  "memo": null,
   "owner": { "id": "u_01H...", "name": "홍길동" },
   "current": {
     "voltageV": 11.9, "currentA": 2.4, "tempC": 58.0, "socPct": 78,
@@ -477,9 +547,17 @@ v3 테이블 컬럼: `세션 ID · 기간 · 최고 이상점수 · 상태 · �
 
 - 대상 배터리의 진단기가 오프라인이면 `409 DEVICE_OFFLINE`.
 
-#### `DELETE /api/sessions/{id}` — 측정 종료
+#### `DELETE /api/sessions/{id}` — 측정 종료 `[제안]`
 
 응답 `200` + 종료된 세션 요약(`peakScore`, `endedAt`).
+
+> **v3에는 이 엔드포인트를 호출할 UI가 없다** `[v3 실측]`. 전체 마크업에 "측정 종료"·"연결 해제" 버튼이 0건이고, 존재하는 건 연결 확인 모달의 `기존 연결은 해제됩니다` 문구뿐이다. 즉 v3에서 세션은 **다른 배터리를 연결할 때만** 끝난다.
+> 종료 트리거를 정해야 한다 `[정의 필요 — Q33]`:
+> (a) 사용자 조작 — 프론트가 대시보드에 `측정 종료` 버튼을 추가한다
+> (b) 다른 배터리 연결 시에만 (§3.2 자동 종료) — 그러면 이 엔드포인트는 불필요
+> (c) 무수신 타임아웃 — 서버가 자동 종료. 임계 시간 필요
+> (d) 계정 정지 시 강제 종료 (Q15와 연동)
+> **(b)만으로는 "측정을 그만두고 싶다"를 표현할 수단이 없다.** 배터리를 뽑아도 세션이 영원히 ACTIVE로 남는다.
 
 > **에지 음성 안내 연동:** 세션 시작/종료는 `battery-events` 토픽으로 발행되어 라즈베리파이가 로컬 음성파일을 재생한다 `[PLAN: S-VOCALR]`. 이 발행은 백엔드 책임이며 프론트는 관여하지 않는다.
 
@@ -525,10 +603,11 @@ WebSocket 연결 **전에** 화면을 채우기 위한 1회 조회. 이후 갱�
 - **프론트는 물리량 임계값을 하드코딩하지 않는다.** §1.6의 이상점수와 같은 원칙 — 판정 로직은 서버 한 곳에만 둔다.
 - 임계값은 **시스템 고정**이며 사용자가 바꿀 수 없다(임계치 설정 기능 제거와 일관).
 - 구체적 수치는 안전 스펙에서 확정한다 `[정의 필요 — Q27]`. v3 코드에 남아 있는 유일한 근거는 온도 `>= 55°C → 경고`(`dTempWarn`)뿐이다. 전압은 `chemistry`·`seriesCount`에 따라 셀당 상·하한을 환산해야 하므로 배터리마다 값이 달라진다.
+- **`status`는 `null`을 허용한다.** Q27이 닫히기 전까지 서버는 `null`을 내려보내고, 프론트는 그때 배지를 렌더링하지 않는다. **이 필드 하나 때문에 `GET /api/dashboard`(구현 우선순위 2위) 착수가 막히면 안 된다.**
 
 > **Fail-Safe 임계와 구분할 것.** 이 `status`는 **표시용 경고**다. 릴레이를 차단하는 물리 임계(§3.3)와 같은 값을 쓸 필요는 없으며, 오히려 `CRIT`이 Fail-Safe보다 먼저 뜨도록 낮게 잡는 편이 경고 목적에 맞다.
 - `aeScore`/`informerScore`는 이중 모델 개별 점수 `[PLAN: S-FGKMXE]`. v3 화면에는 없다. 없으면 `null`.
-- `notices`는 대시보드 하단 공지 3건 `[v3]` `[REQ-WEB-028]`. §4.9 `NoticeSummary`와 동일 스키마(제목·카테고리·요약·게시일).
+- `notices`는 대시보드 하단 공지 3건 `[v3]` `[REQ-WEB-028]`. §1.9 `NoticeSummary` 타입.
 - `quickTrend.metric`은 `volt|curr|temp|soc` 중 프론트가 선택 `[v3: dMetric]` `[REQ-WEB-024]`. 쿼리 `?metric=temp`로 지정.
 
 > **임계치 설정 API는 없다.** v3 코드에 `T.thWatch/thWarn/thDanger/tempCap` 라벨이 남아 있지만 설정 화면에 렌더링되지 않으며(탭은 `알림 수신 / 계정 정보 / 테마·캘리브레이션` 3개뿐), **임계치 설정 기능은 제거하기로 결정되었다.** 등급 임계값은 §1.6의 고정값(0.3/0.6/0.8)이다.
@@ -554,6 +633,8 @@ WebSocket 연결 **전에** 화면을 채우기 위한 1회 조회. 이후 갱�
 
 #### `GET /api/anomaly/evidence` — XAI 기여 요인 `[REQ-WEB-043]`
 
+쿼리: `batteryId`(생략 시 **활성 세션의 배터리**). v3 패널 제목이 `PACK-001 · 이상점수 82`로 특정 배터리를 가리킨다 `[v3]`.
+
 v3가 표시하는 4개 특징: `dT/dt(온도 상승률)`, `I_smooth(전류 변화량)`, `V_drop(전압 강하)`, `SOC_delta(SOC 변화율)` `[v3: T.f1~f4]`
 
 ```json
@@ -564,8 +645,8 @@ v3가 표시하는 4개 특징: `dT/dt(온도 상승률)`, `I_smooth(전류 변�
   "contributions": [
     { "feature": "dT_dt",     "label": "dT/dt (온도 상승률)",     "contribution": 0.42 },
     { "feature": "I_smooth",  "label": "I_smooth (전류 변화량)",  "contribution": 0.28 },
-    { "feature": "V_drop",    "label": "V_drop (전압 강하)",      "contribution": 0.19 },
-    { "feature": "SOC_delta", "label": "SOC_delta (SOC 변화율)",  "contribution": 0.11 }
+    { "feature": "V_drop",    "label": "V_drop (전압 강하)",      "contribution": 0.16 },
+    { "feature": "SOC_delta", "label": "SOC_delta (SOC 변화율)",  "contribution": 0.09 }
   ]
 }
 ```
@@ -625,7 +706,9 @@ v3가 표시하는 4개 특징: `dT/dt(온도 상승률)`, `I_smooth(전류 변�
 |---|---|---|
 | `period` | `24h` \| `7d` \| `30d` | `[v3: periodCfg]` `[REQ-WEB-046]` |
 | `batteryIds` | 콤마 구분, 최대 N개 | `[v3: comparePacks]` `[REQ-WEB-048]` |
-| `sessionIds` | 콤마 구분 (배터리 대신 세션 비교) | `[v3: cmpTitle '다중 배터리 / 세션 비교']` |
+| `sessionIds` | 콤마 구분 (배터리 대신 세션 비교) | `[제안]` |
+
+> `sessionIds`는 **v3에 UI가 없다.** 패널 제목만 `다중 배터리 / 세션 비교`이고 실제 비교 드롭다운은 배터리 5개만 고른다(`compareItems: ['PACK-001' … 'PACK-005']`) `[v3 실측]`. 세션 비교가 필요 없으면 이 파라미터를 뺀다.
 
 **`metrics` 파라미터는 없다.** v3 추세 화면은 전압·전류·온도·SOC **4개 차트를 항상 동시에** 렌더링한다. 지표 선택 UI가 없으므로 응답은 항상 4지표 전부를 담는다 `[v3 실측]`. (`REQ-WEB-047`이 말하는 "표시 지표 선택"은 **대시보드**의 지표 버튼이며, 추세 화면의 기능이 아니다.)
 
@@ -677,7 +760,14 @@ v3 알림 센터 상단에 **"오늘의 알림 요약 — 확인이 필요한 �
 }
 ```
 
-> **3칸이다.** `정상`과 `점검`(디바이스 이벤트)을 한 칸에 합쳐 보여준다. 4등급 분포와 다른 축이므로 §4.5의 `riskDistribution`을 재사용하지 말 것.
+- **`unacknowledgedCount`는 `severity: DANGER` 중 미확인 건수다.** v3 카드의 `확인이 필요한 알림 1건`이 위험 1건만 세기 때문이다(`alertCounts.unread = acked.a1 ? 0 : 1`) `[v3]`. 아래 Ack 노출 규칙과 같은 기준이다.
+- `today` 3칸은 **당일 발생 건수**를 심각도별로 센다(확인 여부 무관). `정상`과 `점검`(디바이스 이벤트)을 한 칸에 합친다.
+
+> 4등급 분포와 다른 축이므로 §4.5의 `riskDistribution`을 재사용하지 말 것.
+
+#### `GET /api/alerts` — 알림 이력
+
+쿼리: `severity`(복수 가능), `subjectType`, `batteryId`, `acknowledged`(`true|false`), `from`, `to`, `page`, `size`. 기본 정렬 `occurredAt desc`.
 
 ```json
 {
@@ -711,8 +801,10 @@ v3 알림 센터 상단에 **"오늘의 알림 요약 — 확인이 필요한 �
 
 - `subjectType`: `BATTERY` \| `DEVICE` — v3에 `진단기 C 하트비트 미수신` 알림이 있어 배터리가 아닌 대상이 존재한다 `[v3: thumb:'device']`
 - `rawSnapshot` → **Raw 데이터 보기 모달** `[v3: rawModal, T.rawView]`. v3에서 신규 추가된 기능이다. 필드 구성은 알림 종류마다 다르며, 값이 없으면 키를 생략한다.
-- **`확인(Ack)`·`Raw 데이터 보기` 버튼은 미확인 알림에만 노출된다** `[v3 실측]`. 즉 `acknowledgedAt !== null`이면 프론트가 두 버튼을 감춘다. 서버는 이미 확인된 알림에 대한 `ack` 재요청을 멱등 처리한다(에러 아님).
-- `POST /ack` 응답은 갱신된 알림 객체. `ack-all`은 `{ "acknowledgedCount": 3 }`.
+- **`확인(Ack)`·`Raw 데이터 보기` 버튼은 `severity === 'DANGER'` 이면서 미확인인 알림에만 노출된다** `[v3: showAck = a.tone === 'danger' && !acked]`. 경고·정상·점검 알림은 **미확인이어도 버튼이 없다.**
+  - 따라서 `POST /alerts/ack-all`의 대상도 **미확인 위험 알림**이다. 응답 `{ "acknowledgedCount": 3 }`.
+  - 서버는 이미 확인된 알림에 대한 `ack` 재요청을 멱등 처리한다(에러 아님). `DANGER`가 아닌 알림에 대한 `ack`도 거부하지 않고 그대로 기록한다 — 정책이 나중에 완화될 수 있으므로 서버가 UI 규칙을 강제하지 않는다.
+- `POST /ack` 응답은 갱신된 알림 객체.
 
 > **Raw 모달은 키를 snake_case 그대로 화면에 찍는다** (`voltage_v`, `soc_pct`, `anomaly_score`, `relay_state`) `[v3 실측]`. 반면 이 계약의 나머지 JSON은 camelCase다. 서버는 camelCase로 통일해 내려주고, Raw 모달의 snake_case 라벨은 **프론트가 표시용으로 매핑**한다 — 이 화면의 목적이 "에지/AI가 발행하는 원본 필드명을 그대로 보여주는 것"이기 때문이다.
 
@@ -800,6 +892,22 @@ v3 알림 센터 상단에 **"오늘의 알림 요약 — 확인이 필요한 �
 | `GET` | `/api/calibrations` | 테마 · 캘리브레이션 | `[REQ-WEB-071]` |
 | `GET`/`PATCH` | `/api/settings/voice-alert` | **화면 없음** | `[REQ-WEB-072]` `[PLAN]` |
 
+**요청 본문**
+
+```jsonc
+// PATCH /api/me — 계정 정보 탭. 허용 필드 3개
+{ "name": "홍길동", "email": "hong@cellguard.io", "phone": "010-1234-5678" }
+
+// POST /api/me/password — 비밀번호 재설정 모달 [v3: 현재/새/새 확인 3개 입력]
+{ "currentPassword": "••••••••", "newPassword": "••••••••" }
+
+// PATCH /api/settings/preferences
+{ "theme": "light", "lang": "ko" }   // theme: light|dark|system, lang: ko|en
+```
+
+> `newPasswordConfirm`은 **서버로 보내지 않는다.** 일치 검증은 프론트 책임이다.
+> `PATCH /api/me`로 `role`·`status`를 바꿀 수 없다(§4.12와 동일 원칙).
+
 > **임계치 탭은 없다** — 기능 자체가 제거되었다(§4.4 참조).
 > **음성 안내 설정은 v3 어느 화면에도 없다.** 그러나 `PLAN.md`에 모델·API가 이미 확정돼 있고 에지 하드웨어 동작과 직결되므로 **계약에 포함한다.** 프론트가 설정 화면에 탭 또는 섹션을 새로 만들어야 한다.
 
@@ -847,6 +955,8 @@ v3 알림 센터 상단에 **"오늘의 알림 요약 — 확인이 필요한 �
 
 - `status`: `VALID` \| `EXPIRING` \| `EXPIRED` `[v3: T.calValid/calExpiring]`
 - 등록/수정 UI는 v3에 없다. **조회 전용.** 등록 경로는 `[정의 필요 — Q14]`.
+- **집계 범위: 요청자의 활성 세션에 연결된 진단기의 센서.** 캘리브레이션은 배터리가 아니라 **하드웨어 자산**에 붙으므로 §1.3의 "본인 소유 리소스" 판정이 그대로 적용되지 않는다 `[정의 필요 — Q32]`. 활성 세션이 없을 때 무엇을 반환할지(빈 배열 vs 최근 사용 진단기)도 함께 정한다.
+- `expiresAt`은 `[제안]`이다 — v3는 만료일을 표시하지 않고 `유효`/`만료 임박` 배지만 보여준다. 배지만 필요하면 `status`로 충분하고 이 필드는 뺄 수 있다.
 
 > **REQ-WEB-069(프로필 사진 변경)는 범위에서 제외되었다** — `docs/superpowers/specs/2026-07-22-...` 검증 결과 반영. 아바타 업로드 엔드포인트는 만들지 않는다.
 > 다만 **`사진 변경` 버튼은 v3 계정 정보 탭에 실제로 렌더링돼 있다** `[v3 실측]`. 프론트가 이 버튼을 제거해야 한다. 남겨두면 백엔드에 없는 기능을 사용자가 누르게 된다.
@@ -921,9 +1031,29 @@ v3 실측 구성: KPI 카드 4개 → 이벤트 추이 차트 + 배터리 상태
     "batteryCount": 5,
     "joinedAt": "2025-03-12T00:00:00.000Z",
     "lastSeenAt": "2026-07-22T14:30:00.000Z"
-  }]
+  }],
+  "page": { "number": 1, "size": 20, "total": 4, "totalPages": 1 }
 }
 ```
+
+**`PATCH /api/admin/users/{id}`** — 허용 필드는 아래 **3개뿐이다.**
+
+```json
+{ "name": "홍길동", "loginId": "hong", "phone": "010-1234-5678" }
+```
+
+> **`role`·`status`·`batteryCount`는 이 엔드포인트로 바꿀 수 없다.** 그 외 필드가 오면 `400 VALIDATION_FAILED`.
+> - `status` 변경은 `/suspend`·`/restore` 전용 — **사유 필수 + 감사 기록**(§3.4·§3.6)이 걸려 있다. `PATCH`로 뚫리면 그 통제가 통째로 우회된다.
+> - `role` 승격도 같은 이유로 `PATCH` 금지. 필요하면 `POST /api/admin/users/{id}/role` 전용 엔드포인트를 사유 필수로 신설한다 `[정의 필요 — Q28]`.
+> - `batteryCount`는 **파생값**이다. v3 유저 수정 모달이 `등록 배터리 수`를 편집 가능한 입력으로 그리지만 `[v3 실측]`, 이는 프로토타입 오류다 — 프론트가 읽기 전용으로 바꿔야 한다(§12-15).
+
+**`POST /api/admin/users/{id}/password-reset`** `[REQ-WEB-116]`
+
+```json
+{ "newPassword": "••••••••" }
+```
+
+> v3 유저 수정 모달 안에서 새 비밀번호를 직접 입력받는다 `[v3]`. 관리자가 평문을 지정하는 방식이므로, 재설정 링크 발송 방식으로 바꿀지는 `[정의 필요 — Q29]`. 감사 기록 대상이다(§3.6).
 
 **상세** — 목록 필드 + `batteries[]`(id, label, opsStatus) + `activityLogs[]` `[v3]` `[REQ-WEB-114]`
 
@@ -962,20 +1092,34 @@ v3 실측 구성: KPI 카드 4개 → 이벤트 추이 차트 + 배터리 상태
     "score": 0.82, "grade": "DANGER",
     "opsStatus": "BLOCKED",
     "latest": { "tempC": 61.4, "voltageV": 11.9, "socPct": 74, "measuredAt": "..." }
-  }]
+  }],
+  "page": { "number": 1, "size": 20, "total": 4, "totalPages": 1 }
 }
 ```
 
-**상세** — 위 + `info[]`(직렬 구성·설치 위치·연결 진단기·관리자 메모) + `opsLogs[]`
+**상세** — 목록 항목 + `info` + `opsLogs[]`
 
 ```json
 {
+  "info": {
+    "seriesConfig": "3S · 11.1V",
+    "location": "서울 물류센터 A동",
+    "device": { "label": "진단기 A", "status": "ONLINE" },
+    "adminMemo": "열폭주 징후로 차단 유지"
+  },
   "opsLogs": [{
     "at": "...", "severity": "DANGER",
     "summary": "릴레이 자동 차단 (Fail-Safe)", "meta": "온도 61.4°C 임계 초과"
-  }]
+  }],
+  "page": { "number": 1, "size": 20, "total": 4, "totalPages": 1 }
 }
 ```
+
+- `seriesConfig`는 `seriesCount` + `chemistry` 공칭전압으로 **서버가 조립**한다(파생값, 저장 안 함).
+- `info.location`·`info.device`는 **입력·조회 경로가 없다** `[정의 필요 — Q31]`:
+  - `location`(설치 위치)은 `PLAN.md`의 `battery_asset`에도, 이 계약의 등록/수정 스키마에도 없다. **저장할 방법 자체가 없으므로** 배터리 등록 폼에 추가하든지 필드를 빼든지 정해야 한다.
+  - `device`(연결 진단기)는 디바이스 화면(F5) 제외 결정과 충돌한다 — 진단기 상태를 어디서 가져올지 미정. 세션의 `deviceId`로 역참조하면 가능하지만 Q7과 얽힌다.
+  - 둘 다 v3 코드에는 값이 있으나 **렌더링되지 않는다**(`rows: [{k:'설치 위치',v:'서울 물류센터 A동'}, …]`) `[v3]`. 화면에 안 나오는 값이므로 결정 전까지 `null` 허용.
 
 > **v3 상세 모달은 조회 전용이다** `[v3 실측]`. 실제로 열어보면 `이상점수 / 온도 / 전압 / SOC` 4칸과 `운영 로그` 목록, 그리고 `닫기` 버튼뿐이다. **운영 상태를 바꾸는 UI도, 관리자 메모를 입력하는 UI도 없다.** 코드에 정의된 `info[]`(직렬 구성·설치 위치·연결 진단기·관리자 메모)조차 렌더링되지 않는다.
 > 그럼에도 `REQ-WEB-123/124/125`는 **계약에 포함하기로 결정했다** — 감사 로그에 이미 `배터리 상태 변경 · NORMAL → BLOCKED` 기록이 존재하므로 기획상 있어야 하는 기능이다. **프론트가 상세 모달에 입력 UI를 추가해야 한다.**
@@ -1010,7 +1154,8 @@ v3 실측 구성: KPI 카드 4개 → 이벤트 추이 차트 + 배터리 상태
 
 - `status: "DRAFT"`로 저장 = 임시 저장 `[REQ-WEB-131]`
 - `notifyChannels` — 게시와 동시에 발송할 채널 `[REQ-WEB-130]`. 빈 배열이면 발송 없음.
-- `audience` 공개 범위 값 목록 `[정의 필요 — Q17]`. v3에 입력 필드는 있으나 옵션이 확정되지 않았다.
+  - **v3는 채널별 선택이 아니라 `게시와 동시에 웹푸시·카카오 알림 발송` 체크박스 하나다** `[v3]`. 배열로 받는 것은 `[제안]`이며, 체크박스 하나로 유지하려면 `notifyOnPublish: boolean`으로 바꾼다.
+- `audience` — v3 `노출 대상` select의 옵션은 `전체 사용자 / 일반 사용자 / 관리자` **3종이다** `[v3]`. enum: `ALL` \| `USER` \| `ADMIN`.
 - 관리자 목록에는 `viewCount`가 표시된다 `[v3: views '1,204']` — 조회수 집계 방식 `[정의 필요 — Q18]`.
 - **삭제는 `DRAFT`만.** 게시된 공지는 `archive`만 가능 `[v3]`.
 
@@ -1034,7 +1179,8 @@ v3 테이블 컬럼: `시간 · 관리자 · 행위 · 대상 · 변경 내용` 
     "targetId": "b_01H...",
     "targetLabel": "PACK-001",
     "changeSummary": "NORMAL → BLOCKED"
-  }]
+  }],
+  "page": { "number": 1, "size": 20, "total": 5, "totalPages": 1 }
 }
 ```
 
@@ -1122,18 +1268,19 @@ v3 테이블 컬럼: `시간 · 관리자 · 행위 · 대상 · 변경 내용` 
 
 | # | 영역 | 라우트 | 필요한 엔드포인트 |
 |---|---|---|---|
+| — | 앱 셸 (전 화면 공통) | — | `GET /api/me` (부팅 시 1회), WS `subscribe` |
 | F1 | 랜딩 | `landing` | 없음 (정적) |
 | F2 | 회원가입 | `signup` | `/api/auth/*` |
 | F3 | 계정 찾기 | `find` | `/api/auth/*` |
 | F4 | 실시간 관제 | `dashboard` | `GET /api/dashboard`, WS `metrics.tick`·`anomaly.score`·`relay.*` |
-| F6 | 배터리 자산관리 | `battery` | `GET/POST/PATCH /api/batteries`, `POST /api/sessions` |
+| F6 | 배터리 자산관리 | `battery` | `GET/POST/PATCH /api/batteries`, `POST /api/sessions`, `DELETE /api/sessions/{id}`(Q33) |
 | F7 | 배터리 상세·이력 | `batteryDetail` | `GET /api/batteries/{id}`, `/sessions`, `GET /api/trends?batteryIds={id}` |
 | F8 | 이상 탐지 | `anomaly` | `GET /api/anomaly/summary`(위험도 분포 포함), `/evidence`, `/events` |
 | F9 | 추세 | `trend` | `GET /api/trends`, `/trends/export` |
 | F10 | 이벤트 이력 | `events` | `GET /api/events` |
 | F11 | 알림 센터 | `alertHistory` | `GET /api/alerts`, `/alerts/summary`, `POST /ack`, `/ack-all` |
 | F12 | 릴레이 제어 | `relay` | `GET /api/relay`, `/history`, `POST /cut`, `/restore` |
-| F13 | 공지사항 | `notices` | `GET /api/notices` |
+| F13 | 공지사항 | `notices` | `GET /api/notices`, `GET /api/notices/{id}`(Q11 결정 시) |
 | F14 | 설정 | `settings` | `/api/settings/alerts`, `/preferences`, `/voice-alert`, `PATCH /api/me`, `POST /api/me/password`, `GET /api/calibrations` |
 | F15 | 관리자 통합 관제 | `admin` | `GET /api/admin/overview` |
 | F16 | 유저 계정 관리 | `adminUsers` | `/api/admin/users/*` |
@@ -1178,10 +1325,10 @@ v3 테이블 컬럼: `시간 · 관리자 · 행위 · 대상 · 변경 내용` 
 | Q1 | CSRF 토큰 방식 | Better Auth 기본 제공 여부 확인 후 결정. 쿠키+헤더(double submit)가 무난 |
 | Q2 | 다국어 | v3에 한/영 토글이 실재한다 `[REQ-WEB-015]`. 서버가 한국어 문장을 주면 영어 전환이 깨진다. **서버는 코드만, 문구는 프론트** 를 제안하나 에러 메시지·XAI 라벨·이벤트 `cause`/`action`은 결정 필요 |
 | ~~Q3~~ | ~~`scoreDisplay` 서버 제공 여부~~ | **해결** — `score`(0.0–1.0)만 내려준다. 0–100 변환은 프론트 |
-| Q4 | `label` 유일성 범위 | 사용자 내 유일? 전역 유일? 중복 허용? |
+| ~~Q4~~ | ~~`label` 유일성 범위~~ | **해결** — `PLAN.md:123,131`이 "이름 중복 허용"으로 이미 확정. 유일성 제약 없음 |
 | Q5 | 감사 로그 보존 기간 | 법적 요구 여부 확인 필요 |
 | Q6 | SOH/RUL/사이클/내부저항 산출 주체 | AI 파이프라인 vs 백엔드 집계. 갱신 주기도 함께 |
-| Q7 | `deviceId` 지정 방식 | v3에 진단기 선택 UI가 **없음을 실측 확인**. 연결 모달은 배터리만 묻는다. 사용자당 1대 가정 가능한가? |
+| **Q7** | `deviceId` 지정 방식 — **차단 항목** | v3에 진단기 선택 UI가 **없음을 실측 확인**. 사용자당 1대인가? **§3.2(세션 단일성 범위)·§4.3(`POST /api/sessions` 본문)·`GET /api/me`의 `activeSession` 단수/복수·Q31(연결 진단기 표시)이 전부 여기 딸려 있다.** 가장 먼저 닫을 것 |
 | ~~Q8~~ | ~~`tempCapC`와 Fail-Safe 관계~~ | **해결** — 임계치 설정 기능이 제거되어 사용자 입력 자체가 없다. 온도 상한은 서버/에지 고정값 |
 | Q9 | CSV/PDF 내보내기 | 동기 다운로드 vs 비동기 작업+알림. 최대 건수 상한. **대상은 추세 데이터**(§4.7) |
 | Q10 | 추세 다운샘플링·집계 | 버킷 크기, avg/max 선택 (§4.7 제안 참조) |
@@ -1191,7 +1338,7 @@ v3 테이블 컬럼: `시간 · 관리자 · 행위 · 대상 · 변경 내용` 
 | Q14 | 캘리브레이션 등록 경로 | 웹 UI 없음 — 내부 도구/스크립트인가 |
 | Q15 | 계정 정지 시 진행 중 세션 | 강제 종료? 릴레이 차단까지? |
 | Q16 | `BLOCKED` 운영 상태의 물리적 효과 | 라벨인가 실제 차단인가 |
-| Q17 | 공지 `audience` 값 목록 | 전체/특정 역할/특정 사용자? |
+| ~~Q17~~ | ~~공지 `audience` 값 목록~~ | **해결** — v3 `노출 대상` select 옵션 실측: `ALL`/`USER`/`ADMIN` 3종 |
 | Q18 | 공지 조회수 집계 | 중복 카운트 방지 기준 |
 | Q19 | 관리자 WebSocket 토픽 | 전체 배터리 실시간 구독이 필요한가 (F15 통합 관제) |
 | Q20 | 수집 100ms vs 푸시 1초 | v3 제품 카피는 "1초 단위 수집", CLAUDE.md는 100ms. **적재 100ms / 푸시 1초**로 정리하면 되는지 확인만 하면 됨 |
@@ -1201,7 +1348,13 @@ v3 테이블 컬럼: `시간 · 관리자 · 행위 · 대상 · 변경 내용` 
 | ~~Q24~~ | ~~지표별 상태 배지 기준~~ | **해결** — 지표별 고정 임계값으로 **서버 판정**, `metrics.*.status` 동봉 |
 | ~~Q25~~ | ~~XAI 기여도 범위·부호~~ | **해결** — 0 이상 실수, 합 제약 없음, 내림차순 |
 | ~~Q26~~ | ~~`측정 담당자` 표기~~ | **해결** — 표기 제거. `jobTitle` 필드 없음 |
-| **Q27** | **지표별 상태 임계값 수치** | Q24의 후속. `OK`/`WARN`/`CRIT` 경계를 지표마다 확정해야 한다. v3 근거는 온도 `≥55°C → 경고` 하나뿐이고, 전압은 `chemistry`·`seriesCount`로 셀당 환산이 필요하다 |
+| Q27 | 지표별 상태 임계값 수치 | Q24의 후속. `OK`/`WARN`/`CRIT` 경계를 지표마다 확정. v3 근거는 온도 `≥55°C → 경고` 하나뿐이고, 전압은 `chemistry`·`seriesCount`로 셀당 환산 필요. **미정 동안 `status: null` 허용하므로 착수를 막지는 않는다** |
+| Q28 | 관리자 권한(`role`) 변경 경로 | `PATCH /admin/users`에서 금지했다. 전용 엔드포인트를 사유 필수로 만들지, 아예 UI에서 뺄지 |
+| Q29 | 관리자 비밀번호 재설정 방식 | v3는 관리자가 새 비밀번호를 직접 입력한다. 재설정 링크 발송으로 바꿀지 |
+| Q30 | `targetMode` 수정 가능 여부 | 자산에 고정된 값이라 `PATCH` 금지로 뒀다. 오등록 정정 수단이 필요한가 |
+| Q31 | 관리자 배터리 상세 `info.location`·`info.device` | `설치 위치`는 저장 경로 자체가 없고, `연결 진단기`는 F5 제외 결정과 충돌. 필드를 살릴지 뺄지 (Q7과 연동) |
+| Q32 | 캘리브레이션 조회 범위 | 사용자별? 진단기별? 전역? 활성 세션이 없을 때 무엇을 반환하나 |
+| Q33 | 측정 세션 종료 트리거 | v3에 종료 버튼이 없다. 사용자 조작 / 다른 배터리 연결만 / 타임아웃 / 계정 정지 중 무엇인가 (§4.3 참조) |
 
 ### 브라우저 실측으로 해결된 항목
 
@@ -1235,13 +1388,13 @@ v3 테이블 컬럼: `시간 · 관리자 · 행위 · 대상 · 변경 내용` 
 
 ## 11. 기능정의서와 v3의 불일치 — 실측 기록
 
-`docs/feature_definition.md`·`docs/admin_feature_definition.md`는 v1(2026-07-10) 기준이다. v3를 브라우저로 띄워 확인한 차이는 아래와 같으며, **이 계약서는 전부 v3를 따랐다.**
+기능정의서 2종은 2026-07-22 커밋 `9bb6d8e`로 v3 기준에 맞춰졌고, 이상점수 스케일·4등급·게이지 범례 버그는 **이미 반영돼 있다**(계약서 §1.6과 일치). 다만 개별 기능의 **화면 위치**는 아직 어긋난 것이 있다. 브라우저로 확인한 차이는 아래와 같으며, **이 계약서는 전부 v3를 따랐다.**
 
 ### 위치가 다른 것
 
 | 요구사항 | 문서가 말하는 위치 | 실제 v3 위치 |
 |---|---|---|
-| REQ-WEB-025 위험도 분포 | 대시보드 | **이상 탐지 화면** |
+| REQ-WEB-025 위험도 분포 | (화면 미지정) | **이상 탐지 화면** — 계약서가 명시 |
 | REQ-WEB-026 최근 이벤트 | 대시보드 | **이상 탐지 화면** (`활성 이상 이벤트`) |
 | REQ-WEB-051 정렬 | 이벤트 이력 | **배터리 관리 화면** (최근 측정순·이상점수순·SOC순) |
 | REQ-WEB-054/055 CSV·PDF | 이벤트 이력 | **추세 차트 화면** |
@@ -1264,9 +1417,14 @@ v3 테이블 컬럼: `시간 · 관리자 · 행위 · 대상 · 변경 내용` 
 |---|---|---|
 | REQ-WEB-037 배터리 등록 | 이름·종류·모드·직렬 셀 수·**제조사/모델** | 이름·종류·모드·직렬 셀 수 **4개뿐** |
 
+### 입력 항목이 누락된 것 (계약서 쪽 오류였음)
+
+| 항목 | 내용 |
+|---|---|
+| REQ-WEB-038 배터리 수정 | v3 수정 모달에 **`메모`** 입력이 있고 `PLAN.md:136`에도 정의돼 있는데 계약 초안이 빠뜨렸다 → §4.2에 추가 |
+
 ### 문서에 없는데 v3에 있는 것
 
-- **배터리 미연결 시 8메뉴 전면 잠금** (§3.1) — 문서 4종에 0건
 - **알림 센터 "오늘의 알림 요약"** 카드 (위험/경고/정상·점검 3칸)
 - **관리자 대시보드 모드별 배터리 분포** (모드 1/2/3)
 - **대시보드 지표별 상태 배지** (전압·전류·온도·SOC 각각 정상/경고)
@@ -1294,3 +1452,7 @@ v3 테이블 컬럼: `시간 · 관리자 · 행위 · 대상 · 변경 내용` 
 | 12 | 이름 아래 `측정 담당자` / `시스템 관리자` 라인 제거 | Q26 결정. 사이드바 하단 + 계정 정보 탭 2곳 |
 | 13 | 이벤트·알림 문구에서 `· 셀 3` 제거 | Q22 결정. 셀 단위 측정 안 함 |
 | 14 | 지표 카드 배지를 서버 `status`로 교체 | Q24 결정. `dTempWarn = temp >= 55` 같은 클라이언트 판정 제거 |
+| 15 | 유저 수정 모달의 `등록 배터리 수`를 읽기 전용으로 | 파생값인데 v3가 편집 가능한 입력으로 그림. 서버는 이 필드를 받지 않는다 |
+| 16 | 유저 수정 모달에서 `권한`·`상태` 편집 분리 | `PATCH /admin/users`가 안 받는다. 상태는 정지/해제 버튼(사유 필수), 권한은 Q28 결정까지 보류 |
+| 17 | 배터리 수정 모달의 `메모`를 계약 `memo`에 연결 | 관리자 메모와 다른 필드임에 주의 |
+| 18 | 측정 종료 수단 결정 | Q33. 종료 버튼이 없어 세션이 영구 ACTIVE로 남을 수 있음 |
