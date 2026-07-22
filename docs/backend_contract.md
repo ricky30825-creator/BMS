@@ -7,8 +7,11 @@
 | 항목 | 값 |
 |---|---|
 | 작성일 | 2026-07-22 |
-| 근거 기준 | `설계 산출물/셀가드 프로토타입_v3.html` (실측), `docs/feature_definition.md`(REQ-WEB-001~072), `docs/admin_feature_definition.md`(REQ-WEB-101~136), `PLAN.md` |
+| 근거 기준 | `설계 산출물/셀가드 프로토타입_v3.html`, `docs/feature_definition.md`(REQ-WEB-001~072), `docs/admin_feature_definition.md`(REQ-WEB-101~136), `PLAN.md` |
+| 검증 방법 | v3 번들에서 앱 소스 복원(코드 실측) + **로컬 HTTP로 띄워 전 화면 육안 확인**(2026-07-22, 사용자 10화면 + 관리자 6화면) |
 | 대상 화면 | 19개 영역 (공개 3 · 일반 사용자 10 · 관리자 6) |
+
+> **기능정의서보다 v3 화면이 우선한다.** `docs/feature_definition.md`는 v1(2026-07-10) 기준이라 v3와 어긋나는 항목이 여럿 확인됐다. 이 문서는 어긋난 곳마다 실측 결과를 명시했다 — §11에 모아 두었다.
 
 ## 0. 표기 규칙
 
@@ -129,10 +132,12 @@ v3 UI는 이상점수를 **0–100 정수**로 표시하고(`score: 82`), `PLAN.
 - 화면 표시용 0–100 정수는 프론트가 `Math.round(score * 100)`으로 만든다.
 
 ```json
-{ "score": 0.8213, "grade": "DANGER", "scoreDisplay": 82 }
+{ "score": 0.8213, "grade": "DANGER" }
 ```
 
-> `scoreDisplay`를 서버가 함께 내려줄지는 `[정의 필요 — Q3]`. 반올림 규칙을 한 곳에 고정하려면 서버가 주는 편이 안전하다.
+**임계치는 시스템 고정값이다.** 사용자·관리자 모두 변경할 수 없다(임계치 설정 기능은 제거됨). 그래도 `grade`를 서버가 계산해 동봉하는 이유는 **판정 로직을 한 곳에만 두기 위해서다** — 프론트·백엔드·AI가 각자 임계값을 들고 있으면 v3에서 실제로 벌어진 것과 똑같은 3-벌 분기 사고가 재현된다.
+
+> **프론트 작업 메모:** v3의 Raw 데이터 모달은 `anomaly_score`를 `82`로 표시한다. "원본 데이터"를 표방하는 화면이 가공값을 보여주는 셈이므로, 실제 구현에서는 `0.82`로 고친다.
 
 **등급 정의** `[PLAN]`
 
@@ -155,6 +160,12 @@ v3에는 판정 로직이 **세 벌** 존재하고 서로 어긋난다.
 | 관리자 배터리 목록 (`scCol` 계산) | `≥70 / ≥40` | 3등급 — **버그** |
 
 계약은 **4등급(0.3/0.6/0.8)** 하나뿐이다. 백엔드는 v3의 70/40을 참고하지 말 것.
+
+**브라우저 실측 증거 (2026-07-22)**
+
+- 배터리 관리 화면의 **PACK-003은 이상점수 33인데 배지가 `정상`** 이다. 4등급이면 `주의`여야 한다. 3등급 버그가 화면에 그대로 드러난 사례.
+- 반대로 관리자 배터리 운영 로그에는 **`이상점수 위험 구간 진입 — 82 (위험 임계 80)`** 이라고 적혀 있다. **v3 자신도 일부 화면에서는 80을 정답으로 쓰고 있다.**
+- 대시보드 게이지 범례 `정상 0–39 / 주의 40–69 / 위험 70+` 는 화면에 실재하며, 4등급으로 교체해야 한다.
 
 **등급 판정은 서버가 한다.** 사용자가 설정 화면에서 임계치를 조정할 수 있기 때문이다(§4.4 임계치 탭 `[v3]`). 임계치가 사용자별로 다르므로 프론트가 하드코딩하면 반드시 어긋난다.
 
@@ -384,6 +395,11 @@ const locked = gated && r !== 'battery';
 - `targetMode` 필수 — 재연결 시 모드 재선택을 없애기 위해 배터리에 고정된다 `[PLAN]`
 - 201 응답 본문은 생성된 배터리 객체 전체 (프론트가 목록에 즉시 삽입)
 
+> **`maker`/`model`은 등록 폼에 없다** `[v3 실측]`. v3 등록 모달의 입력은 `배터리 이름 / 종류(리튬이온·리튬폴리머) / 측정 모드(1·2·3) / 직렬 셀 수(S)` **4개뿐**이며, 안내 문구는 `등록 시 battery_id(UUID)가 발급되고 측정 모드가 자산에 고정됩니다`이다.
+> 그런데 배터리 카드·상세는 `18650 Li-ion · 3S`처럼 제조사/모델을 표시한다. **REQ-WEB-037이 "제조사/모델을 입력한다"고 적은 것은 v3와 맞지 않는다.** 두 가지 중 하나를 정해야 한다 `[정의 필요 — Q23]`:
+> (a) 등록 폼에 `maker`/`model` 입력을 추가한다 — 그러면 위 요청 본문 그대로.
+> (b) 표시 문자열을 `chemistry` + `seriesCount`로만 조립한다(`리튬이온 · 3S`) — 그러면 요청/응답에서 `maker`/`model`을 삭제한다.
+
 #### `GET /api/batteries/{id}` — 배터리 상세/이력 (F7) `[REQ-WEB-040/044]`
 
 ```json
@@ -411,9 +427,14 @@ const locked = gated && r !== 'battery';
 }
 ```
 
-- `health` 4개 필드는 v3 화면에 존재한다 `[v3: T.sohLabel/rulLabel/cumCycle/intRes]` `[REQ-WEB-044]`.
+- `health` 4개 필드는 v3 화면에 실측 확인했다 — `SOH 92% · RUL ~480 사이클 · 누적 사이클 312 · 내부 저항 18.4 mΩ` `[v3]` `[REQ-WEB-044]`.
   **이 값들을 누가 계산하는지는 `[정의 필요 — Q6]`.** AI 파이프라인 산출물인지 백엔드 집계인지 미정.
 - `scoreTrend30d`는 일 단위 집계 30건 `[v3: T.scoreTrend30]`.
+- 상세 화면은 `battery_id`의 UUID 앞자리를 **화면에 직접 노출한다**(`battery_id · a7f3c9-…`) `[v3]`. §2의 `id`/`label` 분리가 v3 설계와 일치한다.
+- 상세 화면에는 **V·I·T·SOC 추세 4차트 + 기간 탭(24시간/7일/30일)** 이 함께 있다 `[v3]`. §4.7 `GET /api/trends`를 `batteryIds` 1개로 호출해 재사용한다.
+
+> **셀 단위 온도는 범위에서 제외한다.** v3 상세 화면에 `셀 온도 히트맵 · 24셀 (3S8P)`가 렌더링되지만, 이 기능은 쓰지 않기로 결정되었다. 따라서 셀별 온도 배열 API를 만들지 않으며, 배터리 등록에 병렬 셀 수(P)도 받지 않는다.
+> 다만 **이벤트·알림에는 셀 번호가 남는다** — `온도 임계값 초과 · 셀 3`, Raw 모달의 `cell_index: 3` `[v3]`. §4.6/§4.8의 `cellIndex`가 그것이며, 셀별 시계열이 아니라 "몇 번 셀에서 터졌는지" 단일 값이다. 에지가 이 값을 어떻게 특정하는지는 `[정의 필요 — Q22]`.
 
 #### `GET /api/batteries/{id}/sessions` `[REQ-WEB-041]`
 
@@ -464,9 +485,13 @@ v3 테이블 컬럼: `세션 ID · 기간 · 최고 이상점수 · 상태 · �
 
 ### 4.4 실시간 관제 (F4)
 
-#### `GET /api/dashboard` — 초기 스냅샷 `[REQ-WEB-019/021/024/025/026]`
+#### `GET /api/dashboard` — 초기 스냅샷 `[REQ-WEB-019/021/024]`
 
 WebSocket 연결 **전에** 화면을 채우기 위한 1회 조회. 이후 갱신은 §5 WebSocket이 담당한다. `[제안]`
+
+**v3 대시보드의 실제 구성** (브라우저 실측): 배터리 헤더 + 상태 배너 + 이상점수 게이지 → 빠른 추세 4카드(V/I/T/SOC, 각 카드에 개별 상태 배지) → V·I·T·SOC 추세 차트 1개(지표 선택 버튼) → 공지사항 3건. **이게 전부다.**
+
+> **REQ-WEB-025(위험도 분포)·REQ-WEB-026(최근 이벤트)은 대시보드에 없다.** 둘 다 이상 탐지 화면(F8)에 있다. 기능정의서가 v1 기준이라 낡았다. → §4.5로 옮겼다.
 
 ```json
 {
@@ -482,8 +507,7 @@ WebSocket 연결 **전에** 화면을 채우기 위한 1회 조회. 이후 갱�
     "evaluatedAt": "..."
   },
   "relay": { "state": "OPEN", "reason": "FAILSAFE_TEMP", "changedAt": "..." },
-  "riskDistribution": { "NORMAL": 3, "CAUTION": 1, "WARNING": 0, "DANGER": 1 },
-  "recentEvents": [ /* EventSummary × 5 */ ],
+  "notices": [ /* NoticeSummary × 3 */ ],
   "quickTrend": {
     "metric": "temp",
     "points": [{ "at": "...", "value": 57.2 }]
@@ -491,46 +515,31 @@ WebSocket 연결 **전에** 화면을 채우기 위한 1회 조회. 이후 갱�
 }
 ```
 
-- `aeScore`/`informerScore`는 이중 모델 개별 점수 `[PLAN: S-FGKMXE]`. v3 화면에는 없지만 이상 탐지 화면 XAI 확장에 쓰인다. 없으면 `null`.
-- `riskDistribution`은 **사용자의 전체 배터리** 기준 `[REQ-WEB-025]`.
+- `metrics`의 각 항목에는 **개별 상태 배지**가 붙는다 — v3 빠른 추세 카드가 전압 `정상`, 온도 `⚠ 경고`처럼 지표마다 따로 표시한다 `[v3 실측]`. 이상점수 등급과는 **다른 축**이다. 지표별 상태 산출 기준은 `[정의 필요 — Q24]`.
+- `aeScore`/`informerScore`는 이중 모델 개별 점수 `[PLAN: S-FGKMXE]`. v3 화면에는 없다. 없으면 `null`.
+- `notices`는 대시보드 하단 공지 3건 `[v3]` `[REQ-WEB-028]`. §4.9 `NoticeSummary`와 동일 스키마(제목·카테고리·요약·게시일).
 - `quickTrend.metric`은 `volt|curr|temp|soc` 중 프론트가 선택 `[v3: dMetric]` `[REQ-WEB-024]`. 쿼리 `?metric=temp`로 지정.
 
-#### 임계치 설정 `[v3: T.thTitle/thWatch/thWarn/thDanger/tempCap]`
-
-v3 설정 화면에 **임계치 탭**이 존재한다. `주의 진입 / 경고 진입 / 위험 진입 / 온도 상한(°C)`.
-
-| 메서드 | 경로 |
-|---|---|
-| `GET` | `/api/settings/thresholds` |
-| `PATCH` | `/api/settings/thresholds` |
-
-```json
-{
-  "caution": 0.3, "warning": 0.6, "danger": 0.8,
-  "tempCapC": 60,
-  "updatedAt": "..."
-}
-```
-
-- 서버는 `caution < warning < danger` 를 강제한다. 위반 시 `400 VALIDATION_FAILED`.
-- **이 값이 §1.6 `grade` 계산의 입력이다.** 사용자가 바꾸면 이후 모든 응답의 `grade`가 달라진다.
-- `tempCapC` 초과 시 즉시 경고 `[v3: T.tempCapNote]` — Fail-Safe 트리거와 연동 `[정의 필요 — Q8]`.
+> **임계치 설정 API는 없다.** v3 코드에 `T.thWatch/thWarn/thDanger/tempCap` 라벨이 남아 있지만 설정 화면에 렌더링되지 않으며(탭은 `알림 수신 / 계정 정보 / 테마·캘리브레이션` 3개뿐), **임계치 설정 기능은 제거하기로 결정되었다.** 등급 임계값은 §1.6의 고정값(0.3/0.6/0.8)이다.
 
 ### 4.5 이상 탐지 (F8)
 
-#### `GET /api/anomaly/summary` `[REQ-WEB-042]`
+#### `GET /api/anomaly/summary` `[REQ-WEB-042]` `[REQ-WEB-025]`
 
 ```json
 {
   "activeCount": 9,
   "todayCount": 23,
-  "peakScore": 0.82,
+  "peakScore": 0.91,
   "peakAt": "2026-06-29T05:24:00.000Z",
-  "model": { "status": "RUNNING", "lastInferenceAt": "...", "version": "ae-1.3+informer-0.9" }
+  "model": { "status": "RUNNING", "lastInferenceAt": "...", "version": "ae-1.3+informer-0.9" },
+  "riskDistribution": { "NORMAL": 3, "CAUTION": 1, "WARNING": 0, "DANGER": 1 }
 }
 ```
 
 - `model.status`: `RUNNING` \| `DEGRADED` \| `STOPPED` `[v3: T.modelStatus/running]`
+- **`riskDistribution`은 요청한 사용자가 소유한 배터리만 집계한다.** v3 화면은 `정상 112 / 주의 11 / 경고 3 / 위험 2`(합 128)를 보여주지만 해당 계정의 배터리는 5개뿐이며, 이는 프로토타입 더미 숫자다. 실제로는 소유 배터리 수와 합이 일치해야 한다.
+- 4등급 전부를 키로 내려준다. 0건인 등급도 `0`으로 포함한다(프론트가 4칸 고정 레이아웃).
 
 #### `GET /api/anomaly/evidence` — XAI 기여 요인 `[REQ-WEB-043]`
 
@@ -550,7 +559,8 @@ v3가 표시하는 4개 특징: `dT/dt(온도 상승률)`, `I_smooth(전류 변�
 }
 ```
 
-- `contribution`은 0–1, **합이 1이 되도록 정규화해서 내려준다.** v3는 막대 길이로 그린다.
+- **합이 1이 되도록 정규화하지 않는다.** v3 실측값은 `+0.42 / +0.28 / +0.16 / +0.09`로 합이 **0.95**다. 각 특징이 이상점수에 기여한 **부호 있는 양**이며 서로 독립이다. 프론트는 최댓값 기준으로 막대 폭을 잡는다.
+- 값의 범위와 부호 규약(음의 기여가 나올 수 있는지)은 `[정의 필요 — Q25]`. v3는 전부 `+`만 보여준다.
 - 내림차순 정렬 보장.
 - `label`을 서버가 줄지 프론트가 매핑할지는 `[정의 필요 — Q2]`(다국어와 연동).
 
@@ -562,7 +572,9 @@ v3가 표시하는 4개 특징: `dT/dt(온도 상승률)`, `I_smooth(전류 변�
 
 #### `GET /api/events` `[REQ-WEB-049~053]`
 
-쿼리: `q`(이벤트명·배터리 라벨 검색), `severity`(`DANGER|WARNING|CAUTION|CUT|NORMAL`, 복수 가능), `batteryId`, `from`, `to`, `sort`(기본 `occurredAt,desc`), `page`, `size`
+쿼리: `q`(이벤트명·배터리 라벨 검색), `severity`(`DANGER|WARNING|CAUTION|CUT|NORMAL`, 복수 가능), `batteryId`, `from`, `to`, `page`, `size`
+
+**정렬 파라미터는 없다.** v3 이벤트 화면에 정렬 UI가 없다(검색창 + 상태 칩 6종 + 페이지네이션뿐). 항상 `occurredAt desc` 고정이다. `REQ-WEB-051`이 말하는 `최근 측정순 / 이상점수 높은순 / SOC 낮은순` 드롭다운은 **배터리 관리 화면(F6)의 것**이며, 기능정의서가 이벤트 화면으로 잘못 분류했다 `[v3 실측]`.
 
 ```json
 {
@@ -586,14 +598,11 @@ v3가 표시하는 4개 특징: `dT/dt(온도 상승률)`, `I_smooth(전류 변�
 
 - `source`: `SYSTEM`(시스템 자동) \| `AI`(이상탐지 엔진) \| `INGEST`(수집 서버) \| `USER` `[v3: by 필드]`
 - `score`는 릴레이 차단·하트비트 누락처럼 점수가 없는 이벤트에서 `null` (v3는 `'—'` 문자열) `[v3 보정]`
+- `cellIndex`(선택) — 셀 특정이 가능한 이벤트에만 (`온도 임계값 초과 · 셀 3`) `[v3]`
 - 상세 모달은 목록 항목만으로 렌더링 가능하다 — v3 상세는 `배터리/이상점수/발생 시각/탐지 주체/원인/조치` 6행이며 전부 위 필드에 포함된다 `[v3]`. **별도 상세 엔드포인트 불필요.**
+- 목록의 `시간` 컬럼은 `14:32:10`처럼 시:분:초만 표시하고 상세에서 `2026-07-03 14:32:10`으로 날짜를 보여준다 `[v3]`. 서버는 §1.1대로 항상 완전한 ISO 8601을 내려주고, 잘라 쓰는 건 프론트가 한다.
 
-#### `GET /api/events/export` `[REQ-WEB-054/055]`
-
-쿼리: 위 필터 전부 + `format=csv|pdf`
-
-- 응답: `200` + `Content-Disposition: attachment`
-- 대용량 대비 비동기 처리 필요 여부 `[정의 필요 — Q9]`
+> **CSV/PDF 내보내기는 이벤트 화면에 없다** `[v3 실측]`. 버튼은 **추세 차트 화면**에 있다 → §4.7 참조. `REQ-WEB-054/055`가 "이벤트 또는 이력 조회 결과"라고 적은 것은 v3와 맞지 않는다.
 
 ### 4.7 추세 차트 (F9)
 
@@ -604,9 +613,10 @@ v3가 표시하는 4개 특징: `dT/dt(온도 상승률)`, `I_smooth(전류 변�
 | 이름 | 값 | 근거 |
 |---|---|---|
 | `period` | `24h` \| `7d` \| `30d` | `[v3: periodCfg]` `[REQ-WEB-046]` |
-| `metrics` | `volt,curr,temp,soc` 콤마 구분 | `[v3: TM]` `[REQ-WEB-047]` |
 | `batteryIds` | 콤마 구분, 최대 N개 | `[v3: comparePacks]` `[REQ-WEB-048]` |
 | `sessionIds` | 콤마 구분 (배터리 대신 세션 비교) | `[v3: cmpTitle '다중 배터리 / 세션 비교']` |
+
+**`metrics` 파라미터는 없다.** v3 추세 화면은 전압·전류·온도·SOC **4개 차트를 항상 동시에** 렌더링한다. 지표 선택 UI가 없으므로 응답은 항상 4지표 전부를 담는다 `[v3 실측]`. (`REQ-WEB-047`이 말하는 "표시 지표 선택"은 **대시보드**의 지표 버튼이며, 추세 화면의 기능이 아니다.)
 
 ```json
 {
@@ -627,13 +637,36 @@ v3가 표시하는 4개 특징: `dT/dt(온도 상승률)`, `I_smooth(전류 변�
 - 다운샘플링 규칙 `[정의 필요 — Q10]`: `24h`=1시간, `7d`=1일, `30d`=1일 집계를 제안. v3 포인트 수는 각각 25/7/30이다 `[v3: periodCfg.n]`.
 - 집계 방식(avg/max)도 함께 정해야 한다. **온도·이상점수는 `max`, 전압·SOC는 `avg`가 안전하다** — 피크를 평균으로 뭉개면 열폭주 전조가 사라진다. `[제안]`
 
+#### `GET /api/trends/export` `[REQ-WEB-054/055]`
+
+CSV·PDF 버튼은 **추세 화면 상단, 기간 탭 옆**에 있다 `[v3 실측]`.
+
+쿼리: `GET /api/trends`의 파라미터 전부 + `format=csv|pdf`
+
+- 응답: `200` + `Content-Disposition: attachment`
+- 대용량 대비 비동기 처리 필요 여부 `[정의 필요 — Q9]`
+
 ### 4.8 알림 센터 (F11)
 
 | 메서드 | 경로 | 근거 |
 |---|---|---|
 | `GET` | `/api/alerts` | `[REQ-WEB-056]` |
+| `GET` | `/api/alerts/summary` | `[v3 실측]` |
 | `POST` | `/api/alerts/{id}/ack` | `[REQ-WEB-057]` |
 | `POST` | `/api/alerts/ack-all` | `[REQ-WEB-058]` |
+
+#### `GET /api/alerts/summary` — 오늘의 알림 요약
+
+v3 알림 센터 상단에 **"오늘의 알림 요약 — 확인이 필요한 알림 N건"** 카드가 있고, 우측에 `위험 1 / 경고 2 / 정상·점검 2` 3칸이 붙는다 `[v3 실측]`. 기능정의서에 없던 항목이다.
+
+```json
+{
+  "unacknowledgedCount": 1,
+  "today": { "DANGER": 1, "WARNING": 2, "NORMAL_OR_CHECK": 2 }
+}
+```
+
+> **3칸이다.** `정상`과 `점검`(디바이스 이벤트)을 한 칸에 합쳐 보여준다. 4등급 분포와 다른 축이므로 §4.5의 `riskDistribution`을 재사용하지 말 것.
 
 ```json
 {
@@ -667,8 +700,11 @@ v3가 표시하는 4개 특징: `dT/dt(온도 상승률)`, `I_smooth(전류 변�
 ```
 
 - `subjectType`: `BATTERY` \| `DEVICE` — v3에 `진단기 C 하트비트 미수신` 알림이 있어 배터리가 아닌 대상이 존재한다 `[v3: thumb:'device']`
-- `rawSnapshot` → **Raw 데이터 보기 모달** `[v3: rawModal, T.rawView]`. v3 v3에서 신규 추가된 기능이다. 필드 구성은 알림 종류마다 다르며, 값이 없으면 키를 생략한다.
+- `rawSnapshot` → **Raw 데이터 보기 모달** `[v3: rawModal, T.rawView]`. v3에서 신규 추가된 기능이다. 필드 구성은 알림 종류마다 다르며, 값이 없으면 키를 생략한다.
+- **`확인(Ack)`·`Raw 데이터 보기` 버튼은 미확인 알림에만 노출된다** `[v3 실측]`. 즉 `acknowledgedAt !== null`이면 프론트가 두 버튼을 감춘다. 서버는 이미 확인된 알림에 대한 `ack` 재요청을 멱등 처리한다(에러 아님).
 - `POST /ack` 응답은 갱신된 알림 객체. `ack-all`은 `{ "acknowledgedCount": 3 }`.
+
+> **Raw 모달은 키를 snake_case 그대로 화면에 찍는다** (`voltage_v`, `soc_pct`, `anomaly_score`, `relay_state`) `[v3 실측]`. 반면 이 계약의 나머지 JSON은 camelCase다. 서버는 camelCase로 통일해 내려주고, Raw 모달의 snake_case 라벨은 **프론트가 표시용으로 매핑**한다 — 이 화면의 목적이 "에지/AI가 발행하는 원본 필드명을 그대로 보여주는 것"이기 때문이다.
 
 ### 4.9 공지사항 (F13) — 사용자
 
@@ -712,7 +748,10 @@ v3가 표시하는 4개 특징: `dT/dt(온도 상승률)`, `I_smooth(전류 변�
 ```
 
 - `interlock.canRestore: false`면 프론트는 복구 버튼을 비활성화한다. 서버도 `409 INTERLOCK_LOCKED`로 막는다 (§3.3).
-- `autoRecover` — v3 릴레이 화면에 항목 존재 `[v3: T.autoRecover]`. 자동 복구 조건은 `[정의 필요 — Q12]`.
+- `autoRecoverEnabled` — 자동 복구 조건은 `[정의 필요 — Q12]`.
+
+> **`interlock`·`autoRecoverEnabled`는 v3 화면에 표시되지 않는다** `[v3 실측]`. `T.interlock('인터락 조건')`·`T.autoRecover('자동 복구')` 라벨이 코드에 정의돼 있으나 렌더링되지 않으며, 실제 릴레이 화면은 `현재 상태(차단됨) / 릴레이 복구 버튼 / 실행하기 / 최근 제어 이력` 뿐이다.
+> 그래도 **두 필드는 계약에 유지한다** — §3.3의 Fail-Safe 우선 규칙을 서버가 강제하려면 인터락 상태가 필요하고, 프론트는 최소한 복구 버튼 활성/비활성 판단에 `canRestore`를 써야 한다. 표시 여부는 프론트가 정한다.
 
 #### `POST /api/relay/cut` / `POST /api/relay/restore` `[REQ-WEB-062/063]`
 
@@ -740,15 +779,19 @@ v3가 표시하는 4개 특징: `dT/dt(온도 상승률)`, `I_smooth(전류 변�
 
 ### 4.11 설정 (F14)
 
+**v3 설정 탭은 3개다** `[v3 실측]`: `알림 수신` / `계정 정보` / `테마 · 캘리브레이션`.
+
 | 메서드 | 경로 | 탭 | 근거 |
 |---|---|---|---|
-| `GET`/`PATCH` | `/api/settings/thresholds` | 임계치 | §4.4 |
 | `GET`/`PATCH` | `/api/settings/alerts` | 알림 수신 | `[REQ-WEB-065/066]` |
-| `GET`/`PATCH` | `/api/settings/voice-alert` | 음성 안내 | `[REQ-WEB-072]` `[PLAN]` |
-| `GET`/`PATCH` | `/api/settings/preferences` | 테마·언어 | `[REQ-WEB-070/015]` |
 | `PATCH` | `/api/me` | 계정 정보 | `[REQ-WEB-067]` |
 | `POST` | `/api/me/password` | 비밀번호 변경 | `[REQ-WEB-068]` |
-| `GET` | `/api/calibrations` | 캘리브레이션 이력 | `[REQ-WEB-071]` |
+| `GET`/`PATCH` | `/api/settings/preferences` | 테마 · 캘리브레이션 | `[REQ-WEB-070/015]` |
+| `GET` | `/api/calibrations` | 테마 · 캘리브레이션 | `[REQ-WEB-071]` |
+| `GET`/`PATCH` | `/api/settings/voice-alert` | **화면 없음** | `[REQ-WEB-072]` `[PLAN]` |
+
+> **임계치 탭은 없다** — 기능 자체가 제거되었다(§4.4 참조).
+> **음성 안내 설정은 v3 어느 화면에도 없다.** 그러나 `PLAN.md`에 모델·API가 이미 확정돼 있고 에지 하드웨어 동작과 직결되므로 **계약에 포함한다.** 프론트가 설정 화면에 탭 또는 섹션을 새로 만들어야 한다.
 
 **`/api/settings/alerts`** `[v3: kakaoOn/emailOn/smsOn/pushOn]`
 
@@ -796,6 +839,9 @@ v3가 표시하는 4개 특징: `dT/dt(온도 상승률)`, `I_smooth(전류 변�
 - 등록/수정 UI는 v3에 없다. **조회 전용.** 등록 경로는 `[정의 필요 — Q14]`.
 
 > **REQ-WEB-069(프로필 사진 변경)는 범위에서 제외되었다** — `docs/superpowers/specs/2026-07-22-...` 검증 결과 반영. 아바타 업로드 엔드포인트는 만들지 않는다.
+> 다만 **`사진 변경` 버튼은 v3 계정 정보 탭에 실제로 렌더링돼 있다** `[v3 실측]`. 프론트가 이 버튼을 제거해야 한다. 남겨두면 백엔드에 없는 기능을 사용자가 누르게 된다.
+
+> **`측정 담당자` 표기 주의** — v3는 사이드바 하단과 계정 탭에 이름 아래 `측정 담당자`(관리자는 `시스템 관리자`)를 표시한다 `[v3 실측]`. 이것이 `role`(USER/ADMIN)의 한국어 라벨인지, 별도 직함 필드인지 불명확하다 `[정의 필요 — Q26]`. 라벨이라면 프론트 매핑으로 끝나고, 별도 필드라면 `user.jobTitle`이 필요하다.
 
 ### 4.12 관리자 (F15~F20)
 
@@ -803,26 +849,31 @@ v3가 표시하는 4개 특징: `dT/dt(온도 상승률)`, `I_smooth(전류 변�
 
 #### `GET /api/admin/overview` — 통합 관제 (F15) `[REQ-WEB-104~107]`
 
+v3 실측 구성: KPI 카드 4개 → 이벤트 추이 차트 + 배터리 상태 분포 → 최근 위험 배터리 / 공지사항 / 최근 관리자 조작.
+
 ```json
 {
   "summary": {
-    "totalUsers": 128, "newUsers7d": 18,
-    "totalBatteries": 342, "newBatteries7d": 42,
-    "activeSessions": 6,
-    "riskBatteries": 4, "anomalies24h": 23,
-    "offlineDevices": 1
+    "totalUsers": 342, "newUsers7d": 18,
+    "totalBatteries": 1284, "newBatteries7d": 42,
+    "activeSessions": 37,
+    "riskBatteries": 5, "anomalies24h": 23
   },
-  "statusDistribution": { "NORMAL": 310, "WATCH": 28, "BLOCKED": 4 },
+  "statusDistribution": { "NORMAL": 1152, "WATCH": 127, "BLOCKED": 5 },
+  "modeDistribution": { "1": 612, "2": 448, "3": 224 },
   "eventTrend7d": [
     { "bucket": "2026-07-16", "caution": 8, "warning": 3, "danger": 1 }
   ],
-  "recentRiskBatteries": [ /* AdminBatteryRow × 5 */ ],
-  "recentAdminActions": [ /* AuditEntry × 5 */ ],
+  "recentRiskBatteries": [ /* AdminBatteryRow × 3 */ ],
+  "recentAdminActions": [ /* AuditEntry × 3 */ ],
   "recentNotices": [ /* NoticeSummary × 3 */ ]
 }
 ```
 
-- `statusDistribution` 키는 운영 상태(`NORMAL/WATCH/BLOCKED`)이며, 사용자 대시보드의 `riskDistribution`(이상 등급)과 **다른 축이다.** 혼동 주의 `[v3: ad.stNormal/stWatch/stLimit]`.
+- **KPI 카드는 4개다** — `전체 유저 / 전체 배터리 / 활성 세션 / 위험·경고 배터리` `[v3 실측]`. `REQ-WEB-104`가 언급한 **오프라인 디바이스 카드는 화면에 없다.** 디바이스 화면(F5)이 제외된 것과 일관되므로 `offlineDevices`를 뺐다.
+- `modeDistribution` — 배터리 상태 분포 카드 하단에 `모드 1 / 2 / 3 → 612 / 448 / 224`로 표시된다 `[v3 실측]`. 내가 처음에 누락했던 항목이다.
+- `statusDistribution` 키는 운영 상태(`NORMAL/WATCH/BLOCKED`)이며, 이상 탐지 화면의 `riskDistribution`(이상 등급)과 **다른 축이다.** 혼동 주의.
+  - 화면 라벨은 `정상 / 주시 / 제한`이다 `[v3 실측]`. `제한` = `BLOCKED`. 목록 필터 칩은 영문 `NORMAL / WATCH / BLOCKED`를 쓰므로 **같은 값에 두 벌의 한국어 라벨이 존재한다.** 프론트가 하나로 통일해야 한다.
 
 #### `GET /api/admin/event-trend` — 이벤트 추이 (F20) `[REQ-WEB-107/108]`
 
@@ -905,10 +956,24 @@ v3가 표시하는 4개 특징: `dT/dt(온도 상승률)`, `I_smooth(전류 변�
 }
 ```
 
-**상세** — 위 + `info[]`(직렬 구성·설치 위치·연결 진단기·관리자 메모) + `opsLogs[]` `[v3]`
+**상세** — 위 + `info[]`(직렬 구성·설치 위치·연결 진단기·관리자 메모) + `opsLogs[]`
+
+```json
+{
+  "opsLogs": [{
+    "at": "...", "severity": "DANGER",
+    "summary": "릴레이 자동 차단 (Fail-Safe)", "meta": "온도 61.4°C 임계 초과"
+  }]
+}
+```
+
+> **v3 상세 모달은 조회 전용이다** `[v3 실측]`. 실제로 열어보면 `이상점수 / 온도 / 전압 / SOC` 4칸과 `운영 로그` 목록, 그리고 `닫기` 버튼뿐이다. **운영 상태를 바꾸는 UI도, 관리자 메모를 입력하는 UI도 없다.** 코드에 정의된 `info[]`(직렬 구성·설치 위치·연결 진단기·관리자 메모)조차 렌더링되지 않는다.
+> 그럼에도 `REQ-WEB-123/124/125`는 **계약에 포함하기로 결정했다** — 감사 로그에 이미 `배터리 상태 변경 · NORMAL → BLOCKED` 기록이 존재하므로 기획상 있어야 하는 기능이다. **프론트가 상세 모달에 입력 UI를 추가해야 한다.**
 
 **운영 상태 변경** — `{ "opsStatus": "BLOCKED", "reason": "열폭주 징후" }`
 `BLOCKED`로 변경 시 `reason` **필수** `[REQ-WEB-125]`, 감사 기록 `[REQ-WEB-126]`.
+
+**관리자 메모** — `{ "memo": "열폭주 징후로 차단 유지" }`, 감사 기록 `[REQ-WEB-124/126]`.
 
 > `BLOCKED`가 릴레이 물리 차단까지 유발하는지는 `[정의 필요 — Q16]`. 운영 라벨일 뿐인지, 실제 제어인지 구분이 필요하다.
 
@@ -939,11 +1004,13 @@ v3가 표시하는 4개 특징: `dT/dt(온도 상승률)`, `I_smooth(전류 변�
 - 관리자 목록에는 `viewCount`가 표시된다 `[v3: views '1,204']` — 조회수 집계 방식 `[정의 필요 — Q18]`.
 - **삭제는 `DRAFT`만.** 게시된 공지는 `archive`만 가능 `[v3]`.
 
-#### 감사 로그 (F19) `[REQ-WEB-133~136]`
+#### 감사 로그 (F19) `[REQ-WEB-133/134/136]`
 
 `GET /api/admin/audit-logs` — **조회 전용** (§3.5)
 
 쿼리: `from`, `to`(기본 최근 7일 `[v3: T.aaPeriod7]`), `action`, `targetType`, `actorId`, `page`, `size`
+
+v3 테이블 컬럼: `시간 · 관리자 · 행위 · 대상 · 변경 내용` 5개 `[v3 실측]`
 
 ```json
 {
@@ -952,21 +1019,29 @@ v3가 표시하는 4개 특징: `dT/dt(온도 상승률)`, `I_smooth(전류 변�
     "at": "2026-06-29T05:32:00.000Z",
     "actor": { "id": "u_01H...", "name": "이연구", "role": "ADMIN" },
     "action": "BATTERY_OPS_STATUS_CHANGE",
+    "actionLabel": "배터리 상태 변경",
     "targetType": "BATTERY",
     "targetId": "b_01H...",
     "targetLabel": "PACK-001",
-    "before": { "opsStatus": "WATCH" },
-    "after": { "opsStatus": "BLOCKED" },
-    "reason": "열폭주 징후",
-    "ip": "203.0.113.24",
-    "userAgent": "Mozilla/5.0 ..."
+    "changeSummary": "NORMAL → BLOCKED"
   }]
 }
 ```
 
-- `before`/`after`는 자유 형태 객체 — v3 상세 모달이 변경 전후 값을 표시한다 `[REQ-WEB-135]`.
-- 로그인·접근 거부처럼 변경이 없는 항목은 둘 다 `null`.
-- 프론트는 **수정·삭제 UI를 렌더링하지 않는다.** 서버도 해당 메서드를 노출하지 않는다.
+- **`changeSummary`는 문자열 한 칸이다.** `before`/`after` 객체가 아니다 — v3 `변경 내용` 컬럼에 들어가는 값이 항목 유형마다 성격이 다르기 때문이다 `[v3 실측]`:
+
+| action | changeSummary 실측값 |
+|---|---|
+| 배터리 상태 변경 | `NORMAL → BLOCKED` |
+| 계정 정지 | `ACTIVE → SUSPENDED` |
+| 메모 변경 | `주시 사유 기록` |
+| 관리자 페이지 접근 실패 | `권한 없음 (RBAC)` |
+| 관리자 로그인 | `203.0.113.24` |
+
+- 시스템이 주체인 항목(`ADMIN_ACCESS_DENIED`)은 `actor.name`이 `—`로 비어 있고 `targetLabel`에 시도한 계정 이메일이 들어간다 `[v3 실측]`.
+- 프론트는 **수정·삭제 UI를 렌더링하지 않는다.** 서버도 해당 메서드를 노출하지 않는다. 화면 우상단에 `수정·삭제 불가` 칩이 상시 표시된다 `[v3]` `[REQ-WEB-136]`.
+
+> **`REQ-WEB-135`(감사 로그 상세 확인)는 계약에서 제외한다.** v3에서 행을 클릭해도 아무 반응이 없다(상세 모달 미구현) `[v3 실측]`. 나중에 상세를 만들려면 `before`/`after` 구조화가 필요하므로, 그때 `GET /api/admin/audit-logs/{id}`를 신설한다.
 
 ---
 
@@ -1017,7 +1092,9 @@ v3가 표시하는 4개 특징: `dT/dt(온도 상승률)`, `I_smooth(전류 변�
 
 **중요한 설계 지점**
 
-- **`metrics.tick`은 100ms 원본을 그대로 흘리지 않는다.** 에지는 100ms 주기로 발행하지만 `[PLAN]`, 브라우저가 초당 10프레임 상태 갱신을 감당하지 못한다. 서버가 **1초 단위로 다운샘플링**해 푸시할 것을 제안한다. 실제 주기는 Q20.
+- **`metrics.tick`은 100ms 원본을 그대로 흘리지 않는다.** 에지는 100ms 주기로 발행하지만 `[PLAN]`, 브라우저가 초당 10프레임 상태 갱신을 감당하지 못한다. 서버가 **1초 단위로 다운샘플링**해 푸시한다.
+  - **v3가 이를 뒷받침한다** — 랜딩 히어로와 로그인 모달이 각각 *"전압·전류·온도·SOC를 **1초 단위**로 수집하고"*, *"**1초 단위** 실시간 모니터링"* 이라고 사용자에게 약속한다 `[v3 실측]`. 제품 카피가 이미 1초다.
+  - 다만 `CLAUDE.md`·`PLAN.md`의 수집 주기는 100ms다. **둘 다 맞다** — 에지→Kafka→DB 적재는 100ms, 브라우저 푸시는 1초로 보면 모순이 없다. 문서에 그렇게 명시할 것 `[정의 필요 — Q20]`.
 - **`relay.autoCut`은 별도 타입으로 분리한다.** 프론트가 이 메시지 하나로 자동 차단 모달을 띄운다 `[REQ-WEB-064]`. `relay.changed`에 섞으면 "사용자가 직접 차단한 경우"와 구분이 안 된다.
 - **`anomaly.gradeChanged`도 별도다.** 매 tick마다 등급을 비교하는 대신 서버가 전이만 알려주면, 프론트는 토스트·알림음·모달 트리거를 안전하게 걸 수 있다.
 
@@ -1039,15 +1116,15 @@ v3가 표시하는 4개 특징: `dT/dt(온도 상승률)`, `I_smooth(전류 변�
 | F2 | 회원가입 | `signup` | `/api/auth/*` |
 | F3 | 계정 찾기 | `find` | `/api/auth/*` |
 | F4 | 실시간 관제 | `dashboard` | `GET /api/dashboard`, WS `metrics.tick`·`anomaly.score`·`relay.*` |
-| F6 | 배터리 자산관리 | `battery` | `GET/POST /api/batteries`, `POST /api/sessions` |
-| F7 | 배터리 상세·이력 | `batteryDetail` | `GET /api/batteries/{id}`, `GET /api/batteries/{id}/sessions` |
-| F8 | 이상 탐지 | `anomaly` | `GET /api/anomaly/summary`, `/evidence`, `/events` |
-| F9 | 추세 | `trend` | `GET /api/trends` |
-| F10 | 이벤트 이력 | `events` | `GET /api/events`, `/events/export` |
-| F11 | 알림 센터 | `alertHistory` | `GET /api/alerts`, `POST /ack`, `/ack-all` |
+| F6 | 배터리 자산관리 | `battery` | `GET/POST/PATCH /api/batteries`, `POST /api/sessions` |
+| F7 | 배터리 상세·이력 | `batteryDetail` | `GET /api/batteries/{id}`, `/sessions`, `GET /api/trends?batteryIds={id}` |
+| F8 | 이상 탐지 | `anomaly` | `GET /api/anomaly/summary`(위험도 분포 포함), `/evidence`, `/events` |
+| F9 | 추세 | `trend` | `GET /api/trends`, `/trends/export` |
+| F10 | 이벤트 이력 | `events` | `GET /api/events` |
+| F11 | 알림 센터 | `alertHistory` | `GET /api/alerts`, `/alerts/summary`, `POST /ack`, `/ack-all` |
 | F12 | 릴레이 제어 | `relay` | `GET /api/relay`, `/history`, `POST /cut`, `/restore` |
 | F13 | 공지사항 | `notices` | `GET /api/notices` |
-| F14 | 설정 | `settings` | `/api/settings/*`, `PATCH /api/me`, `GET /api/calibrations` |
+| F14 | 설정 | `settings` | `/api/settings/alerts`, `/preferences`, `/voice-alert`, `PATCH /api/me`, `POST /api/me/password`, `GET /api/calibrations` |
 | F15 | 관리자 통합 관제 | `admin` | `GET /api/admin/overview` |
 | F16 | 유저 계정 관리 | `adminUsers` | `/api/admin/users/*` |
 | F17 | 배터리 운영 관리 | `adminBattery` | `/api/admin/batteries/*` |
@@ -1090,13 +1167,13 @@ v3가 표시하는 4개 특징: `dT/dt(온도 상승률)`, `I_smooth(전류 변�
 |---|---|---|
 | Q1 | CSRF 토큰 방식 | Better Auth 기본 제공 여부 확인 후 결정. 쿠키+헤더(double submit)가 무난 |
 | Q2 | 다국어 | v3에 한/영 토글이 실재한다 `[REQ-WEB-015]`. 서버가 한국어 문장을 주면 영어 전환이 깨진다. **서버는 코드만, 문구는 프론트** 를 제안하나 에러 메시지·XAI 라벨·이벤트 `cause`/`action`은 결정 필요 |
-| Q3 | `scoreDisplay` 서버 제공 여부 | 반올림 규칙 단일화 vs 페이로드 절약 |
+| ~~Q3~~ | ~~`scoreDisplay` 서버 제공 여부~~ | **해결** — `score`(0.0–1.0)만 내려준다. 0–100 변환은 프론트 |
 | Q4 | `label` 유일성 범위 | 사용자 내 유일? 전역 유일? 중복 허용? |
 | Q5 | 감사 로그 보존 기간 | 법적 요구 여부 확인 필요 |
 | Q6 | SOH/RUL/사이클/내부저항 산출 주체 | AI 파이프라인 vs 백엔드 집계. 갱신 주기도 함께 |
-| Q7 | `deviceId` 지정 방식 | 사용자당 진단기 1대 가정 가능한가? (F5 제외로 선택 UI 없음) |
-| Q8 | `tempCapC`와 Fail-Safe 관계 | 사용자 설정값이 물리 차단 임계에 직접 반영되는가? 안전상 서버 하한선이 필요할 수 있음 |
-| Q9 | CSV/PDF 내보내기 | 동기 다운로드 vs 비동기 작업+알림. 최대 건수 상한 |
+| Q7 | `deviceId` 지정 방식 | v3에 진단기 선택 UI가 **없음을 실측 확인**. 연결 모달은 배터리만 묻는다. 사용자당 1대 가정 가능한가? |
+| ~~Q8~~ | ~~`tempCapC`와 Fail-Safe 관계~~ | **해결** — 임계치 설정 기능이 제거되어 사용자 입력 자체가 없다. 온도 상한은 서버/에지 고정값 |
+| Q9 | CSV/PDF 내보내기 | 동기 다운로드 vs 비동기 작업+알림. 최대 건수 상한. **대상은 추세 데이터**(§4.7) |
 | Q10 | 추세 다운샘플링·집계 | 버킷 크기, avg/max 선택 (§4.7 제안 참조) |
 | Q11 | 공지 `body` 목록 포함 여부 | 본문 길이 상한과 함께 결정 |
 | Q12 | 릴레이 자동 복구 조건 | 어떤 조건에서 자동 복구되는가. 사용자 토글 가능한가 |
@@ -1107,8 +1184,25 @@ v3가 표시하는 4개 특징: `dT/dt(온도 상승률)`, `I_smooth(전류 변�
 | Q17 | 공지 `audience` 값 목록 | 전체/특정 역할/특정 사용자? |
 | Q18 | 공지 조회수 집계 | 중복 카운트 방지 기준 |
 | Q19 | 관리자 WebSocket 토픽 | 전체 배터리 실시간 구독이 필요한가 (F15 통합 관제) |
-| Q20 | `metrics.tick` 푸시 주기 | 1초 제안. 100ms 원본 그대로는 브라우저가 못 버팀 |
+| Q20 | 수집 100ms vs 푸시 1초 | v3 제품 카피는 "1초 단위 수집", CLAUDE.md는 100ms. **적재 100ms / 푸시 1초**로 정리하면 되는지 확인만 하면 됨 |
 | Q21 | 목 서버 제공 방식 | §8 참조 |
+| Q22 | `cellIndex` 특정 방법 | 이벤트·알림에 셀 번호가 붙는다(`셀 3`). 센서 스키마에 셀 단위 필드가 없는데 에지가 어떻게 셀을 특정하는가 |
+| Q23 | `maker`/`model` 처리 | 등록 폼에 입력이 없는데 카드·상세에는 표시된다. 입력을 추가할지, 표시를 `chemistry`+`seriesCount`로 줄일지 |
+| Q24 | 지표별 상태 배지 기준 | 대시보드 빠른 추세 카드가 전압·전류·온도·SOC 각각에 `정상`/`⚠ 경고`를 표시한다. 이상점수와 별개 축이며 산출 기준 미정 |
+| Q25 | XAI 기여도 범위·부호 | 합이 1이 아니다(실측 0.95). 값의 상한과 음수 가능 여부 |
+| Q26 | `측정 담당자` 표기 | `role`의 한국어 라벨인가, 별도 직함 필드(`jobTitle`)인가 |
+
+### 브라우저 실측으로 해결된 항목
+
+| 항목 | 결론 |
+|---|---|
+| 이상점수 스케일 | `score` 0.0–1.0 단일. Raw 모달도 `0.82`로 고친다 |
+| 임계치 설정 | **기능 제거됨.** `/api/settings/thresholds` 없음. 0.3/0.6/0.8 고정 |
+| 위험도 분포 범위 | **소유 배터리 기준.** v3의 128건은 더미 |
+| 셀 온도 히트맵 | **범위 제외.** 셀별 온도 API 없음 |
+| 감사 로그 상세(135) | **제외.** v3 미구현, `changeSummary` 문자열로 충분 |
+| 관리자 운영상태·메모(123/124/125) | **포함.** v3 미구현이나 프론트가 입력 UI를 추가 |
+| 음성 안내 설정(072) | **포함.** v3 화면 없으나 에지 하드웨어와 직결 |
 
 ---
 
@@ -1123,3 +1217,63 @@ v3가 표시하는 4개 특징: `dT/dt(온도 상승률)`, `I_smooth(전류 변�
 | `docs/admin_feature_definition.md` | 관리자 요구사항 36개 |
 | `docs/userflow.md`, `docs/admin_userflow.md` | 화면 전환 흐름 |
 | `설계 산출물/셀가드 프로토타입_v3.html` | **동작하는 프로토타입. 애매하면 이걸 기준으로.** |
+
+---
+
+## 11. 기능정의서와 v3의 불일치 — 실측 기록
+
+`docs/feature_definition.md`·`docs/admin_feature_definition.md`는 v1(2026-07-10) 기준이다. v3를 브라우저로 띄워 확인한 차이는 아래와 같으며, **이 계약서는 전부 v3를 따랐다.**
+
+### 위치가 다른 것
+
+| 요구사항 | 문서가 말하는 위치 | 실제 v3 위치 |
+|---|---|---|
+| REQ-WEB-025 위험도 분포 | 대시보드 | **이상 탐지 화면** |
+| REQ-WEB-026 최근 이벤트 | 대시보드 | **이상 탐지 화면** (`활성 이상 이벤트`) |
+| REQ-WEB-051 정렬 | 이벤트 이력 | **배터리 관리 화면** (최근 측정순·이상점수순·SOC순) |
+| REQ-WEB-054/055 CSV·PDF | 이벤트 이력 | **추세 차트 화면** |
+| REQ-WEB-047 지표 선택 | 추세 차트 | **대시보드** (추세 화면은 4차트 동시 표시) |
+
+### 화면에 없는 것
+
+| 요구사항 | 상태 | 계약 처리 |
+|---|---|---|
+| REQ-WEB-030/031 디바이스 상태 | 라우트 도달 불가 (고아) | **제외** |
+| REQ-WEB-123/124/125 운영상태·메모 | 상세 모달이 조회 전용 | **포함** — 프론트가 입력 UI 추가 |
+| REQ-WEB-135 감사 로그 상세 | 행 클릭 무반응 | **제외** |
+| REQ-WEB-072 음성 안내 설정 | 어느 화면에도 없음 | **포함** — 프론트가 설정에 섹션 추가 |
+| 임계치 설정 | 라벨만 있고 미렌더링 | **제외** (기능 자체가 제거됨) |
+| 셀 온도 히트맵 | 렌더링됨 | **제외** (쓰지 않기로 결정) |
+
+### 입력 항목이 다른 것
+
+| 요구사항 | 문서 | 실제 v3 폼 |
+|---|---|---|
+| REQ-WEB-037 배터리 등록 | 이름·종류·모드·직렬 셀 수·**제조사/모델** | 이름·종류·모드·직렬 셀 수 **4개뿐** |
+
+### 문서에 없는데 v3에 있는 것
+
+- **배터리 미연결 시 8메뉴 전면 잠금** (§3.1) — 문서 4종에 0건
+- **알림 센터 "오늘의 알림 요약"** 카드 (위험/경고/정상·점검 3칸)
+- **관리자 대시보드 모드별 배터리 분포** (모드 1/2/3)
+- **대시보드 지표별 상태 배지** (전압·전류·온도·SOC 각각 정상/경고)
+- **Raw 데이터 보기 모달** (v3 신규, `rawModal`)
+
+---
+
+## 12. 프론트엔드 작업 목록 — 계약과 v3를 맞추려면
+
+백엔드와 무관하게 **프론트가 고쳐야 하는 것들**이다. 실측 중 발견했다.
+
+| # | 항목 | 이유 |
+|---|---|---|
+| 1 | 등급 판정 로직 3곳을 4등급으로 통일 | 대시보드 `dScoreLabel`, 게이지 범례, 관리자 목록 `scCol`이 전부 3등급(70/40). PACK-003이 33점인데 `정상`으로 표시되는 버그 |
+| 2 | 게이지 범례 문구 교체 | `정상 0–39 / 주의 40–69 / 위험 70+` → `정상 0–29 / 주의 30–59 / 경고 60–79 / 위험 80+` (4칸) |
+| 3 | Raw 모달 `anomaly_score`를 `0.82`로 | "원본 데이터" 화면이 가공값(82)을 보여주고 있음 |
+| 4 | `사진 변경` 버튼 제거 | REQ-WEB-069 범위 제외인데 버튼이 남아 있음 |
+| 5 | 셀 온도 히트맵 섹션 제거 | 범위 제외 결정 |
+| 6 | 관리자 배터리 상세에 운영상태·메모 입력 UI 추가 | 계약에 포함했으나 v3는 조회 전용 |
+| 7 | 설정에 음성 안내 섹션 추가 | 계약에 포함했으나 v3에 없음 |
+| 8 | 운영 상태 한국어 라벨 통일 | 관리자 대시보드는 `정상/주시/제한`, 목록 필터는 `NORMAL/WATCH/BLOCKED` — 두 벌 공존 |
+| 9 | 상대시간 표시를 클라이언트 계산으로 | 서버는 절대 시각만 준다(§1.1). v3는 `"3시간 전"`이 하드코딩 |
+| 10 | 이벤트 목록 페이지네이션 정합 | `전체 116건 중 1–5`인데 행이 6개 렌더링됨 |
