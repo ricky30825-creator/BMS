@@ -177,6 +177,76 @@ class TestExemptSections(unittest.TestCase):
         text = "### F1. 랜딩\n메뉴 접기를 제공한다.\n\n### 하지 말 것\n- 없음\n\n---\n"
         self.assertTrue(any("접기" in v for v in lint(text)))
 
+    def test_appendix_b_does_not_swallow_following_section(self):
+        """부록 B 뒤에 오는 실제 조항까지 예외 처리되면 안 된다."""
+        text = (
+            "## 부록 B. 계약서에서 제외한 요구사항\n"
+            "메뉴 접기·펼치기\n"
+            "\n"
+            "## 부록 C. 실제로 남는 조항\n"
+            "메뉴 접기를 제공한다.\n"
+        )
+        self.assertTrue(any("접기" in v for v in lint(text)))
+
+    def test_closed_prohibition_list_does_not_swallow_following_prose(self):
+        """'하지 말 것' 절이 '---'로 곧바로 닫히면, 그 뒤에 오는 일반
+        조항까지 예외로 삼켜서는 안 된다."""
+        text = (
+            "### 하지 말 것\n"
+            "- 접기를 쓰지 않는다\n"
+            "\n"
+            "---\n"
+            "\n"
+            "이 영역은 메뉴 접기 구조를 제공한다.\n"
+            "\n"
+            "### F1. 랜딩\n내용\n"
+        )
+        self.assertTrue(any("접기" in v for v in lint(text)))
+
+    def test_prohibition_list_itself_still_exempt(self):
+        """'하지 말 것' 목록 안의 금지 어휘는 여전히 검사에서 빠져야 한다."""
+        text = "### 하지 말 것\n- 메뉴 접기를 쓰지 않는다\n\n---\n\n### F1. 랜딩\n내용\n"
+        self.assertFalse(any("접기" in v for v in lint(text)))
+
+    def test_unclosed_prohibition_list_does_not_swallow_until_distant_dashes(self):
+        """'하지 말 것' 절이 즉시 '---'로 닫히지 않으면, 다음 헤딩부터는
+        더 이상 예외가 아니어야 한다."""
+        text = (
+            "### 하지 말 것\n"
+            "- 메뉴 접기를 쓰지 않는다\n"
+            "\n"
+            "### F1. 실제 영역\n"
+            "메뉴 접기를 제공한다.\n"
+            "\n"
+            "안내문이 길게 이어진다.\n"
+            "\n"
+            "---\n"
+        )
+        self.assertTrue(any("접기" in v for v in lint(text)))
+
+
+class TestLegendCheckDoesNotShadow(unittest.TestCase):
+    """게이지 범례 검사는 문서 전체를 봐야 하며, 루프의 마지막 영역
+    본문으로 좁혀지면 안 된다."""
+
+    def test_flags_legend_outside_any_area(self):
+        text = (
+            "0-39 정상\n40-69 주의\n70+ 위험\n"
+            "\n"
+            "### F1. 랜딩\n내용\n"
+            "\n"
+            "### F2. 이력\n다른내용\n"
+        )
+        self.assertTrue(any("게이지 범례" in v for v in lint(text)))
+
+    def test_flags_legend_in_non_last_area(self):
+        text = (
+            "### F1. 랜딩\n0-39 정상 40-69 주의 70+ 위험\n"
+            "\n"
+            "### F2. 이력\n다른내용\n"
+        )
+        self.assertTrue(any("게이지 범례" in v for v in lint(text)))
+
 
 if __name__ == "__main__":
     unittest.main()
@@ -198,7 +268,7 @@ cd /Users/jungjeahwan/Desktop/claude/han/tools && ../.venv/bin/python -m unittes
 """디자인 무관 계약서(docs/product_contract.md)를 기계 검증한다.
 
 계약서는 형태 어휘 없이 기능만 기술해야 하고, 도달 가능한 영역 19개와
-REQ-WEB 107개를 빠짐없이 덮어야 한다. 이 린터가 그 조건을 검사한다.
+REQ-WEB 108개를 빠짐없이 덮어야 한다. 이 린터가 그 조건을 검사한다.
 """
 
 import re
@@ -251,8 +321,17 @@ def _lintable(text):
     '하지 말 것' 목록과 부록 B는 금지 대상을 이름으로 지목해야 하므로
     검사하면 반드시 실패한다. 이 두 절만 예외로 둔다.
     """
-    text = re.sub(r"^### 하지 말 것$.*?^---$", "", text, flags=re.M | re.S)
-    text = re.sub(r"^## 부록 B\..*", "", text, flags=re.M | re.S)
+    # 각 절은 자기만의 종료 지점(있다면) 또는 같거나 더 높은 레벨의 다음
+    # 헤딩(또는 입력 끝) 중 먼저 오는 곳에서 멈춘다. 그렇지 않으면 뒤따르는
+    # 실제 조항까지 예외로 삼켜버린다.
+    # '하지 말 것'은 관례상 '---' 줄로 닫히므로 그 지점을 우선 종료로 쓴다.
+    text = re.sub(
+        r"^### 하지 말 것$.*?(?=^---$|^#{1,3}\s|\Z)", "", text, flags=re.M | re.S
+    )
+    # 부록 B는 '---' 관례가 없으므로 다음 동급 이상 헤딩(또는 입력 끝)에서만 멈춘다.
+    text = re.sub(
+        r"^## 부록 B\..*?(?=^#{1,2}\s|\Z)", "", text, flags=re.M | re.S
+    )
     return text
 
 
@@ -272,11 +351,11 @@ def lint(text):
         if num not in areas:
             violations.append(f"영역 누락: F{num}")
 
-    for num, body in sorted(areas.items()):
+    for num, area_body in sorted(areas.items()):
         if num not in EXPECTED_AREAS:
             continue
         for heading in REQUIRED_HEADINGS:
-            if heading not in body:
+            if heading not in area_body:
                 violations.append(f"F{num} 필수 항목 누락: {heading}")
 
     cited = set(re.findall(r"REQ-WEB-\d{3}", text))
@@ -322,7 +401,7 @@ if __name__ == "__main__":
 cd /Users/jungjeahwan/Desktop/claude/han/tools && ../.venv/bin/python -m unittest test_contract_lint -v
 ```
 
-기대: `Ran 11 tests` ... `OK`
+기대: `Ran 17 tests` ... `OK`
 
 - [ ] **Step 5: 커밋한다**
 
@@ -331,7 +410,7 @@ cd /Users/jungjeahwan/Desktop/claude/han
 git add tools/contract_lint.py tools/test_contract_lint.py
 git commit -m "feat: add contract linter
 
-계약서의 형태 어휘 0회, 영역 19개(F5 결번), REQ-WEB 107개 인용,
+계약서의 형태 어휘 0회, 영역 19개(F5 결번), REQ-WEB 108개 인용,
 게이트/불변 표시, 범례 3구간 금지를 기계 검사한다."
 ```
 
@@ -1173,7 +1252,7 @@ CLAUDE.md에 명시. 상태 등급표에 UI 0-100 정수 스케일 병기."
 
 **작성 중 잡은 결함 3건**
 
-1. **REQ-WEB-017·018이 어느 영역에도 없었다.** 린터는 107개 전부 인용을 요구하므로 Task 10에서 반드시 실패했을 것이다. 018(9개 목적지 도달)은 블록 A의 "도달 가능성" 절로, 017(메뉴 접기)은 부록 B의 제외 목록으로 보냈다.
+1. **REQ-WEB-017·018이 어느 영역에도 없었다.** 린터는 108개 전부 인용을 요구하므로 Task 10에서 반드시 실패했을 것이다. 018(9개 목적지 도달)은 블록 A의 "도달 가능성" 절로, 017(메뉴 접기)은 부록 B의 제외 목록으로 보냈다.
 2. **"하지 말 것" 목록과 부록 B가 금지 어휘를 이름으로 지목해야 했다.** 어휘 검사를 그대로 돌리면 위반 0건에 도달할 수 없다. 린터에 `_lintable()` 절 단위 예외를 넣고, 예외가 과하게 적용되지 않는지 확인하는 테스트(`test_still_flags_vocab_outside_exempt_sections`)를 함께 넣었다.
 3. **테스트 개수 표기가 어긋났다.** 예외 테스트 3개를 더해 11개로 맞췄다.
 
