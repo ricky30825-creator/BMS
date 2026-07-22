@@ -1,7 +1,7 @@
 """디자인 무관 계약서(docs/product_contract.md)를 기계 검증한다.
 
 계약서는 형태 어휘 없이 기능만 기술해야 하고, 도달 가능한 영역 19개와
-REQ-WEB 107개를 빠짐없이 덮어야 한다. 이 린터가 그 조건을 검사한다.
+REQ-WEB 108개를 빠짐없이 덮어야 한다. 이 린터가 그 조건을 검사한다.
 """
 
 import re
@@ -54,8 +54,14 @@ def _lintable(text):
     '하지 말 것' 목록과 부록 B는 금지 대상을 이름으로 지목해야 하므로
     검사하면 반드시 실패한다. 이 두 절만 예외로 둔다.
     """
-    text = re.sub(r"^### 하지 말 것$.*?^---$", "", text, flags=re.M | re.S)
-    text = re.sub(r"^## 부록 B\..*", "", text, flags=re.M | re.S)
+    # 각 절은 자기 헤딩과 같거나 더 높은 레벨의 다음 헤딩(또는 입력 끝)에서
+    # 멈춘다. 그렇지 않으면 뒤따르는 실제 조항까지 예외로 삼켜버린다.
+    text = re.sub(
+        r"^### 하지 말 것$.*?(?=^#{1,3}\s|\Z)", "", text, flags=re.M | re.S
+    )
+    text = re.sub(
+        r"^## 부록 B\..*?(?=^#{1,2}\s|\Z)", "", text, flags=re.M | re.S
+    )
     return text
 
 
@@ -75,11 +81,11 @@ def lint(text):
         if num not in areas:
             violations.append(f"영역 누락: F{num}")
 
-    for num, body in sorted(areas.items()):
+    for num, area_body in sorted(areas.items()):
         if num not in EXPECTED_AREAS:
             continue
         for heading in REQUIRED_HEADINGS:
-            if heading not in body:
+            if heading not in area_body:
                 violations.append(f"F{num} 필수 항목 누락: {heading}")
 
     cited = set(re.findall(r"REQ-WEB-\d{3}", text))

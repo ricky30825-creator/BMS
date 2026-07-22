@@ -60,6 +60,56 @@ class TestExemptSections(unittest.TestCase):
         text = "### F1. 랜딩\n메뉴 접기를 제공한다.\n\n### 하지 말 것\n- 없음\n\n---\n"
         self.assertTrue(any("접기" in v for v in lint(text)))
 
+    def test_appendix_b_does_not_swallow_following_section(self):
+        """부록 B 뒤에 오는 실제 조항까지 예외 처리되면 안 된다."""
+        text = (
+            "## 부록 B. 계약서에서 제외한 요구사항\n"
+            "메뉴 접기·펼치기\n"
+            "\n"
+            "## 부록 C. 실제로 남는 조항\n"
+            "메뉴 접기를 제공한다.\n"
+        )
+        self.assertTrue(any("접기" in v for v in lint(text)))
+
+    def test_unclosed_prohibition_list_does_not_swallow_until_distant_dashes(self):
+        """'하지 말 것' 절이 즉시 '---'로 닫히지 않으면, 다음 헤딩부터는
+        더 이상 예외가 아니어야 한다."""
+        text = (
+            "### 하지 말 것\n"
+            "- 메뉴 접기를 쓰지 않는다\n"
+            "\n"
+            "### F1. 실제 영역\n"
+            "메뉴 접기를 제공한다.\n"
+            "\n"
+            "안내문이 길게 이어진다.\n"
+            "\n"
+            "---\n"
+        )
+        self.assertTrue(any("접기" in v for v in lint(text)))
+
+
+class TestLegendCheckDoesNotShadow(unittest.TestCase):
+    """게이지 범례 검사는 문서 전체를 봐야 하며, 루프의 마지막 영역
+    본문으로 좁혀지면 안 된다."""
+
+    def test_flags_legend_outside_any_area(self):
+        text = (
+            "0-39 정상\n40-69 주의\n70+ 위험\n"
+            "\n"
+            "### F1. 랜딩\n내용\n"
+            "\n"
+            "### F2. 이력\n다른내용\n"
+        )
+        self.assertTrue(any("게이지 범례" in v for v in lint(text)))
+
+    def test_flags_legend_in_non_last_area(self):
+        text = (
+            "### F1. 랜딩\n0-39 정상 40-69 주의 70+ 위험\n"
+            "\n"
+            "### F2. 이력\n다른내용\n"
+        )
+        self.assertTrue(any("게이지 범례" in v for v in lint(text)))
+
 
 if __name__ == "__main__":
     unittest.main()
