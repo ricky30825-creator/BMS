@@ -107,5 +107,49 @@ class TestCheck(unittest.TestCase):
         self.assertEqual(check(doc), [])
 
 
+class TestCheckRegion(unittest.TestCase):
+    def test_check_region_flags_banned_color(self):
+        from landing_lint import check_region
+        issues = check_region('<div style="color:#6B7280">가</div>')
+        self.assertTrue(any("#6B7280" in i for i in issues))
+
+    def test_check_region_clean_passes(self):
+        from landing_lint import check_region
+        self.assertEqual(check_region('<div style="color:var(--ink)">가</div>'), [])
+
+    def test_app_region_extracts_after_signup(self):
+        from landing_lint import app_region, LANDING_START_MARK, SIGNUP_MARK
+        doc = (
+            LANDING_START_MARK + "\n<div>랜딩</div>\n"
+            + SIGNUP_MARK + "\n<div>앱화면</div>\n"
+        )
+        region = app_region(doc)
+        self.assertIn("앱화면", region)
+        self.assertNotIn("랜딩", region)
+
+    def test_check_uses_check_region(self):
+        # 기존 check(랜딩)은 여전히 동작해야 한다(하위호환)
+        from landing_lint import check, LANDING_START_MARK, LANDING_END_MARK
+        doc = LANDING_START_MARK + '\n<div style="color:#6B7280">가</div>\n' + LANDING_END_MARK
+        self.assertTrue(any("#6B7280" in i for i in check(doc)))
+
+
+class TestGlassMisuse(unittest.TestCase):
+    def test_flags_backdrop_filter_in_body(self):
+        from landing_lint import glass_misuse
+        issues = glass_misuse('<div style="backdrop-filter:blur(20px)">표</div>')
+        self.assertTrue(any("글래스" in i for i in issues))
+
+    def test_flags_cg_glass_class_in_body(self):
+        from landing_lint import glass_misuse
+        issues = glass_misuse('<div class="cg-surface cg-glass">표</div>')
+        self.assertTrue(any("글래스" in i for i in issues))
+
+    def test_opaque_surface_passes(self):
+        from landing_lint import glass_misuse
+        issues = glass_misuse('<div class="cg-surface" style="background:var(--surface)">표</div>')
+        self.assertEqual(issues, [])
+
+
 if __name__ == "__main__":
     unittest.main()
