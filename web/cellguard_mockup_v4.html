@@ -1,0 +1,1831 @@
+<!doctype html>
+<html lang="ko" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>셀가드 목업 v4 — 계약서 기반 재설계</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable.min.css" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+/* ============================================================
+   CellGuard 목업 v4
+   정본: docs/product_contract.md  /  토큰: design-system/cellguard/MASTER.md
+   제1원칙 — 녹/황/주황/적은 등급 표시 전용. 크롬은 무채색 슬레이트.
+   ============================================================ */
+
+:root{
+  --bg:#F8FAFC; --surface:#FFFFFF; --surface-sunken:#F1F5F9;
+  --fg:#0F172A; --fg-muted:#475569;
+  --border:#E2E8F0; --border-strong:#CBD5E1;
+  --primary:#1D4ED8; --on-primary:#FFFFFF;
+  --danger:#B91C1C; --ring:#1D4ED8;
+
+  --g-normal-fg:#15803D; --g-normal-bg:#F0FDF4;
+  --g-caution-fg:#A16207; --g-caution-bg:#FEFCE8;
+  --g-warning-fg:#C2410C; --g-warning-bg:#FFF7ED;
+  --g-danger-fg:#B91C1C;  --g-danger-bg:#FEF2F2;
+
+  --space-1:4px; --space-2:8px; --space-3:12px; --space-4:16px; --space-6:24px; --space-8:32px;
+  --radius-sm:6px; --radius-md:10px; --radius-lg:14px;
+  --shadow:0 1px 2px rgba(15,23,42,.06);
+
+  --text-score:44px; --text-metric:24px; --text-h1:20px; --text-h2:15px;
+  --text-body:14px; --text-sm:13px; --text-xs:11px;
+
+  --sidebar-w:240px; --header-h:56px;
+  --font-ui:"Pretendard Variable",Pretendard,-apple-system,BlinkMacSystemFont,system-ui,sans-serif;
+  --font-num:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+}
+[data-theme="dark"]{
+  --bg:#0F172A; --surface:#1B2336; --surface-sunken:#161E2F;
+  --fg:#F8FAFC; --fg-muted:#94A3B8;
+  --border:#334155; --border-strong:#475569;
+  --primary:#60A5FA; --on-primary:#0F172A;
+  --danger:#F87171; --ring:#60A5FA;
+
+  --g-normal-fg:#4ADE80; --g-normal-bg:#0C2A18;
+  --g-caution-fg:#FACC15; --g-caution-bg:#2C2409;
+  --g-warning-fg:#FB923C; --g-warning-bg:#2E1B0B;
+  --g-danger-fg:#F87171;  --g-danger-bg:#2E1113;
+  --shadow:0 1px 2px rgba(0,0,0,.3);
+}
+/* 테마 "시스템" 선택 — data-theme이 없을 때 OS 설정을 그대로 따른다 (F14) */
+@media (prefers-color-scheme:dark){
+  html:not([data-theme]){
+    --bg:#0F172A; --surface:#1B2336; --surface-sunken:#161E2F;
+    --fg:#F8FAFC; --fg-muted:#94A3B8;
+    --border:#334155; --border-strong:#475569;
+    --primary:#60A5FA; --on-primary:#0F172A;
+    --danger:#F87171; --ring:#60A5FA;
+    --g-normal-fg:#4ADE80; --g-normal-bg:#0C2A18;
+    --g-caution-fg:#FACC15; --g-caution-bg:#2C2409;
+    --g-warning-fg:#FB923C; --g-warning-bg:#2E1B0B;
+    --g-danger-fg:#F87171;  --g-danger-bg:#2E1113;
+    --shadow:0 1px 2px rgba(0,0,0,.3);
+  }
+}
+
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{
+  background:var(--bg); color:var(--fg);
+  font-family:var(--font-ui); font-size:var(--text-body); line-height:1.5;
+  -webkit-font-smoothing:antialiased;
+}
+/* 모든 수치는 등폭 + tabular-nums — 실시간 갱신 시 폭이 흔들리지 않게 (F4 제약) */
+.num{font-family:var(--font-num);font-variant-numeric:tabular-nums;font-feature-settings:"tnum" 1}
+
+button,input,select,textarea{font:inherit;color:inherit}
+button{background:none;border:none;cursor:pointer}
+a{color:var(--primary)}
+:focus-visible{outline:2px solid var(--ring);outline-offset:2px;border-radius:var(--radius-sm)}
+svg{display:block;flex:none}
+.ico{width:16px;height:16px}   /* icon() 기본 크기 — 더 구체적인 규칙(.nav-item .ico 등)이 있으면 그쪽이 이긴다 */
+
+/* ---------- 레이아웃 ---------- */
+.app{display:grid;grid-template-columns:var(--sidebar-w) 1fr;min-height:100%}
+
+.sidebar{
+  background:var(--surface);border-right:1px solid var(--border);
+  display:flex;flex-direction:column;position:sticky;top:0;height:100vh;
+}
+.brand{
+  height:var(--header-h);display:flex;align-items:center;gap:var(--space-2);
+  padding:0 var(--space-4);border-bottom:1px solid var(--border);font-weight:700;letter-spacing:-.01em;
+}
+.brand .mark{width:22px;height:22px;color:var(--primary)}
+.nav{padding:var(--space-3) var(--space-2);overflow-y:auto;flex:1}
+.nav-label{
+  font-size:var(--text-xs);color:var(--fg-muted);font-weight:600;
+  padding:var(--space-2) var(--space-2) var(--space-1);letter-spacing:.04em;
+}
+.nav-item{
+  display:flex;align-items:center;gap:var(--space-3);width:100%;
+  padding:var(--space-2) var(--space-3);border-radius:var(--radius-sm);
+  color:var(--fg-muted);font-size:var(--text-sm);font-weight:500;text-align:left;
+  transition:background 160ms ease,color 160ms ease;
+  min-height:36px;
+}
+.nav-item:hover:not(:disabled){background:var(--surface-sunken);color:var(--fg)}
+.nav-item[aria-current="page"]{background:var(--surface-sunken);color:var(--fg);font-weight:600}
+.nav-item[aria-current="page"] .ico{color:var(--primary)}
+.nav-item:disabled{opacity:.45;cursor:not-allowed}
+.nav-item .ico{width:16px;height:16px}
+.nav-item .lock{margin-left:auto;width:13px;height:13px}
+.nav-item .count{
+  margin-left:auto;font-family:var(--font-num);font-size:var(--text-xs);font-weight:700;
+  background:var(--g-danger-bg);color:var(--g-danger-fg);
+  border-radius:999px;padding:1px 6px;min-width:20px;text-align:center;
+}
+
+.main{display:flex;flex-direction:column;min-width:0}
+.topbar{
+  height:var(--header-h);display:flex;align-items:center;gap:var(--space-3);
+  padding:0 var(--space-6);border-bottom:1px solid var(--border);
+  background:var(--surface);position:sticky;top:0;z-index:20;
+}
+.topbar h1{font-size:var(--text-h1);font-weight:700;letter-spacing:-.015em}
+.topbar .spacer{flex:1}
+.content{padding:var(--space-6);max-width:1440px;width:100%}
+
+/* 수신 표시등 — 값 자체는 애니메이션하지 않고, 갱신 사실만 여기서 알린다 (MASTER §7) */
+.live{
+  display:inline-flex;align-items:center;gap:var(--space-2);
+  font-size:var(--text-xs);color:var(--fg-muted);font-weight:600;
+  border:1px solid var(--border);border-radius:999px;padding:3px 10px;
+}
+.live .dot{width:7px;height:7px;border-radius:50%;background:var(--g-normal-fg);animation:pulse 2s ease-in-out infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+
+/* ---------- 그릇 ---------- */
+.grid{display:grid;gap:var(--space-4)}
+.card{
+  background:var(--surface);border:1px solid var(--border);
+  border-radius:var(--radius-md);padding:var(--space-4);box-shadow:var(--shadow);
+}
+.card-head{display:flex;align-items:center;gap:var(--space-2);margin-bottom:var(--space-3)}
+.card-head h2{font-size:var(--text-h2);font-weight:650;letter-spacing:-.01em}
+.card-head .sub{font-size:var(--text-xs);color:var(--fg-muted);margin-left:auto}
+.muted{color:var(--fg-muted)}
+.xs{font-size:var(--text-xs)}
+.sm{font-size:var(--text-sm)}
+
+/* ---------- 등급 배지 : 색 + 도형 + 라벨 + 숫자 네 겹 ---------- */
+.badge{
+  display:inline-flex;align-items:center;gap:6px;
+  padding:2px 8px;border-radius:999px;
+  font-size:var(--text-xs);font-weight:700;line-height:1.6;white-space:nowrap;
+}
+.badge .shape{width:9px;height:9px;flex:none}
+.badge .score{font-family:var(--font-num);font-variant-numeric:tabular-nums;font-weight:700}
+.g-normal {background:var(--g-normal-bg); color:var(--g-normal-fg)}
+.g-caution{background:var(--g-caution-bg);color:var(--g-caution-fg)}
+.g-warning{background:var(--g-warning-bg);color:var(--g-warning-fg)}
+.g-danger {background:var(--g-danger-bg); color:var(--g-danger-fg)}
+.g-none   {background:var(--surface-sunken);color:var(--fg-muted)}
+
+/* ---------- 지표 ---------- */
+.metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:var(--space-3)}
+.metric{
+  background:var(--surface-sunken);border-radius:var(--radius-sm);
+  padding:var(--space-3);display:flex;flex-direction:column;gap:var(--space-1);
+  min-height:104px;              /* 자리 예약 — 등급 유무로 높이가 바뀌지 않게 */
+}
+.metric .k{font-size:var(--text-xs);color:var(--fg-muted);font-weight:600}
+.metric .v{font-family:var(--font-num);font-variant-numeric:tabular-nums;font-size:var(--text-metric);font-weight:500;letter-spacing:-.02em}
+.metric .v .u{font-size:13px;color:var(--fg-muted);margin-left:2px}
+.metric .foot{margin-top:auto;min-height:20px}
+
+/* ---------- 게이지 ---------- */
+.gauge-wrap{display:flex;align-items:center;gap:var(--space-6);flex-wrap:wrap}
+.gauge{position:relative;width:220px;flex:none}
+.gauge svg{width:100%;height:auto;overflow:visible}
+.gauge .readout{
+  position:absolute;left:0;right:0;bottom:6px;text-align:center;
+}
+.gauge .readout .n{
+  font-family:var(--font-num);font-variant-numeric:tabular-nums;
+  font-size:var(--text-score);font-weight:700;line-height:1;letter-spacing:-.03em;display:block;
+}
+.gauge .readout .of{font-size:var(--text-xs);color:var(--fg-muted)}
+
+/* 4구간 범례 — 반드시 4개 전부 (3구간은 v3 버그) */
+.legend{display:flex;flex-direction:column;gap:var(--space-2);min-width:190px}
+.legend-row{display:flex;align-items:center;gap:var(--space-2);font-size:var(--text-xs)}
+.legend-row .shape{width:9px;height:9px;flex:none}
+.legend-row .nm{font-weight:650;width:28px}
+.legend-row .rg{font-family:var(--font-num);color:var(--fg-muted);margin-left:auto}
+.legend-row[data-active="true"]{
+  background:var(--surface-sunken);border-radius:var(--radius-sm);
+  margin:-3px -6px;padding:3px 6px;
+}
+
+/* ---------- 분포 막대 : 0건 구간도 자리를 지킨다 (F8 제약) ---------- */
+.dist{display:flex;flex-direction:column;gap:var(--space-3)}
+.dist-row{display:grid;grid-template-columns:64px 1fr 44px;align-items:center;gap:var(--space-3)}
+.dist-name{display:flex;align-items:center;gap:6px;font-size:var(--text-xs);font-weight:650}
+.dist-name .shape{width:9px;height:9px;flex:none}
+.dist-track{height:8px;background:var(--surface-sunken);border-radius:999px;overflow:hidden}
+.dist-fill{height:100%;border-radius:999px;min-width:2px}
+.dist-val{font-family:var(--font-num);font-variant-numeric:tabular-nums;font-size:var(--text-sm);font-weight:600;text-align:right}
+
+/* ---------- 기여 요인 ---------- */
+.factor{display:grid;grid-template-columns:1fr 96px 52px;align-items:center;gap:var(--space-3);padding:var(--space-2) 0}
+.factor+.factor{border-top:1px solid var(--border)}
+.factor .fname{font-size:var(--text-sm)}
+.factor .fname code{font-family:var(--font-num);font-size:12px;color:var(--fg-muted)}
+.factor .ftrack{height:6px;background:var(--surface-sunken);border-radius:999px;overflow:hidden}
+.factor .ffill{height:100%;background:var(--fg-muted);border-radius:999px}
+.factor .fval{font-family:var(--font-num);font-variant-numeric:tabular-nums;font-size:var(--text-sm);text-align:right}
+
+/* ---------- 표 ---------- */
+.table{width:100%;border-collapse:collapse;font-size:var(--text-sm)}
+.table th{
+  text-align:left;font-size:var(--text-xs);color:var(--fg-muted);font-weight:600;
+  padding:var(--space-2) var(--space-3);border-bottom:1px solid var(--border);white-space:nowrap;
+}
+.table td{padding:var(--space-2) var(--space-3);border-bottom:1px solid var(--border);height:40px;vertical-align:middle}
+.table tr:last-child td{border-bottom:none}
+.table tbody tr{transition:background 140ms ease}
+.table tbody tr:hover{background:var(--surface-sunken)}   /* 배경만 — 레이아웃을 밀지 않는다 */
+.table .r{text-align:right}
+.table-scroll{overflow-x:auto}
+/* 식별자·시각은 줄바꿈하지 않는다 — "PACK-001"이 두 줄로 쪼개지면 읽는 단위가 깨진다 */
+.table td.num{white-space:nowrap}
+
+/* ---------- 배터리 목록 ---------- */
+.asset{
+  display:grid;grid-template-columns:1fr auto;gap:var(--space-3);
+  border:1px solid var(--border);border-radius:var(--radius-md);
+  padding:var(--space-3) var(--space-4);background:var(--surface);
+  transition:border-color 160ms ease,background 160ms ease;
+}
+.asset:hover{border-color:var(--border-strong);background:var(--surface-sunken)}
+.asset[data-connected="true"]{border-color:var(--primary);box-shadow:0 0 0 1px var(--primary) inset}
+.asset .id{font-family:var(--font-num);font-weight:700;font-size:var(--text-body)}
+.asset .spec{font-size:var(--text-xs);color:var(--fg-muted);margin-top:2px}
+.asset .right{display:flex;align-items:center;gap:var(--space-4)}
+.asset .kv{text-align:right}
+.asset .kv .k{font-size:var(--text-xs);color:var(--fg-muted)}
+.asset .kv .v{font-family:var(--font-num);font-variant-numeric:tabular-nums;font-weight:600}
+
+/* ---------- 컨트롤 ---------- */
+.btn{
+  display:inline-flex;align-items:center;justify-content:center;gap:6px;
+  min-height:36px;padding:0 14px;border-radius:var(--radius-sm);
+  font-size:var(--text-sm);font-weight:600;border:1px solid transparent;
+  transition:background 160ms ease,border-color 160ms ease,color 160ms ease;
+}
+.btn-primary{background:var(--primary);color:var(--on-primary)}
+.btn-primary:hover{filter:brightness(1.08)}
+.btn-ghost{border-color:var(--border-strong);color:var(--fg)}
+.btn-ghost:hover{background:var(--surface-sunken)}
+/* 파괴적 동작은 등급 배지와 같은 화면에 놓이므로 채움이 아니라 외곽선 (MASTER §1) */
+.btn-danger{border-color:var(--danger);color:var(--danger)}
+.btn-danger:hover{background:var(--g-danger-bg)}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.btn-sm{min-height:30px;padding:0 10px;font-size:var(--text-xs)}
+
+.seg{display:inline-flex;background:var(--surface-sunken);border-radius:var(--radius-sm);padding:2px;gap:2px}
+.seg button{
+  padding:5px 12px;border-radius:4px;font-size:var(--text-xs);font-weight:600;
+  color:var(--fg-muted);min-height:30px;transition:background 160ms ease,color 160ms ease;
+}
+.seg button[aria-pressed="true"]{background:var(--surface);color:var(--fg);box-shadow:var(--shadow)}
+
+.field{display:flex;flex-direction:column;gap:6px}
+.field label{font-size:var(--text-xs);font-weight:650}
+.field .hint{font-size:var(--text-xs);color:var(--fg-muted)}
+.input{
+  width:100%;min-height:38px;padding:8px 12px;
+  background:var(--surface);border:1px solid var(--border-strong);
+  border-radius:var(--radius-sm);font-size:var(--text-sm);
+  transition:border-color 160ms ease,box-shadow 160ms ease;
+}
+.input:focus{outline:none;border-color:var(--primary);box-shadow:0 0 0 3px color-mix(in srgb,var(--primary) 18%,transparent)}
+textarea.input{min-height:72px;resize:vertical}
+
+/* ---------- 잠금 (T0 게이트) ---------- */
+.locked{
+  border:1px dashed var(--border-strong);border-radius:var(--radius-md);
+  background:var(--surface);padding:var(--space-8) var(--space-6);
+  text-align:center;display:flex;flex-direction:column;align-items:center;gap:var(--space-3);
+}
+.locked .lockmark{width:32px;height:32px;color:var(--fg-muted)}
+.locked h2{font-size:var(--text-h1);font-weight:700}
+.locked p{color:var(--fg-muted);max-width:46ch;font-size:var(--text-sm)}
+
+/* ---------- 상태·예외 ---------- */
+.notice{
+  display:flex;gap:var(--space-3);align-items:flex-start;
+  border:1px solid var(--border);border-left:3px solid var(--fg-muted);
+  border-radius:var(--radius-sm);background:var(--surface-sunken);
+  padding:var(--space-3);font-size:var(--text-sm);
+}
+.notice.is-danger{border-left-color:var(--g-danger-fg);background:var(--g-danger-bg);color:var(--g-danger-fg)}
+.notice .ico{width:16px;height:16px;margin-top:2px}
+.empty{padding:var(--space-8) var(--space-4);text-align:center;color:var(--fg-muted);font-size:var(--text-sm)}
+
+/* ---------- 게이트 모달 (T7 재인증 + 사유) ---------- */
+.overlay{
+  position:fixed;inset:0;background:rgba(15,23,42,.5);backdrop-filter:blur(3px);
+  display:flex;align-items:center;justify-content:center;padding:var(--space-4);z-index:100;
+}
+.overlay[hidden]{display:none}
+.modal{
+  background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);
+  width:100%;max-width:420px;padding:var(--space-6);
+  display:flex;flex-direction:column;gap:var(--space-4);
+  box-shadow:0 20px 40px rgba(15,23,42,.2);
+}
+.modal h2{font-size:var(--text-h1);font-weight:700}
+.modal .actions{display:flex;gap:var(--space-2);justify-content:flex-end}
+.gate-list{list-style:none;display:flex;flex-direction:column;gap:6px;font-size:var(--text-xs)}
+.gate-list li{display:flex;align-items:center;gap:6px;color:var(--fg-muted)}
+.gate-list li[data-met="true"]{color:var(--g-normal-fg);font-weight:600}
+.gate-list .ico{width:13px;height:13px}
+
+/* 더보기 시트 */
+.sheet-list{display:flex;flex-direction:column;gap:2px}
+.sheet-item{
+  display:flex;align-items:center;gap:var(--space-3);width:100%;
+  min-height:44px;padding:var(--space-2) var(--space-3);
+  border-radius:var(--radius-sm);font-size:var(--text-sm);font-weight:500;text-align:left;
+  transition:background 160ms ease;
+}
+.sheet-item:hover:not(:disabled){background:var(--surface-sunken)}
+.sheet-item:disabled{opacity:.45;cursor:not-allowed}
+.sheet-item .ico{width:16px;height:16px;color:var(--fg-muted)}
+.sheet-item .lock-sm{width:13px;height:13px;margin-left:auto;color:var(--fg-muted)}
+.sheet-item .count{
+  margin-left:auto;font-family:var(--font-num);font-size:var(--text-xs);font-weight:700;
+  background:var(--g-danger-bg);color:var(--g-danger-fg);
+  border-radius:999px;padding:1px 6px;min-width:20px;text-align:center;
+}
+
+/* ---------- 토글 스위치 · 슬라이더 (F14) ---------- */
+.toggle{display:flex;align-items:center;gap:var(--space-3);cursor:pointer;padding:6px 0}
+.toggle input{position:absolute;opacity:0;width:1px;height:1px}
+.toggle .track{
+  width:38px;height:22px;border-radius:999px;background:var(--surface-sunken);
+  border:1px solid var(--border-strong);position:relative;flex:none;
+  transition:background 160ms ease,border-color 160ms ease;
+}
+.toggle .track::after{
+  content:"";position:absolute;top:1px;left:1px;width:18px;height:18px;border-radius:50%;
+  background:var(--surface);box-shadow:var(--shadow);transition:transform 160ms ease;
+}
+.toggle input:checked + .track{background:var(--primary);border-color:var(--primary)}
+.toggle input:checked + .track::after{transform:translateX(16px);background:var(--on-primary)}
+.toggle input:focus-visible + .track{outline:2px solid var(--ring);outline-offset:2px}
+.toggle input:disabled + .track{opacity:.5;cursor:not-allowed}
+.toggle .lbl{font-size:var(--text-sm);font-weight:600}
+.toggle .lbl .hint{display:block;font-size:var(--text-xs);color:var(--fg-muted);font-weight:400;margin-top:1px}
+.toggle-list{display:flex;flex-direction:column}
+.toggle-list .toggle+.toggle{border-top:1px solid var(--border)}
+
+.range-row{display:flex;align-items:center;gap:var(--space-3)}
+.range{flex:1;accent-color:var(--primary);height:22px}
+.range-val{font-family:var(--font-num);font-variant-numeric:tabular-nums;font-size:var(--text-sm);font-weight:600;min-width:38px;text-align:right}
+
+/* ---------- 추세 차트 (F9) ---------- */
+.tchart+.tchart{border-top:1px solid var(--border);margin-top:var(--space-3);padding-top:var(--space-3)}
+.tchart .thead{display:flex;align-items:baseline;gap:var(--space-2);margin-bottom:2px;flex-wrap:wrap}
+.tchart .thead .nm{font-size:var(--text-sm);font-weight:650}
+.tchart .thead .agg{margin-left:auto;font-size:var(--text-xs);color:var(--fg-muted)}
+.tlegend{display:flex;flex-wrap:wrap;gap:var(--space-3);margin-top:6px}
+.tlegend .li{display:flex;align-items:center;gap:5px;font-size:var(--text-xs);color:var(--fg-muted)}
+.tlegend .swatch{width:16px;height:0;border-top:2.5px solid var(--primary);display:inline-block}
+.tlegend .swatch.cmp{border-top:2px dashed var(--fg-muted)}
+
+/* ---------- 공지 목록 · 칩 (F13) ---------- */
+.chip{
+  display:inline-flex;align-items:center;font-size:var(--text-xs);font-weight:650;
+  padding:2px 8px;border-radius:999px;background:var(--surface-sunken);color:var(--fg-muted);
+  border:1px solid var(--border);white-space:nowrap;
+}
+.notice-item{
+  display:flex;flex-direction:column;gap:4px;padding:var(--space-3) var(--space-2);
+  border-bottom:1px solid var(--border);text-align:left;width:100%;border-radius:var(--radius-sm);
+}
+.notice-item:last-child{border-bottom:none}
+.notice-item:hover{background:var(--surface-sunken)}
+.notice-item[aria-current="true"]{background:var(--surface-sunken);box-shadow:inset 0 0 0 1px var(--primary)}
+.notice-item .ttl{font-weight:650;font-size:var(--text-body)}
+.notice-item .meta{display:flex;gap:var(--space-2);align-items:center;font-size:var(--text-xs);color:var(--fg-muted)}
+.notice-item .summary{font-size:var(--text-sm);color:var(--fg-muted)}
+.notice-body{white-space:pre-wrap;line-height:1.7;font-size:var(--text-body)}
+
+/* ---------- 하단 내비 (모바일) ---------- */
+.bottomnav{display:none}
+
+/* ---------- 반응형 ---------- */
+@media (max-width:1023px){
+  :root{--sidebar-w:64px}
+  .brand span{display:none}
+  .nav-label{display:none}
+  .nav-item{justify-content:center;padding:var(--space-2)}
+  .nav-item span,.nav-item .lock,.nav-item .count{display:none}
+  .content{padding:var(--space-4)}
+  .metrics{grid-template-columns:repeat(2,1fr)}
+}
+@media (max-width:767px){
+  .app{grid-template-columns:1fr}
+  .sidebar{display:none}
+  .content{padding:var(--space-3);padding-bottom:calc(64px + env(safe-area-inset-bottom,0px) + var(--space-3))}
+  .topbar{padding:0 var(--space-3)}
+  .topbar h1{font-size:16px}
+  .gauge{width:100%;max-width:240px;margin:0 auto}
+  .legend{width:100%}
+  /* 표 → 카드 목록 전환 (CLAUDE.md 웹 디자인 원칙) */
+  .table thead{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+  .table,.table tbody,.table tr,.table td{display:block;width:100%}
+  .table tr{
+    border:1px solid var(--border);border-radius:var(--radius-sm);
+    padding:var(--space-2);margin-bottom:var(--space-2);
+  }
+  .table td{
+    border:none;height:auto;padding:5px var(--space-2);
+    display:flex;justify-content:space-between;align-items:center;gap:var(--space-3);
+  }
+  .table td::before{
+    content:attr(data-label);font-size:var(--text-xs);color:var(--fg-muted);font-weight:600;flex:none;
+  }
+  .table td.r{text-align:left}
+  /* 제목+설명처럼 내용이 긴 셀은 라벨 옆이 아니라 위에 쌓아 보여준다 (알림 센터 F11) */
+  .table td.stack{flex-direction:column;align-items:flex-start;gap:2px}
+  /* 화면들이 인라인 style로 건 다열 grid를 모바일에서 무조건 1열로 되돌린다.
+     인라인 선언이라 !important 없이는 이길 수 없다 — 없으면 가로 스크롤이 생긴다. */
+  .content .grid{grid-template-columns:1fr!important}
+  .content .grid > *{grid-column:1/-1!important}
+  .asset{grid-template-columns:1fr}
+  .asset .right{justify-content:space-between}
+  .notices-grid{grid-template-columns:1fr!important}
+  .bottomnav{
+    display:flex;position:fixed;left:0;right:0;bottom:0;z-index:30;
+    background:var(--surface);border-top:1px solid var(--border);
+    padding:6px 4px calc(6px + env(safe-area-inset-bottom,0px));
+  }
+  .bottomnav button{
+    flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;
+    padding:6px 2px;min-height:52px;font-size:10px;font-weight:600;color:var(--fg-muted);
+    border-radius:var(--radius-sm);position:relative;
+  }
+  .bottomnav button[aria-current="page"]{color:var(--primary)}
+  .bottomnav button:disabled{opacity:.4}
+  .bottomnav .ico{width:19px;height:19px}
+  .bottomnav .dotmark{
+    position:absolute;top:4px;right:calc(50% - 16px);
+    width:6px;height:6px;border-radius:50%;background:var(--g-danger-fg);
+  }
+}
+
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation-duration:.001ms!important;animation-iteration-count:1!important;transition-duration:.001ms!important}
+}
+@media (prefers-color-scheme:dark){
+  html:not([data-theme]){color-scheme:dark}
+}
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+.screen[hidden]{display:none}
+</style>
+</head>
+<body>
+
+<div class="app">
+
+  <!-- ================= 사이드바 ================= -->
+  <aside class="sidebar">
+    <div class="brand">
+      <svg class="mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/>
+      </svg>
+      <span>셀가드</span>
+    </div>
+    <nav class="nav" id="nav" aria-label="주요 메뉴"></nav>
+  </aside>
+
+  <!-- ================= 본문 ================= -->
+  <div class="main">
+    <header class="topbar">
+      <h1 id="screenTitle">실시간 관제</h1>
+      <div class="spacer"></div>
+      <span class="live" id="liveTag"><span class="dot"></span>수신 중</span>
+      <button class="btn btn-ghost btn-sm" id="gateToggle" title="T0 진입 잠금 게이트를 켜고 끄며 확인합니다">배터리 연결 해제</button>
+      <button class="btn btn-ghost btn-sm" id="themeToggle" aria-label="테마 전환">
+        <svg class="ico" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+          <circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M6.3 17.7l-1.4 1.4M19.1 4.9l-1.4 1.4"/>
+        </svg>
+      </button>
+    </header>
+
+    <main class="content" id="content"></main>
+  </div>
+</div>
+
+<nav class="bottomnav" id="bottomnav" aria-label="주요 메뉴"></nav>
+
+<!-- 게이트 모달 (T7) -->
+<div class="overlay" id="overlay" hidden role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+  <div class="modal" id="modal"></div>
+</div>
+
+<script>
+"use strict";
+
+/* ============================================================
+   1. 등급 — 계약서 §"이상점수와 상태 등급"
+   등급은 언제나 임계값에서 계산한다. 데이터에 적힌 라벨을 쓰지 않는다.
+   경계값은 하위 등급(0.3 → 정상) — frontend/dashboard/RealtimeDashboard.jsx:15와 동일.
+   ============================================================ */
+const GRADES = [
+  { key:"normal",  max:0.30, label:"정상", cls:"g-normal",  shape:"circle",   range:"0–29"   },
+  { key:"caution", max:0.60, label:"주의", cls:"g-caution", shape:"diamond",  range:"30–59"  },
+  { key:"warning", max:0.80, label:"경고", cls:"g-warning", shape:"triangle", range:"60–79"  },
+  { key:"danger",  max:1.00, label:"위험", cls:"g-danger",  shape:"square",   range:"80–100" },
+];
+const gradeOf = s => GRADES.find(g => s <= g.max) || GRADES[GRADES.length - 1];
+const toDisplay = s => Math.round(s * 100);   // 0.0–1.0 → 표시용 정수
+
+/* 도형 — 색만으로 정보를 전달하지 않기 위한 두 번째 채널. 장식이 아니다. */
+function shapeSVG(kind, size){
+  const s = size || 9;
+  const p = {
+    circle:  `<circle cx="5" cy="5" r="4.2"/>`,
+    diamond: `<path d="M5 .6 9.4 5 5 9.4.6 5z"/>`,
+    triangle:`<path d="M5 .8 9.6 9H.4z"/>`,
+    square:  `<rect x="1" y="1" width="8" height="8" rx="1"/>`,
+  }[kind];
+  return `<svg class="shape" width="${s}" height="${s}" viewBox="0 0 10 10" fill="currentColor" aria-hidden="true">${p}</svg>`;
+}
+
+/* 등급 배지 — 색 + 도형 + 라벨 + 숫자 네 겹을 한 곳에서만 만든다 */
+function badge(score){
+  if (score === null || score === undefined) {
+    return `<span class="badge g-none">점수 없음</span>`;
+  }
+  const g = gradeOf(score);
+  return `<span class="badge ${g.cls}">${shapeSVG(g.shape)}${g.label}<span class="score">${toDisplay(score)}</span></span>`;
+}
+/* 임계값이 아직 없어 등급을 매길 수 없는 지표 (F4 상태·예외) */
+const noThreshold = `<span class="badge g-none" title="이 지표는 임계값이 정해지지 않아 등급을 매길 수 없습니다">임계값 미정</span>`;
+
+/* ============================================================
+   2. 목업 데이터 — 전부 docs/product_contract.md 부록 A
+      여기에 없는 수치는 지어내지 않는다.
+   ============================================================ */
+const DATA = {
+  user:{ name:"홍길동", role:"측정 담당자" },
+  unread:{ anomaly:9, alerts:2 },
+
+  /* 부록 A "배터리 자산 5대" — 등급 열은 싣지 않는다. 점수에서 계산한다. */
+  assets:[
+    { id:"PACK-001", spec:"18650 Li-ion · 3S", mode:1, soc:78, score:0.82, device:"진단기 A" },
+    { id:"PACK-002", spec:"18650 Li-ion · 3S", mode:1, soc:91, score:0.18, device:"진단기 A" },
+    { id:"PACK-003", spec:"Li-Po · 2S",        mode:3, soc:64, score:0.33, device:"진단기 C" },
+    { id:"PACK-004", spec:"18650 Li-ion · 2S", mode:2, soc:47, score:0.58, device:"진단기 B" },
+    { id:"PACK-005", spec:"Li-Po · 1S",        mode:3, soc:82, score:0.24, device:"—" },
+  ],
+
+  /* 부록 A "측정 세션 기준값" */
+  session:{
+    battery:"PACK-002",
+    voltage:11.46, current:1.7, temp:28.7, soc:90, score:0.18,
+  },
+
+  /* 부록 A "진단기 목록" */
+  devices:[
+    { name:"진단기 A — BMS-2400", sn:"SN-00124 · Raspberry Pi 5", link:"ONLINE",  last:"방금 전",  battery:"PACK-001", mode:"모드 1" },
+    { name:"진단기 B — BMS-2401", sn:"SN-00125 · Raspberry Pi 5", link:"ONLINE",  last:"12초 전",  battery:"PACK-004", mode:"모드 2" },
+    { name:"진단기 C — BMS-2402", sn:"SN-00126 · Raspberry Pi 4", link:"DELAYED", last:"3분 전",   battery:"PACK-003", mode:"모드 3" },
+    { name:"진단기 D — BMS-2403", sn:"SN-00127 · Raspberry Pi 4", link:"OFFLINE", last:"2시간 전", battery:"—",        mode:"—" },
+  ],
+
+  /* 부록 A "이상 탐지 요약과 건강도" */
+  anomaly:{
+    model:"실행 중", active:9, today:23, todayMax:0.91, todayMaxAt:"6/29 14:24",
+    dist:[ {key:"normal",n:112},{key:"caution",n:11},{key:"warning",n:3},{key:"danger",n:2} ],
+    factorsFor:{ battery:"PACK-001", score:0.82 },
+    factors:[
+      { name:"온도 상승률",  code:"dT/dt",     v:0.42 },
+      { name:"전류 변화량",  code:"I_smooth",  v:0.28 },
+      { name:"전압 강하",    code:"V_drop",    v:0.16 },
+      { name:"SOC 변화율",   code:"SOC_delta", v:0.09 },
+    ],
+    health:[
+      { k:"SOH (건강 상태)", v:"92", u:"%" },
+      { k:"RUL (잔존수명)",  v:"~480", u:"사이클" },
+      { k:"누적 사이클",     v:"312", u:"" },
+      { k:"내부 저항",       v:"18.4", u:"mΩ" },
+    ],
+  },
+
+  /* 부록 A "이상 탐지 이벤트 이력" — 전체 116건 중 1–5 */
+  events:{
+    total:116,
+    rows:[
+      { at:"14:32:10", name:"릴레이 자동 차단 (Kill-Switch)", battery:"PACK-001", score:null, state:"차단" },
+      { at:"14:32:08", name:"온도 임계값 초과",              battery:"PACK-001", score:0.82, state:null },
+      { at:"14:24:51", name:"전류 변화량 급상승",            battery:"PACK-004", score:0.58, state:null },
+      { at:"14:08:12", name:"이상점수 주의 구간 진입",        battery:"PACK-003", score:0.44, state:null },
+      { at:"13:54:40", name:"디바이스 하트비트 미수신",       battery:"PACK-005", score:null, state:"주의" },
+    ],
+  },
+
+  /* 부록 A "릴레이 제어 이력" 대상 회로 */
+  relay:{ circuit:"PACK-001", state:"CUT" },
+
+  /* 부록 A "알림 센터 알림" — 오늘 요약은 계약서에 명시된 고정 문구를 그대로 쓴다.
+     개별 항목의 등급은 점수가 있으면 badge()로 계산한다 — 부록 원문 라벨을 그대로 베끼지 않는다
+     (PACK-004 행은 원문이 "경고"지만 점수 0.58은 4등급 기준 "주의" 구간이다. 아래 anomaly 판정용
+     이상탐지 이벤트 이력의 동일 사건도 이미 이렇게 계산해 표시하고 있다 — 이 화면도 같은 규칙을 따른다). */
+  alertsSummary:{ needAck:1, danger:1, warning:2, ok:1 },
+  alerts:[
+    { id:"AL-1", score:0.82, target:"PACK-001", title:"온도 임계값 초과",
+      desc:"IR 표면 온도 60.4°C, dT/dt 급상승이 감지되었습니다. 즉시 확인이 필요합니다.",
+      at:"방금 전", metric:"60.4°C · 이상점수 82", channels:["카카오","인앱","SMS"], acked:false,
+      raw:{ timestamp:"2026-07-10T14:22:03Z", battery_id:"PACK-001", temp_c:60.4, dT_dt:"+2.8 °C/min",
+            voltage_v:11.62, current_a:2.9, soc_pct:78, anomaly_score:"0.82", relay_state:"CUT (fail-safe)" } },
+    { id:"AL-2", score:0.58, target:"PACK-004", title:"전류 변화량 급상승",
+      desc:"I_smooth(전류 변화량)가 평소의 2.8배로 상승했습니다. 추세를 모니터링하고 있습니다.",
+      at:"8분 전", metric:"전류 변화 2.8× · 이상점수 58", channels:["카카오","인앱"], acked:false, raw:null },
+    { id:"AL-3", score:null, sevLabel:"경고", target:"PACK-002", title:"SOC 급락 감지",
+      desc:"10분 사이 SOC가 18%p 하락했습니다. 부하 이상 여부를 점검하세요.",
+      at:"25분 전", metric:"SOC -18%p", channels:["인앱"], acked:false, raw:null },
+    { id:"AL-4", score:null, sevLabel:"점검", target:"진단기 C", title:"디바이스 하트비트 미수신",
+      desc:"진단기 C의 하트비트가 3회 연속 누락되었습니다. 통신 상태를 확인하세요.",
+      at:"1시간 전", metric:"연속 누락 3회", channels:["인앱"], acked:false, raw:null },
+  ],
+
+  /* 부록 A "공지사항" — 목록엔 요약(본문 앞부분을 기계적으로 잘라낸 것), 상세엔 본문 전체 */
+  notices:[
+    { id:"NT-1", cat:"중요", title:"펌웨어 v5.2 긴급 업데이트 안내", date:"2026-07-01",
+      body:"릴레이 인터락 안정성이 개선됩니다. 7/5 02:00에 자동 반영되며, 반영 중 약 3분간 원격 제어가 제한됩니다. 반영 후에는 별도 조치가 필요하지 않습니다." },
+    { id:"NT-2", cat:"점검", title:"7월 정기 서버 점검 (무중단)", date:"2026-06-30",
+      body:"7/7 00:00~04:00 인프라 점검이 진행됩니다. WebSocket 순단이 발생할 수 있으나 자동 재연결되며, 측정 데이터는 버퍼링 후 복원됩니다." },
+    { id:"NT-3", cat:"기능", title:"이상 근거(XAI) 표시 정식 오픈", date:"2026-06-28",
+      body:"이상 탐지 화면에서 이상점수 상승에 기여한 특징(dT/dt·가스·전압강하 등)을 막대 형태로 확인할 수 있습니다." },
+    { id:"NT-4", cat:"안내", title:"모바일 웹푸시(PWA) 베타 지원", date:"2026-06-24",
+      body:"설정 · 알림 수신에서 웹푸시를 켜면 모바일에서도 위험 알림을 받을 수 있습니다. iOS 16.4 이상에서 홈 화면 추가 후 사용하세요." },
+  ],
+
+  /* docs/backend_contract.md §4.11 /api/settings/alerts, /voice-alert 기본값 — 부록 A엔 없으나
+     API 계약 정본에 명시된 기본값이라 이 값을 그대로 쓴다 */
+  notify:{
+    channels:{ KAKAO:true, EMAIL:true, SMS:false, WEBPUSH:true },
+    sendOn:["위험","경고"], smsOnlyDanger:true, dedupeMinutes:5,
+  },
+  voice:{
+    enabled:true, volume:70,
+    categories:[
+      { key:"connection", label:"연결/측정",        on:true },
+      { key:"anomaly",    label:"이상상태",          on:true },
+      { key:"failsafe",   label:"Fail-Safe/릴레이", on:true },
+      { key:"deviceError",label:"센서/디바이스 오류", on:true },
+      { key:"network",    label:"네트워크/서버 상태", on:false },
+    ],
+  },
+};
+
+/* 공지 요약 — 부록 A는 "본문"만 주고 별도 요약 문구는 없다.
+   새 사실을 지어내지 않기 위해, 이미 있는 본문 텍스트의 첫 문장만 기계적으로 잘라 쓴다. */
+function noticeSummary(body){
+  const cut = body.indexOf("니다.");
+  return cut > -1 ? body.slice(0, cut + 3) : (body.length > 40 ? body.slice(0,40) + "…" : body);
+}
+
+/* ============================================================
+   3. 화면 정의 — 9개 목적지 (계약서 §도달 가능성)
+      T0 잠금 시 배터리 자산관리를 제외한 8개가 잠긴다.
+   ============================================================ */
+const ICON = {
+  monitor:'<path d="M3 3h18v12H3z"/><path d="M8 21h8M12 15v6"/>',
+  battery:'<rect x="2" y="7" width="16" height="10" rx="2"/><path d="M22 11v2"/><path d="M6 11v2"/>',
+  anomaly:'<path d="M3 15l4-6 4 4 4-8 6 10"/>',
+  trend:  '<path d="M3 17l6-6 4 4 8-8"/><path d="M21 7v5h-5"/>',
+  events: '<path d="M4 5h16M4 12h16M4 19h10"/>',
+  bell:   '<path d="M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/>',
+  notice: '<path d="M3 11v2a1 1 0 0 0 1 1h3l5 4V6L7 10H4a1 1 0 0 0-1 1z"/><path d="M17 9a4 4 0 0 1 0 6"/>',
+  relay:  '<path d="M13 2 4 14h7l-1 8 9-12h-7z"/>',
+  settings:'<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-1.8-.3 1.6 1.6 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1A1.6 1.6 0 0 0 9 19.4a1.6 1.6 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.6 1.6 0 0 0 .3-1.8 1.6 1.6 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1A1.6 1.6 0 0 0 4.6 9a1.6 1.6 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.6 1.6 0 0 0 1.8.3H9a1.6 1.6 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.6 1.6 0 0 0 1 1.5 1.6 1.6 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.6 1.6 0 0 0-.3 1.8V9a1.6 1.6 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.6 1.6 0 0 0-1.5 1z"/>',
+  lock:   '<rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 1 1 8 0v3"/>',
+  more:   '<circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/>',
+  check:  '<path d="M20 6 9 17l-5-5"/>',
+  alert:  '<path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/>',
+  download:'<path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/>',
+  volume: '<path d="M11 5 6 9H2v6h4l5 4z"/><path d="M18.5 8.5a5 5 0 0 1 0 7"/><path d="M21 6a9 9 0 0 1 0 12"/>',
+  globe:  '<circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3a13.5 13.5 0 0 1 0 18 13.5 13.5 0 0 1 0-18z"/>',
+  key:    '<circle cx="7.5" cy="15.5" r="4.5"/><path d="m10.6 12.4 8-8"/><path d="M15 8l2 2"/><path d="M18 5l2 2"/>',
+  user:   '<circle cx="12" cy="8" r="4"/><path d="M4 21c0-4.4 3.6-7 8-7s8 2.6 8 7"/>',
+};
+function icon(name, cls){
+  return `<svg class="${cls||"ico"}" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+    stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICON[name]}</svg>`;
+}
+
+const SCREENS = [
+  { id:"monitor",  title:"실시간 관제",     titleEn:"Live Monitor",     icon:"monitor",  lockable:true,  bottom:true },
+  { id:"assets",   title:"배터리 자산관리", titleEn:"Battery Assets",   icon:"battery",  lockable:false, bottom:true },
+  { id:"anomaly",  title:"이상 탐지",       titleEn:"Anomaly Detection",icon:"anomaly",  lockable:true,  bottom:true, badge:()=>DATA.unread.anomaly },
+  { id:"trend",    title:"추세",            titleEn:"Trends",           icon:"trend",    lockable:true },
+  { id:"events",   title:"이벤트 이력",     titleEn:"Event History",    icon:"events",   lockable:true },
+  { id:"alerts",   title:"알림 센터",       titleEn:"Alert Center",     icon:"bell",     lockable:true, badge:()=>DATA.unread.alerts },
+  { id:"notices",  title:"공지사항",        titleEn:"Notices",          icon:"notice",   lockable:true },
+  { id:"relay",    title:"릴레이 제어",     titleEn:"Relay Control",    icon:"relay",    lockable:true, bottom:true },
+  { id:"settings", title:"설정",            titleEn:"Settings",         icon:"settings", lockable:true },
+];
+/* 화면 라벨을 골라 쓴다 — screenLabel(sc) */
+const screenLabel = sc => state.lang === "en" ? sc.titleEn : sc.title;
+
+const state = {
+  screen:"monitor", connected:true, theme:"light", lang:"ko",
+  trendRange:"24h", trendCompare:[], trendExportMsg:null,
+  noticeCat:"전체", selectedNotice:null,
+};
+
+/* 크롬(사이드바·상단바 등) 전용 한/영 문구 — 화면 본문 번역은 이 목업 범위 밖이다 */
+const tc = (ko, en) => state.lang === "en" ? en : ko;
+
+/* ---------- 테마 — 라이트·다크·시스템 3종, 실제로 동작한다 (F14) ---------- */
+function applyTheme(mode){
+  state.theme = mode;
+  if (mode === "system") document.documentElement.removeAttribute("data-theme");
+  else document.documentElement.dataset.theme = mode;
+}
+
+/* ============================================================
+   4. 게이지 — 4구간을 모두 그린다 (3구간은 v3 버그)
+   ============================================================ */
+function gauge(score){
+  const R = 84, CX = 110, CY = 100;
+  const a = t => Math.PI * (1 - t);                       // 0→180°, 1→0°
+  const pt = t => [CX + R*Math.cos(a(t)), CY - R*Math.sin(a(t))];
+  const arc = (t0,t1,color,w) => {
+    const [x0,y0] = pt(t0), [x1,y1] = pt(t1);
+    return `<path d="M${x0.toFixed(2)} ${y0.toFixed(2)} A${R} ${R} 0 0 1 ${x1.toFixed(2)} ${y1.toFixed(2)}"
+            fill="none" stroke="${color}" stroke-width="${w}" stroke-linecap="butt"/>`;
+  };
+  const segs = [[0,.3,"--g-normal-fg"],[.3,.6,"--g-caution-fg"],[.6,.8,"--g-warning-fg"],[.8,1,"--g-danger-fg"]];
+  const track = segs.map(([t0,t1,c]) => arc(t0+.004, t1-.004, `var(${c})`, 11)).join("");
+
+  const g = gradeOf(score);
+  const [mx,my] = pt(score);
+  const [ix,iy] = [CX + (R-22)*Math.cos(a(score)), CY - (R-22)*Math.sin(a(score))];
+
+  return `
+  <div class="gauge">
+    <svg viewBox="0 0 220 128" role="img"
+         aria-label="이상점수 ${toDisplay(score)}점, 100점 만점, ${g.label} 등급">
+      ${track}
+      <line x1="${ix.toFixed(2)}" y1="${iy.toFixed(2)}" x2="${mx.toFixed(2)}" y2="${my.toFixed(2)}"
+            stroke="var(--fg)" stroke-width="3" stroke-linecap="round"/>
+      <circle cx="${mx.toFixed(2)}" cy="${my.toFixed(2)}" r="4.5" fill="var(--fg)"/>
+      <text x="${(CX-R).toFixed(0)}" y="120" font-size="10" fill="var(--fg-muted)" text-anchor="middle" font-family="var(--font-num)">0</text>
+      <text x="${(CX+R).toFixed(0)}" y="120" font-size="10" fill="var(--fg-muted)" text-anchor="middle" font-family="var(--font-num)">100</text>
+    </svg>
+    <div class="readout">
+      <span class="n" style="color:var(--g-${g.key}-fg)">${toDisplay(score)}</span>
+      <span class="of">최종 이상점수</span>
+    </div>
+  </div>`;
+}
+
+function legend(score){
+  const cur = gradeOf(score);
+  return `<div class="legend">
+    ${GRADES.map(g => `
+      <div class="legend-row" data-active="${g.key===cur.key}" style="color:var(--g-${g.key}-fg)">
+        ${shapeSVG(g.shape)}
+        <span class="nm">${g.label}</span>
+        <span class="rg">${g.range}</span>
+      </div>`).join("")}
+  </div>`;
+}
+
+/* ============================================================
+   5. 화면
+   ============================================================ */
+const V = {};
+
+/* ---- F4 실시간 관제 ---- */
+V.monitor = () => {
+  const s = DATA.session;
+  const g = gradeOf(s.score);
+  /* 온도만 임계값이 있다. 전압·전류·SOC는 등급이 비어 있다 (F4 상태·예외) */
+  const metric = (k, v, u, gradeHtml) => `
+    <div class="metric">
+      <span class="k">${k}</span>
+      <span class="v">${v}<span class="u">${u}</span></span>
+      <span class="foot">${gradeHtml}</span>
+    </div>`;
+
+  return `
+  <div class="grid" style="grid-template-columns:minmax(0,1.15fr) minmax(0,1fr);align-items:start">
+
+    <section class="card" style="grid-column:1/-1">
+      <div class="card-head">
+        <h2>연결된 배터리</h2>
+        <span class="sub">측정 세션 진행 중 · 마지막 수신 <span class="num">방금 전</span></span>
+      </div>
+      <div style="display:flex;align-items:center;gap:var(--space-4);flex-wrap:wrap">
+        <span class="num" style="font-size:var(--text-h1);font-weight:700">${s.battery}</span>
+        ${badge(s.score)}
+        <span class="xs muted">진단기 A — BMS-2400 · 모드 1</span>
+        <div style="margin-left:auto;display:flex;gap:var(--space-2)">
+          <button class="btn btn-ghost btn-sm" data-go="assets">측정 대상 변경</button>
+          <button class="btn btn-danger btn-sm" data-go="relay">릴레이 차단</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="card-head"><h2>최종 이상점수</h2></div>
+      <div class="gauge-wrap">
+        ${gauge(s.score)}
+        ${legend(s.score)}
+      </div>
+      <div style="margin-top:var(--space-4);display:flex;gap:var(--space-2)">
+        <button class="btn btn-ghost btn-sm" data-go="anomaly">이상 근거 확인</button>
+        <button class="btn btn-ghost btn-sm" data-go="trend">추세 전체 보기</button>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="card-head"><h2>현재값</h2><span class="sub">4지표</span></div>
+      <div class="metrics" style="grid-template-columns:repeat(2,1fr)">
+        ${metric("전압", s.voltage.toFixed(2), "V", noThreshold)}
+        ${metric("전류", s.current.toFixed(1), "A", noThreshold)}
+        ${metric("온도", s.temp.toFixed(1), "℃", badge(0.18))}
+        ${metric("SOC",  s.soc,              "%", noThreshold)}
+      </div>
+      <div class="notice" style="margin-top:var(--space-3)">
+        ${icon("alert")}
+        <div>현재 임계값이 정해진 지표는 <strong>온도</strong>뿐입니다. 전압·전류·SOC는 값만 표시되고 등급은 비어 있습니다.</div>
+      </div>
+    </section>
+
+    <section class="card" style="grid-column:1/-1">
+      <div class="card-head">
+        <h2>최근 추이</h2>
+        <span class="sub">표시 지표 선택</span>
+      </div>
+      <div class="seg" role="group" aria-label="표시 지표">
+        <button aria-pressed="true">전압</button><button aria-pressed="false">전류</button>
+        <button aria-pressed="false">온도</button><button aria-pressed="false">SOC</button>
+      </div>
+      ${sparkline()}
+    </section>
+
+    <section class="card" style="grid-column:1/-1">
+      <div class="card-head"><h2>최근 공지</h2>
+        <button class="btn btn-ghost btn-sm" style="margin-left:auto" data-go="notices">전체 보기</button>
+      </div>
+      <div class="empty">부록 A에 사용자 화면 공지 데이터가 있으나 이 목업 범위에 포함하지 않았습니다.</div>
+    </section>
+  </div>`;
+};
+
+/* 데이터 없는 구간을 값 0과 구분해 그린다 (F9 제약) */
+function sparkline(){
+  const pts = [42,44,43,47,52,50,null,null,55,58,54,53,57,60,59,62,58,56,55,57];
+  const W=880,H=120,P=8;
+  const xs = i => P + i*(W-2*P)/(pts.length-1);
+  const ys = v => H-P - ((v-35)/35)*(H-2*P);
+  let d="",gapRects="",open=false;
+  pts.forEach((v,i)=>{
+    if(v===null){
+      open=false;
+      const x0=xs(i)-((W-2*P)/(pts.length-1))/2, w=(W-2*P)/(pts.length-1);
+      gapRects+=`<rect x="${x0.toFixed(1)}" y="${P}" width="${w.toFixed(1)}" height="${H-2*P}" fill="url(#hatch)"/>`;
+      return;
+    }
+    d += (open?" L":" M") + xs(i).toFixed(1) + " " + ys(v).toFixed(1);
+    open=true;
+  });
+  return `
+  <div style="margin-top:var(--space-3)">
+    <svg viewBox="0 0 ${W} ${H}" style="width:100%;height:120px" role="img" aria-label="최근 전압 추이. 중간에 데이터가 없는 구간이 있습니다.">
+      <defs>
+        <pattern id="hatch" width="6" height="6" patternTransform="rotate(45)" patternUnits="userSpaceOnUse">
+          <line x1="0" y1="0" x2="0" y2="6" stroke="var(--border-strong)" stroke-width="1.5"/>
+        </pattern>
+      </defs>
+      ${gapRects}
+      <path d="${d}" fill="none" stroke="var(--primary)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>
+    <div class="xs muted" style="display:flex;align-items:center;gap:6px;margin-top:6px">
+      <span style="width:14px;height:8px;border:1px solid var(--border-strong);display:inline-block;
+        background:repeating-linear-gradient(45deg,var(--border-strong) 0 1.5px,transparent 1.5px 6px)"></span>
+      빗금 구간은 <strong>데이터 없음</strong>입니다 — 값이 0인 것과 다릅니다.
+    </div>
+  </div>`;
+}
+
+/* ============================================================
+   F9 추세 — 4지표 소형 선 차트. 부록 A는 지표별 시계열을 주지 않으므로
+   (배터리별 단일 시점 값 뿐) 각 배터리의 SOC(부록 A 실측)와 직렬 셀 수(부록 A 실측,
+   전압 기준선 산출용)만 실측을 앵커로 쓰고, 나머지 형태는 결정적 의사난수로 그린
+   예시 파형이다 — 실제 시계열이 아니라는 점을 화면에 각주로 밝힌다.
+   ============================================================ */
+const TREND_METRICS = [
+  { key:"voltage", label:"전압", unit:"V", agg:"avg", decimals:2, spread:.35 },
+  { key:"current", label:"전류", unit:"A", agg:"avg", decimals:1, spread:.9  },
+  { key:"temp",    label:"온도", unit:"℃", agg:"max", decimals:1, spread:2.6 },
+  { key:"soc",     label:"SOC", unit:"%", agg:"avg", decimals:0, spread:5   },
+];
+const RANGE_LABEL = { "24h":"24시간 전", "7d":"7일 전", "30d":"30일 전" };
+const SERIES_LEN = 16, GAP_AT = 7; /* 연결된 배터리에서만 하트비트 유실 구간을 재현한다 */
+
+function seededRand(seed){
+  let s = seed % 2147483647; if (s <= 0) s += 2147483646;
+  return () => (s = (s * 16807) % 2147483647) / 2147483647;
+}
+function hashSeed(str){ let h=0; for (let i=0;i<str.length;i++) h=(h*31+str.charCodeAt(i))|0; return Math.abs(h)||1; }
+
+function baselineFor(batteryId, metricKey){
+  const a = DATA.assets.find(x => x.id === batteryId);
+  const cells = +((a.spec.match(/(\d+)S/) || [])[1]) || 1;
+  const isConnected = batteryId === DATA.session.battery;
+  switch (metricKey){
+    case "voltage": return isConnected ? DATA.session.voltage : +(cells * 3.75).toFixed(2);
+    case "current": return isConnected ? DATA.session.current : 1.6;
+    case "temp":    return isConnected ? DATA.session.temp : 27.5;
+    case "soc":     return a.soc;
+  }
+}
+/* 배터리 × 지표 × 기간별로 고정된(재렌더에도 흔들리지 않는) 예시 파형을 만든다 */
+function trendSeries(batteryId, metricKey, range){
+  const rnd = seededRand(hashSeed(batteryId + metricKey + range));
+  const m = TREND_METRICS.find(x => x.key === metricKey);
+  const base = baselineFor(batteryId, metricKey);
+  const withGap = batteryId === DATA.session.battery;
+  const pts = [];
+  for (let i=0;i<SERIES_LEN;i++){
+    if (withGap && (i===GAP_AT || i===GAP_AT+1)){ pts.push(null); continue; }
+    pts.push(+(base + (rnd()-0.5) * 2 * m.spread).toFixed(m.decimals));
+  }
+  return pts;
+}
+function aggregate(pts, agg){
+  const v = pts.filter(x => x !== null);
+  if (!v.length) return null;
+  return agg === "max" ? Math.max(...v) : +(v.reduce((a,b)=>a+b,0)/v.length).toFixed(2);
+}
+
+const CMP_DASH = ["4 3","2 2","7 2 2 2","1 3"];
+
+/* 소형 다중 선 차트 하나 — 연결된 배터리(실선) + 비교 배터리(대시, 최대 4개) */
+function trendChart(m, batteryIds){
+  const W=760, H=88, P=6;
+  const seriesList = batteryIds.map((id,idx) => ({
+    id, points: trendSeries(id, m.key, state.trendRange),
+    primary: id === DATA.session.battery,
+    dash: idx>0 || id!==DATA.session.battery ? CMP_DASH[idx % CMP_DASH.length] : null,
+  }));
+  const all = seriesList.flatMap(s => s.points).filter(v => v !== null);
+  const lo = Math.min(...all), hi = Math.max(...all);
+  const pad = (hi-lo)*0.15 || 1;
+  const ys = v => H-P - ((v-(lo-pad))/((hi+pad)-(lo-pad))) * (H-2*P);
+  const xs = i => P + i*(W-2*P)/(SERIES_LEN-1);
+  const stepW = (W-2*P)/(SERIES_LEN-1);
+
+  let gapRects = "";
+  const gapId = "hatch-" + m.key;
+  seriesList.filter(s=>s.primary).forEach(s => {
+    s.points.forEach((v,i) => { if (v===null){
+      gapRects += `<rect x="${(xs(i)-stepW/2).toFixed(1)}" y="${P}" width="${stepW.toFixed(1)}" height="${H-2*P}" fill="url(#${gapId})"/>`;
+    }});
+  });
+
+  const paths = seriesList.map(s => {
+    let d="", open=false;
+    s.points.forEach((v,i) => {
+      if (v===null){ open=false; return; }
+      d += (open?" L":" M") + xs(i).toFixed(1) + " " + ys(v).toFixed(1);
+      open=true;
+    });
+    const stroke = s.primary ? "var(--primary)" : "var(--fg-muted)";
+    const dash = s.dash ? `stroke-dasharray="${s.dash}"` : "";
+    const width = s.primary ? 2.25 : 1.5;
+    return `<path d="${d}" fill="none" stroke="${stroke}" stroke-width="${width}" ${dash} stroke-linecap="round" stroke-linejoin="round"/>`;
+  }).join("");
+
+  const primaryPts = seriesList.find(s=>s.primary)?.points || [];
+  const aggVal = aggregate(primaryPts, m.agg);
+  const aggWord = m.agg === "max" ? "구간 내 최고값" : "구간 내 평균값";
+
+  return `
+  <div class="tchart">
+    <div class="thead">
+      <span class="nm">${m.label}<span class="xs muted" style="margin-left:6px">(${m.unit})</span></span>
+      <span class="agg">${aggWord} <span class="num">${aggVal===null?"—":aggVal}${m.unit}</span></span>
+    </div>
+    <svg viewBox="0 0 ${W} ${H}" style="width:100%;height:${H}px" role="img"
+      aria-label="${DATA.session.battery} ${m.label} 추이. ${aggWord} ${aggVal===null?"데이터 없음":aggVal+m.unit}. 중간에 데이터 없는 구간 있음.">
+      <defs>
+        <pattern id="${gapId}" width="6" height="6" patternTransform="rotate(45)" patternUnits="userSpaceOnUse">
+          <line x1="0" y1="0" x2="0" y2="6" stroke="var(--border-strong)" stroke-width="1.5"/>
+        </pattern>
+      </defs>
+      ${gapRects}${paths}
+    </svg>
+  </div>`;
+}
+
+/* ---- F6 배터리 자산관리 (T0에서 유일하게 열린 곳) ---- */
+V.assets = () => `
+  <div class="grid">
+    ${state.connected ? "" : `
+    <div class="notice">
+      ${icon("lock")}
+      <div><strong>측정 대상 배터리가 연결되지 않았습니다.</strong><br>
+      아래에서 배터리를 선택해 연결하면 나머지 8개 메뉴가 열립니다.</div>
+    </div>`}
+
+    <section class="card">
+      <div class="card-head">
+        <h2>저장된 배터리</h2>
+        <span class="sub">총 <span class="num">${DATA.assets.length}</span>대</span>
+      </div>
+
+      <div style="display:flex;gap:var(--space-3);flex-wrap:wrap;margin-bottom:var(--space-3)">
+        <div class="seg" role="group" aria-label="측정 모드로 좁히기">
+          <button aria-pressed="true">전체</button><button aria-pressed="false">모드 1</button>
+          <button aria-pressed="false">모드 2</button><button aria-pressed="false">모드 3</button>
+        </div>
+        <div class="seg" role="group" aria-label="정렬 기준">
+          <button aria-pressed="true">최근 측정순</button>
+          <button aria-pressed="false">이상점수 높은순</button>
+          <button aria-pressed="false">SOC 낮은순</button>
+        </div>
+        <button class="btn btn-primary btn-sm" style="margin-left:auto">새 배터리 등록</button>
+      </div>
+
+      <div class="grid" style="gap:var(--space-2)">
+        ${DATA.assets.map(a => `
+          <div class="asset" data-connected="${state.connected && a.id===DATA.session.battery}">
+            <div>
+              <div style="display:flex;align-items:center;gap:var(--space-2);flex-wrap:wrap">
+                <span class="id">${a.id}</span>
+                ${badge(a.score)}
+                ${state.connected && a.id===DATA.session.battery
+                  ? `<span class="badge g-none" style="color:var(--primary)">연결됨</span>` : ""}
+              </div>
+              <div class="spec">${a.spec} · 모드 ${a.mode} · ${a.device}</div>
+            </div>
+            <div class="right">
+              <div class="kv"><div class="k">SOC</div><div class="v">${a.soc}%</div></div>
+              <button class="btn btn-ghost btn-sm" data-connect="${a.id}">연결</button>
+            </div>
+          </div>`).join("")}
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="card-head"><h2>진단기 상태</h2><span class="sub">연결 가능 여부의 근거</span></div>
+      <div class="table-scroll">
+        <table class="table">
+          <thead><tr><th>진단기</th><th>일련번호 · 기종</th><th>통신</th><th>마지막 수신</th><th>연결 배터리</th></tr></thead>
+          <tbody>
+            ${DATA.devices.map(d => `
+              <tr>
+                <td data-label="진단기">${d.name}</td>
+                <td data-label="일련번호" class="num xs">${d.sn}</td>
+                <td data-label="통신">
+                  <span class="badge ${d.link==="ONLINE"?"g-normal":d.link==="DELAYED"?"g-caution":"g-danger"}">
+                    ${shapeSVG(d.link==="ONLINE"?"circle":d.link==="DELAYED"?"diamond":"square")}${d.link}
+                  </span>
+                </td>
+                <td data-label="마지막 수신" class="num">${d.last}</td>
+                <td data-label="연결 배터리" class="num">${d.battery}</td>
+              </tr>`).join("")}
+          </tbody>
+        </table>
+      </div>
+      <div class="notice" style="margin-top:var(--space-3)">
+        ${icon("alert")}
+        <div>진단기 D는 <strong>OFFLINE</strong>입니다. 이 진단기가 담당하는 배터리는 연결을 시작할 수 없습니다.</div>
+      </div>
+    </section>
+  </div>`;
+
+/* ---- F8 이상 탐지 ---- */
+V.anomaly = () => {
+  const A = DATA.anomaly, maxDist = Math.max(...A.dist.map(d=>d.n));
+  return `
+  <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(300px,1fr))">
+
+    <section class="card" style="grid-column:1/-1">
+      <div class="metrics">
+        <div class="metric"><span class="k">모델 동작 상태</span>
+          <span class="v" style="font-size:var(--text-h1)">${A.model}</span>
+          <span class="foot"><span class="badge g-normal">${shapeSVG("circle")}정상 동작</span></span></div>
+        <div class="metric"><span class="k">활성 이상 이벤트</span>
+          <span class="v">${A.active}<span class="u">건</span></span><span class="foot"></span></div>
+        <div class="metric"><span class="k">오늘 발생한 이상</span>
+          <span class="v">${A.today}<span class="u">건</span></span><span class="foot"></span></div>
+        <div class="metric"><span class="k">오늘 최고 이상점수</span>
+          <span class="v">${toDisplay(A.todayMax)}</span>
+          <span class="foot"><span class="xs muted num">${A.todayMaxAt}</span></span></div>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="card-head"><h2>위험도 구간별 분포</h2><span class="sub">내 배터리 기준</span></div>
+      <div class="dist">
+        ${A.dist.map(d => {
+          const g = GRADES.find(x=>x.key===d.key);
+          return `<div class="dist-row">
+            <span class="dist-name" style="color:var(--g-${g.key}-fg)">${shapeSVG(g.shape)}${g.label}</span>
+            <span class="dist-track"><span class="dist-fill" style="width:${(d.n/maxDist*100).toFixed(1)}%;background:var(--g-${g.key}-fg)"></span></span>
+            <span class="dist-val">${d.n}</span>
+          </div>`;
+        }).join("")}
+      </div>
+      <p class="xs muted" style="margin-top:var(--space-3)">4구간을 모두 표시합니다. 0건인 구간도 자리를 지킵니다.</p>
+    </section>
+
+    <section class="card">
+      <div class="card-head"><h2>이상점수 기여 요인</h2>
+        <span class="sub num">${A.factorsFor.battery} · ${toDisplay(A.factorsFor.score)}점</span>
+      </div>
+      ${A.factors.map(f => `
+        <div class="factor">
+          <span class="fname">${f.name} <code>${f.code}</code></span>
+          <span class="ftrack"><span class="ffill" style="width:${(f.v/0.42*100).toFixed(0)}%"></span></span>
+          <span class="fval">+${f.v.toFixed(2)}</span>
+        </div>`).join("")}
+      <p class="xs muted" style="margin-top:var(--space-3)">
+        기여도는 서로 독립이며 합이 1이 되도록 정규화하지 않습니다. 점수를 낮추는 방향의 기여는 표시하지 않습니다.
+      </p>
+    </section>
+
+    <section class="card">
+      <div class="card-head"><h2>건강도</h2></div>
+      <div class="metrics" style="grid-template-columns:repeat(2,1fr)">
+        ${A.health.map(h => `
+          <div class="metric" style="min-height:78px">
+            <span class="k">${h.k}</span>
+            <span class="v">${h.v}<span class="u">${h.u}</span></span>
+          </div>`).join("")}
+      </div>
+    </section>
+
+    <section class="card" style="grid-column:1/-1">
+      <div class="card-head"><h2>활성 이상 이벤트</h2>
+        <button class="btn btn-ghost btn-sm" style="margin-left:auto" data-go="events">전체 이력</button>
+      </div>
+      ${eventTable(false)}
+    </section>
+  </div>`;
+};
+
+/* ---- F10 이벤트 이력 ---- */
+function eventTable(withPager){
+  const E = DATA.events;
+  return `
+  <div class="table-scroll">
+    <table class="table">
+      <thead><tr><th>발생 시각</th><th>이벤트명</th><th>대상 배터리</th><th>이상점수 · 상태</th></tr></thead>
+      <tbody>
+        ${E.rows.map(r => `
+          <tr>
+            <td data-label="발생 시각" class="num">${r.at}</td>
+            <td data-label="이벤트명">${r.name}</td>
+            <td data-label="대상" class="num">${r.battery}</td>
+            <td data-label="상태">${
+              r.score !== null ? badge(r.score)
+              : `<span class="badge g-none">점수 없음 · ${r.state}</span>`}</td>
+          </tr>`).join("")}
+      </tbody>
+    </table>
+  </div>
+  ${withPager ? `
+  <div style="display:flex;align-items:center;gap:var(--space-3);margin-top:var(--space-3)">
+    <span class="xs muted">전체 <span class="num">${E.total}</span>건 중 <span class="num">1–${E.rows.length}</span></span>
+    <div style="margin-left:auto;display:flex;gap:var(--space-2)">
+      <button class="btn btn-ghost btn-sm" disabled>이전</button>
+      <button class="btn btn-ghost btn-sm">다음</button>
+    </div>
+  </div>` : ""}`;
+}
+
+V.events = () => `
+  <div class="grid">
+    <section class="card">
+      <div style="display:flex;gap:var(--space-3);flex-wrap:wrap;margin-bottom:var(--space-3)">
+        <input class="input" style="max-width:260px" placeholder="배터리 식별자로 검색" aria-label="배터리 식별자로 검색">
+        <div class="seg" role="group" aria-label="상태 기준">
+          <button aria-pressed="true">전체</button><button aria-pressed="false">위험</button>
+          <button aria-pressed="false">경고</button><button aria-pressed="false">주의</button>
+          <button aria-pressed="false">차단</button><button aria-pressed="false">정상</button>
+        </div>
+      </div>
+      ${eventTable(true)}
+      <p class="xs muted" style="margin-top:var(--space-3)">
+        목록은 발생 시각 최신순으로 고정됩니다. 정렬 기준은 배터리 자산관리의 기능입니다.
+      </p>
+    </section>
+  </div>`;
+
+/* ---- F12 릴레이 제어 (T7 게이트) ---- */
+V.relay = () => {
+  const cut = DATA.relay.state === "CUT";
+  return `
+  <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(320px,1fr))">
+    <section class="card">
+      <div class="card-head"><h2>회로 상태</h2><span class="sub num">${DATA.relay.circuit}</span></div>
+      <div style="display:flex;align-items:center;gap:var(--space-3);padding:var(--space-4) 0">
+        <span class="badge ${cut?"g-danger":"g-normal"}" style="font-size:var(--text-h2);padding:6px 14px">
+          ${shapeSVG(cut?"square":"circle", 12)}${cut?"차단됨":"정상 연결"}
+        </span>
+      </div>
+      ${cut ? `
+      <div class="notice is-danger">
+        ${icon("alert")}
+        <div><strong>Fail-Safe 자동 차단</strong><br>
+        온도 임계값 초과로 회로가 이미 차단되었습니다. 승인 절차 없이 실행된 차단이며, 통보만 제공됩니다.</div>
+      </div>` : ""}
+      <div style="display:flex;gap:var(--space-2);margin-top:var(--space-4)">
+        <button class="btn btn-primary" data-gate="restore" ${cut?"":"disabled"}>회로 복구</button>
+        <button class="btn btn-danger" data-gate="cut" ${cut?"disabled":""}>회로 차단</button>
+      </div>
+      <p class="xs muted" style="margin-top:var(--space-3)">
+        자동 복구는 없습니다. 한 번 차단된 회로는 재인증과 사유 입력을 거쳐 사람이 수동으로만 복구합니다.
+      </p>
+    </section>
+
+    <section class="card">
+      <div class="card-head"><h2>최근 제어 이력</h2></div>
+      <div class="table-scroll">
+        <table class="table">
+          <thead><tr><th>행위</th><th>수행 주체</th><th>시각</th></tr></thead>
+          <tbody>
+            <tr><td data-label="행위">릴레이 자동 차단 (Kill-Switch)</td>
+                <td data-label="주체">시스템 자동</td><td data-label="시각" class="num">14:32:10</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="xs muted" style="margin-top:var(--space-3)">
+        부록 A의 릴레이 제어 이력 중 이 목업에 실은 행입니다. 나머지 값은 지어내지 않았습니다.
+      </p>
+    </section>
+  </div>`;
+};
+
+/* ---- F9 추세 ---- */
+V.trend = () => {
+  const base = DATA.session.battery;
+  const others = DATA.assets.filter(a => a.id !== base);
+  const MAX_CMP = 5;
+  const atCap = state.trendCompare.length >= MAX_CMP;
+  const poolExhausted = state.trendCompare.length >= others.length;
+  const shownIds = [base, ...state.trendCompare];
+
+  return `
+  <div class="grid">
+    <section class="card">
+      <div class="card-head">
+        <h2>기간</h2>
+        <span class="sub">집계 방식 — 온도는 구간 내 <strong>최고값</strong>, 나머지는 <strong>평균값</strong></span>
+      </div>
+      <div class="seg" role="group" aria-label="기간 전환">
+        <button data-trendrange="24h" aria-pressed="${state.trendRange==='24h'}">24시간</button>
+        <button data-trendrange="7d"  aria-pressed="${state.trendRange==='7d'}">7일</button>
+        <button data-trendrange="30d" aria-pressed="${state.trendRange==='30d'}">30일</button>
+      </div>
+    </section>
+
+    <section class="card" style="grid-column:1/-1">
+      <div class="card-head">
+        <h2>전압 · 전류 · 온도 · SOC</h2>
+        <span class="sub num">${base} 기준 · ${RANGE_LABEL[state.trendRange]} → 지금</span>
+      </div>
+      <div class="grid" style="grid-template-columns:repeat(2,minmax(0,1fr))">
+        ${TREND_METRICS.map(m => trendChart(m, shownIds)).join("")}
+      </div>
+      <div class="tlegend">
+        <span class="li"><span class="swatch"></span>${base} (연결됨)</span>
+        ${state.trendCompare.map((id,idx) => `<span class="li"><span class="swatch cmp" style="border-top-style:${idx%2?"dotted":"dashed"}"></span>${id}</span>`).join("")}
+      </div>
+      <div class="xs muted" style="display:flex;align-items:center;gap:6px;margin-top:var(--space-3)">
+        <span style="width:14px;height:8px;border:1px solid var(--border-strong);display:inline-block;
+          background:repeating-linear-gradient(45deg,var(--border-strong) 0 1.5px,transparent 1.5px 6px)"></span>
+        빗금 구간은 <strong>데이터 없음</strong>입니다 — 값이 0인 것과 다릅니다.
+      </div>
+      <p class="xs muted" style="margin-top:var(--space-2)">
+        4지표를 항상 함께 표시합니다. 지표를 고르는 기능은 실시간 관제(F4)에 있습니다.
+        그래프 파형은 목업 예시이며, SOC와 직렬 셀 수(전압 기준선)만 부록 A 실측값을 앵커로 썼습니다.
+      </p>
+    </section>
+
+    <section class="card">
+      <div class="card-head">
+        <h2>비교 대상 배터리</h2>
+        <span class="sub">최대 <span class="num">${MAX_CMP}</span>개</span>
+      </div>
+      ${atCap ? `<div class="notice">${icon("alert")}<div>비교 대상은 최대 <strong>5개</strong>까지 선택할 수 있습니다. 더 추가하려면 먼저 하나를 해제하세요.</div></div>` : ""}
+      <div class="grid" style="gap:var(--space-2);margin-top:var(--space-3)">
+        <div class="asset" data-connected="true">
+          <div><span class="id">${base}</span><div class="spec">연결된 배터리 · 항상 표시</div></div>
+          <div class="right"><span class="badge g-none">기준</span></div>
+        </div>
+        ${others.map(a => {
+          const added = state.trendCompare.includes(a.id);
+          const disableAdd = !added && atCap;
+          return `
+          <div class="asset">
+            <div>
+              <div style="display:flex;align-items:center;gap:var(--space-2)"><span class="id">${a.id}</span>${badge(a.score)}</div>
+              <div class="spec">${a.spec} · 모드 ${a.mode}</div>
+            </div>
+            <div class="right">
+              <button class="btn ${added?"btn-danger":"btn-ghost"} btn-sm"
+                data-${added?"rmcmp":"addcmp"}="${a.id}" ${disableAdd?"disabled":""}>${added?"제거":"추가"}</button>
+            </div>
+          </div>`;
+        }).join("")}
+      </div>
+      ${poolExhausted && !atCap ? `<p class="xs muted" style="margin-top:var(--space-2)">등록된 배터리를 모두 비교 중입니다. 부록 A 목업 데이터는 배터리 5대뿐이라 최대 5개 한도까지 실제로 채울 수는 없습니다.</p>` : ""}
+    </section>
+
+    <section class="card">
+      <div class="card-head"><h2>내보내기</h2><span class="sub">현재 조회 중인 집계된 추세</span></div>
+      <p class="sm muted">선택한 기간 · 지표와 비교 중인 배터리의 집계된 추세를 파일로 저장합니다. 원본 센서 시계열은 내보낼 수 없습니다.</p>
+      <div style="display:flex;gap:var(--space-2);margin-top:var(--space-3);align-items:center">
+        <button class="btn btn-ghost" data-export="csv">${icon("download")}CSV로 내보내기</button>
+        <button class="btn btn-ghost" data-export="pdf">${icon("download")}PDF로 내보내기</button>
+        ${state.trendExportMsg ? `<span class="xs" style="color:var(--g-normal-fg);font-weight:600">${state.trendExportMsg}</span>` : ""}
+      </div>
+    </section>
+  </div>`;
+};
+
+/* ---- F11 알림 센터 ---- */
+V.alerts = () => {
+  const S = DATA.alertsSummary;
+  const dangerUnacked = a => a.score !== null && gradeOf(a.score).key === "danger" && !a.acked;
+  const anyBulkTarget = DATA.alerts.some(dangerUnacked);
+  return `
+  <div class="grid">
+    <section class="card">
+      <div class="card-head"><h2>오늘 요약</h2></div>
+      <div class="metrics">
+        <div class="metric"><span class="k">확인 필요</span><span class="v">${S.needAck}<span class="u">건</span></span><span class="foot"></span></div>
+        <div class="metric"><span class="k">위험</span>
+          <span class="v" style="color:var(--g-danger-fg);display:flex;align-items:center;gap:6px">${shapeSVG("square",14)}${S.danger}<span class="u">건</span></span><span class="foot"></span></div>
+        <div class="metric"><span class="k">경고</span>
+          <span class="v" style="color:var(--g-warning-fg);display:flex;align-items:center;gap:6px">${shapeSVG("triangle",14)}${S.warning}<span class="u">건</span></span><span class="foot"></span></div>
+        <div class="metric"><span class="k">정상 · 점검</span><span class="v">${S.ok}<span class="u">건</span></span><span class="foot"></span></div>
+      </div>
+    </section>
+
+    <section class="card" style="grid-column:1/-1">
+      <div class="card-head">
+        <h2>알림 목록</h2><span class="sub">발생 시각순</span>
+        <button class="btn btn-ghost btn-sm" style="margin-left:auto" data-bulkack ${anyBulkTarget?"":"disabled"}>
+          미확인 위험 알림 모두 확인
+        </button>
+      </div>
+      <div class="table-scroll">
+        <table class="table">
+          <thead><tr><th>등급</th><th>대상</th><th>제목 · 설명</th><th>발생 시각</th><th>관련 수치</th><th>발송 채널</th><th></th></tr></thead>
+          <tbody>
+            ${DATA.alerts.map(a => {
+              const canAct = dangerUnacked(a);
+              const gradeCell = a.score !== null
+                ? badge(a.score)
+                : `<span class="badge g-none">점수 없음 · ${a.sevLabel}</span>`;
+              return `
+              <tr>
+                <td data-label="등급">${gradeCell}${a.acked?` <span class="xs muted">확인됨</span>`:""}</td>
+                <td data-label="대상" class="num">${a.target}</td>
+                <td data-label="제목 · 설명" class="stack"><strong>${a.title}</strong><div class="xs muted" style="margin-top:2px">${a.desc}</div></td>
+                <td data-label="발생 시각" class="num">${a.at}</td>
+                <td data-label="관련 수치" class="num xs">${a.metric}</td>
+                <td data-label="발송 채널" class="xs">${a.channels.join(", ")}</td>
+                <td data-label="동작">${canAct ? `
+                  <div style="display:flex;gap:6px;flex-wrap:wrap">
+                    <button class="btn btn-ghost btn-sm" data-ack="${a.id}">확인</button>
+                    <button class="btn btn-ghost btn-sm" data-rawview="${a.id}">원본 데이터</button>
+                  </div>` : ""}</td>
+              </tr>`;
+            }).join("")}
+          </tbody>
+        </table>
+      </div>
+      <p class="xs muted" style="margin-top:var(--space-3)">
+        확인(Ack)과 원본 데이터 보기는 <strong>위험 등급이면서 아직 확인하지 않은</strong> 알림에만 제공합니다.
+      </p>
+    </section>
+  </div>`;
+};
+
+/* ---- F13 공지사항 ---- */
+V.notices = () => {
+  const CATS = ["전체","중요","점검","기능","안내"];
+  const list = DATA.notices.filter(n => state.noticeCat === "전체" || n.cat === state.noticeCat);
+  const selected = DATA.notices.find(n => n.id === state.selectedNotice);
+  return `
+  <div class="grid notices-grid" style="grid-template-columns:minmax(0,1.1fr) minmax(0,1fr);align-items:start">
+    <section class="card">
+      <div class="card-head"><h2>공지 목록</h2></div>
+      <div class="seg" role="group" aria-label="분류로 좁히기" style="margin-bottom:var(--space-3);flex-wrap:wrap">
+        ${CATS.map(c => `<button data-noticecat="${c}" aria-pressed="${state.noticeCat===c}">${c}</button>`).join("")}
+      </div>
+      ${list.length ? list.map(n => `
+        <button class="notice-item" data-noticeview="${n.id}" aria-current="${state.selectedNotice===n.id}">
+          <div class="meta"><span class="chip">${n.cat}</span><span class="num">${n.date}</span></div>
+          <div class="ttl">${n.title}</div>
+          <div class="summary">${noticeSummary(n.body)}</div>
+        </button>`).join("") : `<div class="empty">선택한 분류에 해당하는 공지가 없습니다.</div>`}
+    </section>
+
+    <section class="card">
+      <div class="card-head"><h2>공지 상세</h2></div>
+      ${selected ? `
+        <div class="meta" style="display:flex;gap:var(--space-2);align-items:center;margin-bottom:var(--space-2)">
+          <span class="chip">${selected.cat}</span><span class="xs muted num">${selected.date}</span>
+        </div>
+        <h3 style="font-size:var(--text-h1);margin-bottom:var(--space-3)">${selected.title}</h3>
+        <div class="notice-body">${selected.body}</div>
+      ` : `<div class="empty">목록에서 공지를 선택하면 본문 전체를 볼 수 있습니다.</div>`}
+    </section>
+  </div>`;
+};
+
+/* ---- F14 설정 ---- */
+V.settings = () => {
+  const N = DATA.notify, VC = DATA.voice;
+  const CHANNELS = [["KAKAO","카카오"],["EMAIL","이메일"],["SMS","SMS"],["WEBPUSH","웹푸시"]];
+  return `
+  <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(340px,1fr))">
+
+    <section class="card">
+      <div class="card-head">${icon("bell")}<h2>알림 수신 채널</h2></div>
+      <div class="toggle-list">
+        ${CHANNELS.map(([key,label]) => `
+          <label class="toggle">
+            <input type="checkbox" data-channel="${key}" ${N.channels[key]?"checked":""}>
+            <span class="track"></span>
+            <span class="lbl">${label}</span>
+          </label>`).join("")}
+      </div>
+      <div class="notice" style="margin-top:var(--space-3)">
+        ${icon("alert")}
+        <div>위험·경고 등급에서 발송됩니다. <strong>SMS는 위험 등급만</strong> 발송합니다.
+        동일 이벤트는 <span class="num">${N.dedupeMinutes}</span>분 내 중복 발송을 억제합니다.</div>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="card-head">${icon("user")}<h2>계정 정보</h2></div>
+      <div class="grid" style="gap:var(--space-3)">
+        <div class="field"><label for="acctName">이름</label><input class="input" id="acctName" value="${DATA.user.name}"></div>
+        <div class="field"><label for="acctEmail">이메일</label><input class="input" id="acctEmail" type="email" placeholder="이메일을 입력하세요"></div>
+        <div class="field"><label for="acctPhone">전화번호</label><input class="input" id="acctPhone" type="tel" placeholder="010-0000-0000"></div>
+        <div class="xs muted">이메일 · 전화번호는 부록 A에 값이 없어 자리표시자만 둡니다.</div>
+        <button class="btn btn-primary" id="acctSave" style="align-self:flex-start">저장</button>
+        <span id="acctSaveMsg" class="xs" style="color:var(--g-normal-fg);font-weight:600"></span>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="card-head">${icon("key")}<h2>비밀번호 변경</h2></div>
+      <div class="grid" style="gap:var(--space-3)">
+        <div class="field"><label for="pwCurrent">현재 비밀번호</label>
+          <input class="input" id="pwCurrent" type="password" autocomplete="current-password"></div>
+        <div class="field"><label for="pwNew">새 비밀번호</label>
+          <input class="input" id="pwNew" type="password" autocomplete="new-password">
+          <span class="hint">영문 · 숫자 · 특수문자 조합 8자 이상</span></div>
+        <div class="field"><label for="pwConfirm">새 비밀번호 확인</label>
+          <input class="input" id="pwConfirm" type="password" autocomplete="new-password">
+          <span class="hint" id="pwMismatch" style="color:var(--danger);display:none">새 비밀번호가 일치하지 않습니다.</span></div>
+        <button class="btn btn-primary" id="pwSave" disabled>비밀번호 변경</button>
+        <span class="xs muted">현재 비밀번호를 확인해야 저장 버튼이 활성화됩니다.</span>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="card-head"><h2>화면 표시</h2></div>
+      <div class="field" style="margin-bottom:var(--space-4)">
+        <label>테마</label>
+        <div class="seg" role="group" aria-label="테마 선택">
+          <button data-theme-choice="light"  aria-pressed="${state.theme==='light'}">라이트</button>
+          <button data-theme-choice="dark"   aria-pressed="${state.theme==='dark'}">다크</button>
+          <button data-theme-choice="system" aria-pressed="${state.theme==='system'}">시스템</button>
+        </div>
+      </div>
+      <div class="field">
+        <label style="display:flex;align-items:center;gap:6px">${icon("globe")}화면 언어</label>
+        <div class="seg" role="group" aria-label="화면 언어">
+          <button data-lang-choice="ko" aria-pressed="${state.lang==='ko'}">한국어</button>
+          <button data-lang-choice="en" aria-pressed="${state.lang==='en'}">English</button>
+        </div>
+        <span class="hint">사이드바 · 상단바 라벨만 전환됩니다. 화면 본문 다국어화는 이 목업 범위 밖입니다.</span>
+      </div>
+    </section>
+
+    <section class="card" style="grid-column:1/-1">
+      <div class="card-head">${icon("volume")}<h2>디바이스 음성 안내</h2></div>
+      <label class="toggle" style="margin-bottom:var(--space-3)">
+        <input type="checkbox" id="voiceEnabled" ${VC.enabled?"checked":""}>
+        <span class="track"></span>
+        <span class="lbl">전체 음성 안내<span class="hint">에지(라즈베리파이)의 스피커 안내 전체를 켜고 끕니다</span></span>
+      </label>
+      <div class="field" style="max-width:360px;margin-bottom:var(--space-4)">
+        <label for="volumeRange">음량</label>
+        <div class="range-row">
+          <input class="range" type="range" id="volumeRange" min="0" max="100" value="${VC.volume}" ${VC.enabled?"":"disabled"}>
+          <span class="range-val num" id="volumeOut">${VC.volume}</span>
+        </div>
+      </div>
+      <div class="toggle-list">
+        ${VC.categories.map(c => `
+          <label class="toggle">
+            <input type="checkbox" data-voicecat="${c.key}" ${c.on?"checked":""} ${VC.enabled?"":"disabled"}>
+            <span class="track"></span>
+            <span class="lbl">${c.label}</span>
+          </label>`).join("")}
+      </div>
+    </section>
+  </div>`;
+};
+
+/* T0 잠금 화면 — 잠겼다는 사실과 푸는 방법을 함께 보인다 */
+const lockedView = title => `
+  <div class="locked">
+    ${icon("lock","lockmark")}
+    <h2>${title} — 잠김</h2>
+    <p>측정 대상 배터리가 연결되지 않아 이 메뉴를 열 수 없습니다.
+       <strong>배터리 자산관리</strong>에서 배터리를 선택해 연결하면 잠금이 풀립니다.</p>
+    <button class="btn btn-primary" data-go="assets">배터리 자산관리로 이동</button>
+  </div>`;
+
+/* ============================================================
+   6. 렌더 · 이벤트
+   ============================================================ */
+const $ = s => document.querySelector(s);
+
+function isLocked(id){
+  const sc = SCREENS.find(s => s.id === id);
+  return !state.connected && sc && sc.lockable;
+}
+
+function renderNav(){
+  $("#nav").innerHTML = `<div class="nav-label">${tc("관제","Control")}</div>` + SCREENS.map(s => {
+    const locked = isLocked(s.id);
+    const n = s.badge ? s.badge() : 0;
+    return `<button class="nav-item" data-go="${s.id}" ${locked?"disabled":""}
+      ${state.screen===s.id?'aria-current="page"':""}
+      ${locked?`title="배터리 미연결로 잠김"`:""}>
+      ${icon(s.icon)}<span>${screenLabel(s)}</span>
+      ${locked ? icon("lock","lock") : (n ? `<span class="count">${n}</span>` : "")}
+    </button>`;
+  }).join("");
+
+  /* 하단 내비는 4칸 + 더보기 = 5칸(MASTER §6 상한). 나머지 5개 목적지는 더보기 시트에서
+     도달한다 — 계약서 §도달 가능성의 9개 목적지가 모바일에서도 전부 열려야 한다. */
+  const rest = SCREENS.filter(s => !s.bottom);
+  const restUnread = rest.reduce((n,s) => n + (s.badge && !isLocked(s.id) ? s.badge() : 0), 0);
+
+  $("#bottomnav").innerHTML = SCREENS.filter(s=>s.bottom).map(s => {
+    const locked = isLocked(s.id);
+    const n = s.badge ? s.badge() : 0;
+    return `<button data-go="${s.id}" ${locked?"disabled":""} ${state.screen===s.id?'aria-current="page"':""}>
+      ${icon(s.icon)}<span>${screenLabel(s)}</span>${n&&!locked?'<span class="dotmark"></span>':""}
+    </button>`;
+  }).join("") + `
+    <button data-sheet="more" ${rest.some(s=>s.id===state.screen)?'aria-current="page"':""}
+            aria-haspopup="dialog">
+      ${icon("more")}<span>${tc("더보기","More")}</span>${restUnread?'<span class="dotmark"></span>':""}
+    </button>`;
+}
+
+/* 더보기 시트 — 하단 내비에 자리가 없는 목적지로 가는 통로 */
+function openSheet(){
+  const rest = SCREENS.filter(s => !s.bottom);
+  $("#modal").innerHTML = `
+    <h2 id="modalTitle">${tc("모든 메뉴","All destinations")}</h2>
+    <div class="sheet-list">
+      ${rest.map(s => {
+        const locked = isLocked(s.id);
+        const n = s.badge ? s.badge() : 0;
+        return `<button class="sheet-item" ${locked?"disabled":""} data-go="${s.id}" data-close>
+          ${icon(s.icon)}<span>${screenLabel(s)}</span>
+          ${locked ? icon("lock","lock-sm") : (n ? `<span class="count">${n}</span>` : "")}
+        </button>`;
+      }).join("")}
+    </div>
+    <div class="actions"><button class="btn btn-ghost" data-close>${tc("닫기","Close")}</button></div>`;
+  $("#overlay").hidden = false;
+  $("#modal").querySelector("button:not([disabled])").focus();
+}
+
+function render(){
+  const sc = SCREENS.find(s => s.id === state.screen);
+  document.documentElement.lang = state.lang === "en" ? "en" : "ko";
+  $(".brand span").textContent = tc("셀가드","CellGuard");
+  $("#screenTitle").textContent = screenLabel(sc);
+  $("#liveTag").lastChild.textContent = tc("수신 중","Live");
+  $("#liveTag").style.visibility = (state.connected && state.screen==="monitor") ? "visible" : "hidden";
+  $("#gateToggle").textContent = state.connected ? tc("배터리 연결 해제","Disconnect Battery") : tc("배터리 연결","Connect Battery");
+  $("#content").innerHTML = isLocked(state.screen) ? lockedView(screenLabel(sc)) : V[state.screen]();
+  renderNav();
+  window.scrollTo(0,0);
+}
+
+function go(id){
+  if (isLocked(id)) return;          // 잠긴 대상은 선택해도 이동하지 않는다 (T0)
+  state.screen = id;
+  closeGate();                       // 더보기 시트를 통해 이동한 경우 시트를 닫는다
+  render();
+}
+
+/* T7 게이트 — 재인증 + 사유 둘 다 있어야만 실행 */
+function openGate(kind){
+  const isCut = kind === "cut";
+  $("#modal").innerHTML = `
+    <h2 id="modalTitle">${isCut ? "회로 차단" : "회로 복구"}</h2>
+    <p class="sm muted">대상 회로 <span class="num">${DATA.relay.circuit}</span>. 재인증과 사유 입력을 모두 통과해야 실행됩니다.</p>
+    <div class="field">
+      <label for="pw">비밀번호 재인증</label>
+      <input class="input" type="password" id="pw" autocomplete="current-password" placeholder="현재 비밀번호">
+    </div>
+    <div class="field">
+      <label for="reason">사유</label>
+      <textarea class="input" id="reason" placeholder="이 제어를 실행하는 이유를 입력하세요"></textarea>
+      <span class="hint">사유는 감사 로그에 그대로 기록됩니다.</span>
+    </div>
+    <ul class="gate-list" id="gateList">
+      <li data-met="false">${icon("check")}재인증 입력</li>
+      <li data-met="false">${icon("check")}사유 입력</li>
+    </ul>
+    <div class="actions">
+      <button class="btn btn-ghost" data-close>취소</button>
+      <button class="btn ${isCut?"btn-danger":"btn-primary"}" id="exec" disabled>${isCut?"차단 실행":"복구 실행"}</button>
+    </div>`;
+  $("#overlay").hidden = false;
+  $("#pw").focus();
+
+  const check = () => {
+    const okPw = $("#pw").value.length > 0;
+    const okRs = $("#reason").value.trim().length > 0;
+    const items = $("#gateList").children;
+    items[0].dataset.met = okPw; items[1].dataset.met = okRs;
+    $("#exec").disabled = !(okPw && okRs);   // 둘 중 하나라도 없으면 실행 불가
+  };
+  $("#pw").addEventListener("input", check);
+  $("#reason").addEventListener("input", check);
+  $("#exec").addEventListener("click", () => {
+    DATA.relay.state = isCut ? "CUT" : "OK";
+    closeGate(); render();
+  });
+}
+function closeGate(){ $("#overlay").hidden = true; }
+
+/* 확인 절차만 거치는 모달(재인증 불필요) — F9 CSV·PDF 내보내기 */
+function openConfirm({title, body, confirmLabel, onConfirm}){
+  $("#modal").innerHTML = `
+    <h2 id="modalTitle">${title}</h2>
+    <p class="sm muted">${body}</p>
+    <div class="actions">
+      <button class="btn btn-ghost" data-close>취소</button>
+      <button class="btn btn-primary" id="confirmExec">${confirmLabel}</button>
+    </div>`;
+  $("#overlay").hidden = false;
+  $("#confirmExec").addEventListener("click", () => { onConfirm(); closeGate(); });
+}
+
+/* 위험·미확인 알림의 원본 센서 데이터 — anomaly_score는 0.0–1.0 그대로(100배하지 않음) */
+function openRawData(a){
+  $("#modal").innerHTML = `
+    <h2 id="modalTitle">원본 센서 데이터</h2>
+    <p class="sm muted num">${a.target} · ${a.title}</p>
+    <div class="table-scroll"><table class="table">
+      <tbody>
+        ${Object.entries(a.raw).map(([k,v]) => `
+          <tr><td data-label="필드" class="num">${k}</td><td data-label="값" class="num r">${v}</td></tr>`).join("")}
+      </tbody>
+    </table></div>
+    <div class="actions"><button class="btn btn-ghost" data-close>닫기</button></div>`;
+  $("#overlay").hidden = false;
+}
+
+document.addEventListener("click", e => {
+  const go_ = e.target.closest("[data-go]");
+  if (go_) return go(go_.dataset.go);
+
+  const conn = e.target.closest("[data-connect]");
+  if (conn){ state.connected = true; DATA.session.battery = conn.dataset.connect; return go("monitor"); }
+
+  const gate = e.target.closest("[data-gate]");
+  if (gate) return openGate(gate.dataset.gate);
+
+  if (e.target.closest("[data-sheet]")) return openSheet();
+
+  if (e.target.closest("[data-close]") || e.target.id === "overlay") return closeGate();
+
+  /* ---- F9 추세 ---- */
+  const tr = e.target.closest("[data-trendrange]");
+  if (tr){ state.trendRange = tr.dataset.trendrange; return render(); }
+
+  const addcmp = e.target.closest("[data-addcmp]");
+  if (addcmp){
+    if (state.trendCompare.length < 5 && !state.trendCompare.includes(addcmp.dataset.addcmp))
+      state.trendCompare.push(addcmp.dataset.addcmp);
+    return render();
+  }
+  const rmcmp = e.target.closest("[data-rmcmp]");
+  if (rmcmp){ state.trendCompare = state.trendCompare.filter(id => id !== rmcmp.dataset.rmcmp); return render(); }
+
+  const exp = e.target.closest("[data-export]");
+  if (exp){
+    const kind = exp.dataset.export.toUpperCase();
+    return openConfirm({
+      title: `${kind}로 내보내기`,
+      body: `선택한 기간(${RANGE_LABEL[state.trendRange]} → 지금)과 비교 중인 배터리의 집계된 추세를 ${kind} 파일로 내보냅니다. 계속할까요?`,
+      confirmLabel: "내보내기",
+      onConfirm: () => {
+        state.trendExportMsg = `${kind}로 내보냈습니다.`;
+        render();
+        setTimeout(() => { state.trendExportMsg = null; if (state.screen==="trend") render(); }, 2500);
+      },
+    });
+  }
+
+  /* ---- F11 알림 센터 ---- */
+  const ack = e.target.closest("[data-ack]");
+  if (ack){
+    const a = DATA.alerts.find(x => x.id === ack.dataset.ack);
+    if (a) a.acked = true;
+    return render();
+  }
+  if (e.target.closest("[data-bulkack]")){
+    DATA.alerts.forEach(a => { if (a.score !== null && gradeOf(a.score).key === "danger") a.acked = true; });
+    return render();
+  }
+  const rv = e.target.closest("[data-rawview]");
+  if (rv){
+    const a = DATA.alerts.find(x => x.id === rv.dataset.rawview);
+    if (a && a.raw) openRawData(a);
+    return;
+  }
+
+  /* ---- F13 공지사항 ---- */
+  const nc = e.target.closest("[data-noticecat]");
+  if (nc){ state.noticeCat = nc.dataset.noticecat; return render(); }
+  const nv = e.target.closest("[data-noticeview]");
+  if (nv){ state.selectedNotice = nv.dataset.noticeview; return render(); }
+
+  /* ---- F14 설정 ---- */
+  const thc = e.target.closest("[data-theme-choice]");
+  if (thc){ applyTheme(thc.dataset.themeChoice); return render(); }
+  const lgc = e.target.closest("[data-lang-choice]");
+  if (lgc){ state.lang = lgc.dataset.langChoice; return render(); }
+  if (e.target.id === "acctSave"){
+    const msg = $("#acctSaveMsg");
+    if (msg){ msg.textContent = "저장되었습니다."; setTimeout(() => { if (msg) msg.textContent=""; }, 2500); }
+    return;
+  }
+  if (e.target.id === "pwSave"){
+    $("#pwCurrent").value = ""; $("#pwNew").value = ""; $("#pwConfirm").value = "";
+    $("#pwSave").disabled = true;
+    return;
+  }
+
+  const seg = e.target.closest(".seg button");
+  if (seg && !seg.closest("[data-trendrange],[data-noticecat],[data-theme-choice],[data-lang-choice]")){
+    [...seg.parentElement.children].forEach(b => b.setAttribute("aria-pressed","false"));
+    seg.setAttribute("aria-pressed","true");
+  }
+});
+
+/* F14 게이트 — 현재 비밀번호가 비어 있으면 저장 버튼은 항상 비활성 */
+function checkPwGate(){
+  const cur = $("#pwCurrent"), nw = $("#pwNew"), cf = $("#pwConfirm"), save = $("#pwSave"), mismatch = $("#pwMismatch");
+  if (!cur || !nw || !cf || !save) return;
+  const okCur = cur.value.length > 0;
+  const okNew = nw.value.length > 0;
+  const match = nw.value === cf.value;
+  if (mismatch) mismatch.style.display = (cf.value.length > 0 && !match) ? "block" : "none";
+  save.disabled = !(okCur && okNew && cf.value.length > 0 && match);
+}
+
+document.addEventListener("input", e => {
+  if (e.target.closest("#pwCurrent,#pwNew,#pwConfirm")) return checkPwGate();
+  if (e.target.id === "volumeRange"){
+    DATA.voice.volume = +e.target.value;
+    const out = $("#volumeOut"); if (out) out.textContent = DATA.voice.volume;
+  }
+});
+
+document.addEventListener("change", e => {
+  const ch = e.target.closest("[data-channel]");
+  if (ch){ DATA.notify.channels[ch.dataset.channel] = ch.checked; return; }
+  const vc = e.target.closest("[data-voicecat]");
+  if (vc){ const cat = DATA.voice.categories.find(c => c.key === vc.dataset.voicecat); if (cat) cat.on = vc.checked; return; }
+  if (e.target.id === "voiceEnabled"){ DATA.voice.enabled = e.target.checked; render(); }
+});
+
+document.addEventListener("keydown", e => {
+  if (e.key === "Escape" && !$("#overlay").hidden) closeGate();
+});
+
+$("#gateToggle").addEventListener("click", () => {
+  state.connected = !state.connected;
+  if (!state.connected) state.screen = "assets";   // 로그인 직후 도착지 = 배터리 자산관리
+  render();
+});
+
+$("#themeToggle").addEventListener("click", () => {
+  applyTheme(state.theme === "dark" ? "light" : "dark");
+});
+
+applyTheme(state.theme);
+render();
+</script>
+</body>
+</html>

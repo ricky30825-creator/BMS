@@ -204,6 +204,16 @@ Raspberry Pi        Kafka  → Consumer → PostgreSQL            Google Colab  
 - 범위 밖 REQ 5건(030·031·069·071·135)은 본문에서 인용하면 위반이다. 부록 B에서만 언급한다.
 - v3와 계약서가 어긋나면 v3가 틀린 것이다. v3 자체의 수정 목록은 `docs/backend_contract.md` §12에 25건으로 정리돼 있다.
 
+## 새 디자인 (계약서 기반)
+
+계약서를 입력으로 만든 디자인의 정본은 `design-system/cellguard/MASTER.md`, 목업은 `web/cellguard_mockup_v4.html`(자립형 단일 HTML)이다.
+
+- **제1원칙 — 녹·황·주황·적은 등급 표시 전용이다.** 배경·테두리·기본 버튼 등 크롬에 쓰면 상태 판독이 무너진다. 주요 동작은 파랑(`--primary`), 파괴적 동작은 등급 배지와 같은 화면에서 채움 대신 외곽선.
+- 등급은 언제나 **색 + 도형 + 라벨 + 숫자** 네 겹으로 표시한다. `주의`(#A16207)와 `경고`(#C2410C)가 인접색이라 색만으로는 구분되지 않는다. 목업의 `badge()` 함수 하나가 이 네 겹을 만든다 — 등급을 직접 그리지 말고 이 함수를 쓴다.
+- 모든 측정값·시각·ID에 `class="num"`(등폭 + `tabular-nums`)을 붙인다. 실시간 갱신 중 폭이 흔들리지 않게 하는 장치다.
+- 목업 확인은 로컬 HTTP 서버로 — `web/`에서 `python3 -m http.server 8811 --bind 127.0.0.1`.
+- `search.py --design-system`의 자동 매칭은 이 제품에서 신뢰할 수 없다. 배경·CTA에 상태색을, 타이포에 Cinzel(럭셔리용)을 배정했다. 개별 도메인 조회(`--domain style/color/product`)로 `Data-Dense Dashboard`·`Real-Time Monitoring`·`Status Page`를 직접 골라야 맞는다. `--persist --force`는 손으로 고친 MASTER.md를 덮어쓴다.
+
 ## 요구사항 추적
 
 상세 요구사항·기능·스펙은 `PLAN.md` 참조. Manyfast 프로젝트 ID: `7241ba62-d21a-4de4-ba45-fe572dd0f4de`
