@@ -617,11 +617,10 @@ const DATA = {
   /* 부록 A "릴레이 제어 이력" 대상 회로 */
   relay:{ circuit:"PACK-001", state:"CUT" },
 
-  /* 부록 A "알림 센터 알림" — 오늘 요약은 계약서에 명시된 고정 문구를 그대로 쓴다.
-     개별 항목의 등급은 점수가 있으면 badge()로 계산한다 — 부록 원문 라벨을 그대로 베끼지 않는다
-     (PACK-004 행은 원문이 "경고"지만 점수 0.58은 4등급 기준 "주의" 구간이다. 아래 anomaly 판정용
-     이상탐지 이벤트 이력의 동일 사건도 이미 이렇게 계산해 표시하고 있다 — 이 화면도 같은 규칙을 따른다). */
-  alertsSummary:{ needAck:1, danger:1, warning:2, ok:1 },
+  /* 부록 A "알림 센터 알림". 개별 항목의 등급은 점수가 있으면 badge()로 계산한다.
+     PACK-004(0.58)가 원문에서 "경고"였던 오류는 계약서 부록 A에서 "주의"로 고쳐졌고,
+     오늘 요약과 발송 채널도 그에 맞춰 다시 셌다. */
+  alertsSummary:{ needAck:1, danger:1, warning:1, caution:1, ok:1 },
   alerts:[
     { id:"AL-1", score:0.82, target:"PACK-001", title:"온도 임계값 초과",
       desc:"IR 표면 온도 60.4°C, dT/dt 급상승이 감지되었습니다. 즉시 확인이 필요합니다.",
@@ -630,7 +629,7 @@ const DATA = {
             voltage_v:11.62, current_a:2.9, soc_pct:78, anomaly_score:"0.82", relay_state:"CUT (fail-safe)" } },
     { id:"AL-2", score:0.58, target:"PACK-004", title:"전류 변화량 급상승",
       desc:"I_smooth(전류 변화량)가 평소의 2.8배로 상승했습니다. 추세를 모니터링하고 있습니다.",
-      at:"8분 전", metric:"전류 변화 2.8× · 이상점수 58", channels:["카카오","인앱"], acked:false, raw:null },
+      at:"8분 전", metric:"전류 변화 2.8× · 이상점수 58", channels:["인앱"], acked:false, raw:null },
     { id:"AL-3", score:null, sevLabel:"경고", target:"PACK-002", title:"SOC 급락 감지",
       desc:"10분 사이 SOC가 18%p 하락했습니다. 부하 이상 여부를 점검하세요.",
       at:"25분 전", metric:"SOC -18%p", channels:["인앱"], acked:false, raw:null },
@@ -1358,6 +1357,8 @@ V.alerts = () => {
           <span class="v" style="color:var(--g-danger-fg);display:flex;align-items:center;gap:6px">${shapeSVG("square",14)}${S.danger}<span class="u">건</span></span><span class="foot"></span></div>
         <div class="metric"><span class="k">경고</span>
           <span class="v" style="color:var(--g-warning-fg);display:flex;align-items:center;gap:6px">${shapeSVG("triangle",14)}${S.warning}<span class="u">건</span></span><span class="foot"></span></div>
+        <div class="metric"><span class="k">주의</span>
+          <span class="v" style="color:var(--g-caution-fg);display:flex;align-items:center;gap:6px">${shapeSVG("diamond",14)}${S.caution}<span class="u">건</span></span><span class="foot"></span></div>
         <div class="metric"><span class="k">정상 · 점검</span><span class="v">${S.ok}<span class="u">건</span></span><span class="foot"></span></div>
       </div>
     </section>
