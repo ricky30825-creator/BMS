@@ -722,6 +722,7 @@ const state = {
   screen:"monitor", connected:true, theme:"light", lang:"ko",
   trendRange:"24h", trendCompare:[], trendExportMsg:null,
   noticeCat:"전체", selectedNotice:null,
+  monitorMetric:"voltage",   /* F4의 표시 지표. 지표 선택은 F4에만 있다 — F9에는 없다 */
 };
 
 /* 크롬(사이드바·상단바 등) 전용 한/영 문구 — 화면 본문 번역은 이 목업 범위 밖이다 */
@@ -851,10 +852,10 @@ V.monitor = () => {
         <span class="sub">표시 지표 선택</span>
       </div>
       <div class="seg" role="group" aria-label="표시 지표">
-        <button aria-pressed="true">전압</button><button aria-pressed="false">전류</button>
-        <button aria-pressed="false">온도</button><button aria-pressed="false">SOC</button>
+        ${TREND_METRICS.map(m => `<button data-monitormetric="${m.key}"
+          aria-pressed="${state.monitorMetric===m.key}">${m.label}</button>`).join("")}
       </div>
-      ${sparkline()}
+      ${sparkline(state.monitorMetric)}
     </section>
 
     <section class="card" style="grid-column:1/-1">
@@ -866,12 +867,18 @@ V.monitor = () => {
   </div>`;
 };
 
-/* 데이터 없는 구간을 값 0과 구분해 그린다 (F9 제약) */
-function sparkline(){
-  const pts = [42,44,43,47,52,50,null,null,55,58,54,53,57,60,59,62,58,56,55,57];
+/* F4 최근 추이 — F9와 같은 파형 기계를 쓴다. 그래야 마지막 점이 부록 A 값과 이어지고
+   (전압이면 11.46 V에서 끝난다) 화면을 다시 그려도 모양이 달라지지 않는다.
+   데이터 없는 구간은 값 0과 구분해 그린다 (F9 제약). */
+function sparkline(metricKey){
+  const m = TREND_METRICS.find(x => x.key === metricKey) || TREND_METRICS[0];
+  const pts = trendSeries(DATA.session.battery, m.key, "24h");
+  const vals = pts.filter(v => v !== null);
+  const lo = Math.min(...vals), hi = Math.max(...vals);
+  const pad = (hi - lo) * 0.25 || 1;          // 평평한 계열도 납작해지지 않게
   const W=880,H=120,P=8;
   const xs = i => P + i*(W-2*P)/(pts.length-1);
-  const ys = v => H-P - ((v-35)/35)*(H-2*P);
+  const ys = v => H-P - ((v-(lo-pad))/((hi+pad)-(lo-pad)))*(H-2*P);
   let d="",gapRects="",open=false;
   pts.forEach((v,i)=>{
     if(v===null){
@@ -885,7 +892,8 @@ function sparkline(){
   });
   return `
   <div style="margin-top:var(--space-3)">
-    <svg viewBox="0 0 ${W} ${H}" style="width:100%;height:120px" role="img" aria-label="최근 전압 추이. 중간에 데이터가 없는 구간이 있습니다.">
+    <svg viewBox="0 0 ${W} ${H}" style="width:100%;height:120px" role="img"
+         aria-label="최근 ${m.label} 추이. 현재값 ${vals[vals.length-1]}${m.unit}. 중간에 데이터가 없는 구간이 있습니다.">
       <defs>
         <pattern id="hatch" width="6" height="6" patternTransform="rotate(45)" patternUnits="userSpaceOnUse">
           <line x1="0" y1="0" x2="0" y2="6" stroke="var(--border-strong)" stroke-width="1.5"/>
@@ -894,10 +902,11 @@ function sparkline(){
       ${gapRects}
       <path d="${d}" fill="none" stroke="var(--primary)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
     </svg>
-    <div class="xs muted" style="display:flex;align-items:center;gap:6px;margin-top:6px">
+    <div class="xs muted" style="display:flex;align-items:center;gap:6px;margin-top:6px;flex-wrap:wrap">
       <span style="width:14px;height:8px;border:1px solid var(--border-strong);display:inline-block;
         background:repeating-linear-gradient(45deg,var(--border-strong) 0 1.5px,transparent 1.5px 6px)"></span>
       빗금 구간은 <strong>데이터 없음</strong>입니다 — 값이 0인 것과 다릅니다.
+      <span style="margin-left:auto">파형은 목업 예시이며, 현재값 <span class="num">${vals[vals.length-1]}${m.unit}</span>만 실측값입니다.</span>
     </div>
   </div>`;
 }
@@ -934,7 +943,9 @@ function baselineFor(batteryId, metricKey){
     case "soc":     return a.soc;
   }
 }
-/* 배터리 × 지표 × 기간별로 고정된(재렌더에도 흔들리지 않는) 예시 파형을 만든다 */
+/* 배터리 × 지표 × 기간별로 고정된(재렌더에도 흔들리지 않는) 예시 파형을 만든다.
+   마지막 점은 반드시 부록 A의 해당 값과 같다 — 계약서 부록 A "추세 파형은 예외다"의
+   첫 번째 조건("파형의 현재값은 이 부록의 해당 값과 이어져야 한다"). */
 function trendSeries(batteryId, metricKey, range){
   const rnd = seededRand(hashSeed(batteryId + metricKey + range));
   const m = TREND_METRICS.find(x => x.key === metricKey);
@@ -943,7 +954,9 @@ function trendSeries(batteryId, metricKey, range){
   const pts = [];
   for (let i=0;i<SERIES_LEN;i++){
     if (withGap && (i===GAP_AT || i===GAP_AT+1)){ pts.push(null); continue; }
-    pts.push(+(base + (rnd()-0.5) * 2 * m.spread).toFixed(m.decimals));
+    pts.push(i === SERIES_LEN-1
+      ? +base.toFixed(m.decimals)                                   // 현재값 = 부록 A 값
+      : +(base + (rnd()-0.5) * 2 * m.spread).toFixed(m.decimals));
   }
   return pts;
 }
@@ -1706,6 +1719,9 @@ document.addEventListener("click", e => {
   if (gate) return openGate(gate.dataset.gate);
 
   if (e.target.closest("[data-sheet]")) return openSheet();
+
+  const mm = e.target.closest("[data-monitormetric]");
+  if (mm){ state.monitorMetric = mm.dataset.monitormetric; return render(); }
 
   if (e.target.closest("[data-close]") || e.target.id === "overlay") return closeGate();
 
