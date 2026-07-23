@@ -133,3 +133,20 @@ class TestLegendCheckDoesNotShadow(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestExcludedReqs(unittest.TestCase):
+    """범위에서 제외된 요구사항은 본문이 인용하면 안 되고, 부록 B에서만 언급할 수 있다."""
+
+    def test_flags_excluded_req_in_body(self):
+        text = "### F1. 랜딩\n**추적** — REQ-WEB-071\n"
+        self.assertTrue(any("REQ-WEB-071" in v and "제외" in v for v in lint(text)))
+
+    def test_allows_excluded_req_in_appendix_b(self):
+        text = "## 부록 B. 계약서에서 제외한 요구사항\nREQ-WEB-071 캘리브레이션 이력\n"
+        self.assertFalse(any("제외된 기능" in v for v in lint(text)))
+
+    def test_excluded_reqs_are_not_expected(self):
+        from contract_lint import EXCLUDED_REQS, EXPECTED_REQS
+        self.assertEqual(len(EXPECTED_REQS), 104)
+        self.assertFalse(EXPECTED_REQS & EXCLUDED_REQS)

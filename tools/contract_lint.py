@@ -1,7 +1,9 @@
 """디자인 무관 계약서(docs/product_contract.md)를 기계 검증한다.
 
 계약서는 형태 어휘 없이 기능만 기술해야 하고, 도달 가능한 영역 19개와
-REQ-WEB 108개를 빠짐없이 덮어야 한다. 이 린터가 그 조건을 검사한다.
+REQ-WEB 104개를 빠짐없이 덮어야 한다. 이 린터가 그 조건을 검사한다.
+
+제외된 5건은 부록 B에서만 언급할 수 있다. 본문이 인용하면 위반이다.
 """
 
 import re
@@ -18,11 +20,20 @@ FORBIDDEN = [
 EXPECTED_AREAS = [1, 2, 3, 4, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
 
 # REQ-WEB-069는 삭제된 기능이다. 073은 잠금 게이트로 신설한다.
+# 범위에서 제외된 요구사항. 근거는 docs/backend_contract.md §11 "화면에 없는 것".
+# 069 프로필 사진 변경 — 기능 제거 결정(2026-07-22)
+# 030·031 디바이스 상태 — devices 라우트가 도달 불가한 고아라 기능 자체가 없다
+# 071 캘리브레이션 이력 — 조회 화면만 있고 등록 수단이 없다
+# 135 감사 로그 상세 — 항목을 선택해도 아무 일이 없다(상세 미구현)
+EXCLUDED_REQS = {
+    "REQ-WEB-030", "REQ-WEB-031", "REQ-WEB-069", "REQ-WEB-071", "REQ-WEB-135",
+}
+
 EXPECTED_REQS = (
-    {f"REQ-WEB-{n:03d}" for n in range(1, 73)} - {"REQ-WEB-069"}
+    {f"REQ-WEB-{n:03d}" for n in range(1, 73)}
     | {"REQ-WEB-073"}
     | {f"REQ-WEB-{n:03d}" for n in range(101, 137)}
-)
+) - EXCLUDED_REQS
 
 # 각 영역 절이 반드시 담아야 할 항목.
 REQUIRED_HEADINGS = [
@@ -92,11 +103,12 @@ def lint(text):
                 violations.append(f"F{num} 필수 항목 누락: {heading}")
 
     cited = set(re.findall(r"REQ-WEB-\d{3}", text))
-    if "REQ-WEB-069" in cited:
-        violations.append("REQ-WEB-069는 삭제된 기능이다")
+    body_cited = set(re.findall(r"REQ-WEB-\d{3}", body))
+    for req in sorted(EXCLUDED_REQS & body_cited):
+        violations.append(f"{req}는 범위에서 제외된 기능이다")
     for req in sorted(EXPECTED_REQS - cited):
         violations.append(f"미인용 REQ: {req}")
-    for req in sorted(cited - EXPECTED_REQS - {"REQ-WEB-069"}):
+    for req in sorted(cited - EXPECTED_REQS - EXCLUDED_REQS):
         violations.append(f"알 수 없는 REQ: {req}")
 
     gates = text.count("**게이트**")
