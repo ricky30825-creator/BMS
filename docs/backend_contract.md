@@ -190,7 +190,7 @@ v3에는 판정 로직이 **세 벌** 존재하고 서로 어긋난다.
 | 계정 권한 | `USER` `ADMIN` `[REQ-WEB-113]` |
 | 디바이스 상태 | `ONLINE` `DELAYED` `OFFLINE` `[v3]` |
 | 릴레이 상태 | `CLOSED`(정상 연결) `OPEN`(차단됨) `[v3]` |
-| 측정 모드 | `1` `2` `3` (정수) `[PLAN]` |
+| 측정 모드 | `1`(외부 셀) `2`(보조배터리) (정수) `[PLAN]` — 2026-07-27 3모드 → 2모드 축소, 구 모드 3이 신 모드 2 |
 | 배터리 종류 | `LI_ION` `LI_PO` `[v3: newChem='li_ion']` |
 | 세션 상태 | `ACTIVE` `COMPLETED` `ABORTED` `[제안]` |
 | 이벤트 심각도 | `NORMAL` `CAUTION` `WARNING` `DANGER` `CUT`(차단) `[v3: evtChips]` |
@@ -212,7 +212,6 @@ v3에는 판정 로직이 **세 벌** 존재하고 서로 어긋난다.
 | `powerW` | W |
 | `socPct` | % (0–100 정수) |
 | `tempContact`, `tempIrSurface` | °C |
-| `insulationMohm` | MΩ |
 | `gasRaw`, `pressureRaw`, `acousticRaw` | ADC raw (무차원 정수) |
 | `dTdt` | °C/min `[v3: '+2.8 °C/min']` |
 
@@ -452,7 +451,7 @@ const locked = gated && r !== 'battery';
 
 #### `GET /api/batteries`
 
-쿼리: `mode`(1\|2\|3, 미지정=전체 `[REQ-WEB-033]`), `sort`(`recent`\|`score`\|`soc`, 기본 `recent` `[REQ-WEB-051]`), `page`, `size`
+쿼리: `mode`(1\|2, 미지정=전체 `[REQ-WEB-033]`), `sort`(`recent`\|`score`\|`soc`, 기본 `recent` `[REQ-WEB-051]`), `page`, `size`
 
 ```json
 {
@@ -514,7 +513,7 @@ const locked = gated && r !== 'battery';
 
 - `maker` / `model` **선택** — 카드·상세의 `18650 Li-ion · 3S` 표시에 쓴다.
 
-> **v3 등록 폼에는 `maker`/`model` 입력이 없다** `[v3 실측]`. 입력은 `배터리 이름 / 종류(리튬이온·리튬폴리머) / 측정 모드(1·2·3) / 직렬 셀 수(S)` 4개뿐이고, 안내 문구는 `등록 시 battery_id(UUID)가 발급되고 측정 모드가 자산에 고정됩니다`이다.
+> **v3 등록 폼에는 `maker`/`model` 입력이 없다** `[v3 실측]`. 입력은 `배터리 이름 / 종류(리튬이온·리튬폴리머) / 측정 모드(1·2) / 직렬 셀 수(S)` 4개뿐이고, 안내 문구는 `등록 시 battery_id(UUID)가 발급되고 측정 모드가 자산에 고정됩니다`이다.
 > **결정: 등록 폼에 입력을 추가한다.** 백엔드 스키마는 위 요청 본문 그대로 가고, **프론트가 등록·수정 모달에 `제조사`·`모델` 입력 2개를 추가한다**(§12-11). 둘 다 선택 입력이므로 미입력 시 카드 표시는 `리튬이온 · 3S`로 축약한다.
 
 #### `GET /api/batteries/{id}` — 배터리 상세/이력 (F7) `[REQ-WEB-040/044]`
@@ -1070,7 +1069,7 @@ v3 실측 구성: KPI 카드 4개 → 이벤트 추이 차트 + 배터리 상태
     "riskBatteries": 5, "anomalies24h": 23
   },
   "statusDistribution": { "NORMAL": 1152, "WATCH": 127, "BLOCKED": 5 },
-  "modeDistribution": { "1": 612, "2": 448, "3": 224 },
+  "modeDistribution": { "1": 1060, "2": 224 },
   "eventTrend7d": [
     { "bucket": "2026-07-16", "caution": 8, "warning": 3, "danger": 1 }
   ],
@@ -1081,7 +1080,7 @@ v3 실측 구성: KPI 카드 4개 → 이벤트 추이 차트 + 배터리 상태
 ```
 
 - **KPI 카드는 4개다** — `전체 유저 / 전체 배터리 / 활성 세션 / 위험·경고 배터리` `[v3 실측]`. `REQ-WEB-104`가 언급한 **오프라인 디바이스 카드는 화면에 없다.** 디바이스 화면(F5)이 제외된 것과 일관되므로 `offlineDevices`를 뺐다.
-- `modeDistribution` — 배터리 상태 분포 카드 하단에 `모드 1 / 2 / 3 → 612 / 448 / 224`로 표시된다 `[v3 실측]`. 내가 처음에 누락했던 항목이다.
+- `modeDistribution` — 배터리 상태 분포 카드 하단에 `모드 1 / 2 → 1060 / 224`로 표시된다 `[v3 실측]`. v3는 모드 3까지 3칸이었으나 2모드 축소(2026-07-27)로 2칸이 됐다.
 - `statusDistribution` 키는 운영 상태(`NORMAL/WATCH/BLOCKED`)이며, 이상 탐지 화면의 `riskDistribution`(이상 등급)과 **다른 축이다.** 혼동 주의.
   - 화면 라벨은 `정상 / 주시 / 제한`이다 `[v3 실측]`. `제한` = `BLOCKED`. 목록 필터 칩은 영문 `NORMAL / WATCH / BLOCKED`를 쓰므로 **같은 값에 두 벌의 한국어 라벨이 존재한다.** 프론트가 하나로 통일해야 한다.
 
@@ -1522,7 +1521,7 @@ v3 테이블 컬럼: `시간 · 관리자 · 행위 · 대상 · 변경 내용` 
 ### 문서에 없는데 v3에 있는 것
 
 - **알림 센터 "오늘의 알림 요약"** 카드 (위험/경고/정상·점검 3칸)
-- **관리자 대시보드 모드별 배터리 분포** (모드 1/2/3)
+- **관리자 대시보드 모드별 배터리 분포** (모드 1/2)
 - **대시보드 지표별 상태 배지** (전압·전류·온도·SOC 각각 정상/경고)
 - **Raw 데이터 보기 모달** (v3 신규, `rawModal`)
 

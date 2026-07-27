@@ -564,9 +564,9 @@ const DATA = {
   assets:[
     { id:"PACK-001", spec:"18650 Li-ion · 3S", mode:1, soc:78, score:0.82, device:"진단기 A" },
     { id:"PACK-002", spec:"18650 Li-ion · 3S", mode:1, soc:91, score:0.18, device:"진단기 A" },
-    { id:"PACK-003", spec:"Li-Po · 2S",        mode:3, soc:64, score:0.33, device:"진단기 C" },
-    { id:"PACK-004", spec:"18650 Li-ion · 2S", mode:2, soc:47, score:0.58, device:"진단기 B" },
-    { id:"PACK-005", spec:"Li-Po · 1S",        mode:3, soc:82, score:0.24, device:"—" },
+    { id:"PACK-003", spec:"Li-Po · 2S",        mode:2, soc:64, score:0.33, device:"진단기 C" },
+    { id:"PACK-004", spec:"18650 Li-ion · 2S", mode:1, soc:47, score:0.58, device:"진단기 B" },
+    { id:"PACK-005", spec:"Li-Po · 1S",        mode:2, soc:82, score:0.24, device:"—" },
   ],
 
   /* 부록 A "측정 세션 기준값" */
@@ -578,8 +578,8 @@ const DATA = {
   /* 부록 A "진단기 목록" */
   devices:[
     { name:"진단기 A — BMS-2400", sn:"SN-00124 · Raspberry Pi 5", link:"ONLINE",  last:"방금 전",  battery:"PACK-001", mode:"모드 1" },
-    { name:"진단기 B — BMS-2401", sn:"SN-00125 · Raspberry Pi 5", link:"ONLINE",  last:"12초 전",  battery:"PACK-004", mode:"모드 2" },
-    { name:"진단기 C — BMS-2402", sn:"SN-00126 · Raspberry Pi 4", link:"DELAYED", last:"3분 전",   battery:"PACK-003", mode:"모드 3" },
+    { name:"진단기 B — BMS-2401", sn:"SN-00125 · Raspberry Pi 5", link:"ONLINE",  last:"12초 전",  battery:"PACK-004", mode:"모드 1" },
+    { name:"진단기 C — BMS-2402", sn:"SN-00126 · Raspberry Pi 4", link:"DELAYED", last:"3분 전",   battery:"PACK-003", mode:"모드 2" },
     { name:"진단기 D — BMS-2403", sn:"SN-00127 · Raspberry Pi 4", link:"OFFLINE", last:"2시간 전", battery:"—",        mode:"—" },
   ],
 
@@ -1045,7 +1045,7 @@ V.assets = () => `
       <div style="display:flex;gap:var(--space-3);flex-wrap:wrap;margin-bottom:var(--space-3)">
         <div class="seg" role="group" aria-label="측정 모드로 좁히기">
           <button aria-pressed="true">전체</button><button aria-pressed="false">모드 1</button>
-          <button aria-pressed="false">모드 2</button><button aria-pressed="false">모드 3</button>
+          <button aria-pressed="false">모드 2</button>
         </div>
         <div class="seg" role="group" aria-label="정렬 기준">
           <button aria-pressed="true">최근 측정순</button>
