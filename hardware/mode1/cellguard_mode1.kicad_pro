@@ -1,0 +1,8 @@
+{
+  "board": {},
+  "libraries": {"pinned_footprint_libs": [], "pinned_symbol_libs": []},
+  "meta": {"filename": "cellguard_mode1.kicad_pro", "version": 3},
+  "schematic": {"legacy_lib_dir": "", "legacy_lib_list": []},
+  "sheets": [["2591c9a4-08c7-5581-87ba-34dbe85f198c", "Root"]],
+  "text_variables": {}
+}
