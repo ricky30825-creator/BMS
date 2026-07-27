@@ -149,7 +149,7 @@ SYMBOLS: dict[str, Sym] = {
     ),
     "MLX90614": Sym(
         "MLX90614", "U", "MLX90614 [SEN0206]",
-        "비접촉 IR 표면온도, I2C 0x5A. Gravity 4핀 — 검정 GND / 빨강 VCC / 파랑 SDA / 초록 SCL",
+        "비접촉 IR 표면온도(MLX90614-DCC, FOV 35°). 주소는 EEPROM 0x0E로 변경 가능. Gravity 4핀 — 검정 GND / 빨강 VCC / 파랑 SDA / 초록 SCL",
         left=P("1:VCC 2:GND"), right=P("3:SDA 4:SCL"), width=33.02,
     ),
     "ADS1115": Sym(
@@ -161,7 +161,7 @@ SYMBOLS: dict[str, Sym] = {
     ),
     "DS18B20": Sym(
         "DS18B20", "U", "DS18B20 방수형 [SEN050007]",
-        "셀 표면 접촉온도, 1-Wire. 빨강 VDD / 노랑 DQ / 검정 GND",
+        "셀 표면 접촉온도, 1-Wire 멀티드롭(고유 64비트 ROM 코드라 주소 설정 불필요). 빨강 VDD / 노랑 DQ / 검정 GND",
         right=P("1:VDD 2:DQ 3:GND"), width=38.1,
     ),
     "OLED": Sym(
@@ -236,16 +236,13 @@ INSTANCES: list[Inst] = [
         "VCC": "+3V3", "GND": "GND", **I2C,
     }, nc=["ALE"]),
 
-    # ---- 압력 · 접촉온도 (좌측 열 하단)
+    # ---- 압력 (좌측 열 하단)
     Inst("FSR406", "RV1", 62, 168, nets={"1": "+3V3", "2": "FSR_OUT"}),
     Inst("R", "R1", 62, 192, value="10k", nets={"1": "FSR_OUT", "2": "GND"}),
-    Inst("DS18B20", "U5", 62, 222, nets={
-        "VDD": "+3V3", "DQ": "OW_DATA", "GND": "GND",
-    }),
-    Inst("R", "R2", 62, 252, value="4.7k", nets={"1": "+3V3", "2": "OW_DATA"}),
+    Inst("R", "R2", 62, 216, value="4.7k", nets={"1": "+3V3", "2": "OW_DATA"}),
 
     # ---- 릴레이 · 충방전 (가운데 열)
-    Inst("RELAY4", "K1", 190, 78, nets={
+    Inst("RELAY4", "K1", 220, 78, nets={
         "VCC": "+3V3", "GND": "GND", "JD_VCC": "+5V_RLY",
         "IN1": "RLY_IN1", "IN2": "RLY_IN2", "IN3": "RLY_IN3", "IN4": "RLY_IN4",
         "CH1_COM": "V5_PD",       "CH1_NO": "RLY_CH1_OUT",
@@ -253,18 +250,18 @@ INSTANCES: list[Inst] = [
         "CH3_COM": "RLY_CH3_IN",  "CH3_NO": "RLY_CH3_OUT",
     }, nc=["CH1_NC", "CH2_NC", "CH3_NC", "CH4_COM", "CH4_NO", "CH4_NC"]),
 
-    Inst("BABYSITTER", "U2", 190, 168, nets={
+    Inst("BABYSITTER", "U2", 220, 168, nets={
         "VIN": "RLY_CH1_OUT", "GND_IN": "GND",
         "BAT+": "RLY_CH3_OUT", "BAT-": "CELL_N",
         "SYS+": "SYS_P", "SYS-": "GND",
         **I2C, "GND": "GND",
     }, nc=["GPOUT"]),
 
-    Inst("ZY12PDN", "J2", 190, 218, nets={"VOUT+": "V5_PD", "VOUT-": "GND"}),
-    Inst("BW150", "J3", 190, 248, nets={"LOAD+": "RLY_CH2_OUT", "LOAD-": "GND"}),
+    Inst("ZY12PDN", "J2", 220, 218, nets={"VOUT+": "V5_PD", "VOUT-": "GND"}),
+    Inst("BW150", "J3", 220, 248, nets={"LOAD+": "RLY_CH2_OUT", "LOAD-": "GND"}),
 
     # ---- 라즈베리파이 헤더 (우측 열)
-    Inst("RPI5_HDR", "J1", 330, 112, nets={
+    Inst("RPI5_HDR", "J1", 400, 112, nets={
         "3V3 (1)": "+3V3",
         "(2) 5V": "+5V_RLY",
         "GPIO2/SDA1 (3)": "I2C_SDA",
@@ -290,22 +287,36 @@ INSTANCES: list[Inst] = [
         "GND (39)": "GND",
     }),
 
+    # ---- 접촉 온도 3점 (1-Wire 멀티드롭 — 셋 다 같은 3선에 병렬)
+    #      주소 설정이 필요 없다. 각 센서가 고유 64비트 ROM 코드를 갖는다.
+    Inst("DS18B20", "U5", 400, 192, value="DS18B20 #1 (셀 하단)",
+         nets={"VDD": "+3V3", "DQ": "OW_DATA", "GND": "GND"}),
+    Inst("DS18B20", "U7", 400, 220, value="DS18B20 #2 (셀 중앙)",
+         nets={"VDD": "+3V3", "DQ": "OW_DATA", "GND": "GND"}),
+    Inst("DS18B20", "U8", 400, 248, value="DS18B20 #3 (셀 상단·단자쪽)",
+         nets={"VDD": "+3V3", "DQ": "OW_DATA", "GND": "GND"}),
+
     # ---- I2C / SPI 주변 (최우측 열)
-    Inst("MLX90614", "U3", 470, 42, nets={"VCC": "+3V3", "GND": "GND", **I2C}),
-    Inst("ADS1115", "U4", 470, 92, nets={
+    # ---- IR 표면온도 2존. 둘 다 출고 시 0x5A이므로 U9는 EEPROM 0x0E를 0x5B로
+    #      바꿔 두어야 한다. 반드시 한 개씩 따로 연결해서 작업할 것.
+    Inst("MLX90614", "U3", 590, 42, value="MLX90614 #1 (0x5A, 셀 중앙)",
+         nets={"VCC": "+3V3", "GND": "GND", **I2C}),
+    Inst("MLX90614", "U9", 590, 74, value="MLX90614 #2 (0x5B, 셀 단자쪽)",
+         nets={"VCC": "+3V3", "GND": "GND", **I2C}),
+    Inst("ADS1115", "U4", 590, 114, nets={
         "A0": "FSR_OUT", "VDD": "+3V3", "GND": "GND", **I2C, "ADDR": "GND",
     }, nc=["A1", "A2", "A3", "ALRT"]),
-    Inst("OLED", "U6", 470, 152, nets={
+    Inst("OLED", "U6", 590, 174, nets={
         "GND": "GND", "VCC": "+3V3",
         "D0": "SPI_SCLK", "D1": "SPI_MOSI",
         "RES": "OLED_RES", "DC": "OLED_DC", "CS": "SPI_CE0",
     }),
 
     # ---- 릴레이 IN 풀업 (부팅 중 오동작 방지)
-    Inst("R", "R3", 470, 196, value="10k", nets={"1": "+3V3", "2": "RLY_IN1"}),
-    Inst("R", "R4", 470, 216, value="10k", nets={"1": "+3V3", "2": "RLY_IN2"}),
-    Inst("R", "R5", 470, 236, value="10k", nets={"1": "+3V3", "2": "RLY_IN3"}),
-    Inst("R", "R6", 470, 256, value="10k", nets={"1": "+3V3", "2": "RLY_IN4"}),
+    Inst("R", "R3", 590, 216, value="10k", nets={"1": "+3V3", "2": "RLY_IN1"}),
+    Inst("R", "R4", 590, 234, value="10k", nets={"1": "+3V3", "2": "RLY_IN2"}),
+    Inst("R", "R5", 590, 252, value="10k", nets={"1": "+3V3", "2": "RLY_IN3"}),
+    Inst("R", "R6", 590, 270, value="10k", nets={"1": "+3V3", "2": "RLY_IN4"}),
 ]
 
 # 라즈베리파이 헤더에서 쓰지 않는 핀은 전부 미연결 표시
@@ -339,7 +350,7 @@ _COLUMNS: list[tuple[float, list[tuple[str, str]]]] = [
         ("", "부팅 초기 보호 2중화:  IN1~IN4에 10k 풀업(R3~R6)"),
         ("", "                        + /boot/firmware/config.txt 에 gpio=5,6,13,19=op,dh"),
     ]),
-    (215, [
+    (300, [
         ("h1", "릴레이 채널 배분"),
         ("", "CH1  충전 경로    ZY12PDN 5V -> Babysitter VIN       GPIO5   (물리핀 29)"),
         ("", "CH2  방전 경로    Babysitter SYS+ -> BW150 부하 +    GPIO6   (물리핀 31)"),
@@ -355,23 +366,29 @@ _COLUMNS: list[tuple[float, list[tuple[str, str]]]] = [
         ("", "0x40   INA226      전압 · 전류 · 전력"),
         ("", "0x48   ADS1115     A0=FSR 압력 / A1~A3 예비 (ADDR -> GND)"),
         ("", "0x55   BQ27441     SOC (Battery Babysitter 탑재)"),
-        ("", "0x5A   MLX90614    IR 표면온도 (SEN0206 = MLX90614-DCC, FOV 35도)"),
+        ("", "0x5A   MLX90614 #1  IR 표면온도 - 셀 중앙   (SEN0206 = MLX90614-DCC, FOV 35도)"),
+        ("", "0x5B   MLX90614 #2  IR 표면온도 - 셀 단자쪽 (EEPROM 0x0E 로 주소 변경한 개체)"),
+        ("", ""),
+        ("h2", "[!] 온도는 다점 측정 -> 최댓값을 쓴다"),
+        ("", "MLX90614 소자 1개는 FOV 안의 '평균'만 낸다. 그래서 2개를 다른 지점에 겨눠 공간 피크를 만든다."),
+        ("", "   temp_ir_surface = max(#1, #2)      temp_contact = max(DS18B20 #1, #2, #3)"),
+        ("", "DS18B20 3개는 같은 3선(GPIO4 + 3.3V + GND)에 병렬로 문다. 1-Wire는 고유 64비트 ROM 코드를"),
+        ("", "쓰므로 주소 설정이 필요 없다. Skip ROM + Convert T 로 셋을 동시에 변환해 750ms 그대로다."),
         ("", ""),
         ("h2", "[!] MLX90614 부착 거리 — 2cm 이내"),
         ("", "FOV 35도 -> 측정 스팟 지름 = 0.63 x 거리.  2cm 에서 1.26cm 로 18650(지름 1.8cm) 안에 들어간다."),
         ("", "5cm 떨어지면 스팟이 3.15cm 라 배경 온도가 절반 넘게 섞여 셀보다 낮게 읽힌다."),
-        ("", "이 센서는 소자 1개짜리라 FOV 안의 평균만 낸다. 공간 피크는 물리적으로 불가능하다."),
         ("", "출고 상태는 갱신 865ms + 스파이크 50% 감쇠다. EEPROM 0x25 재설정 필수 -> backend_spec.md 6-3"),
         ("", ""),
         ("", "확인:  sudo i2cdetect -y 1  ->  40  48  55  5a  네 개가 보여야 한다."),
     ]),
-    (400, [
+    (580, [
         ("h1", "Raspberry Pi 5 헤더 배선"),
         ("", "물리핀 1, 17   3.3V        센서 · OLED · 릴레이 VCC(옵토측)"),
         ("", "물리핀 2       5V          릴레이 JD_VCC(코일측)"),
         ("", "물리핀 3       GPIO2/SDA   I2C 데이터"),
         ("", "물리핀 5       GPIO3/SCL   I2C 클럭"),
-        ("", "물리핀 7       GPIO4       1-Wire (+ 4.7k 풀업 -> 3.3V) -> DS18B20"),
+        ("", "물리핀 7       GPIO4       1-Wire (+ 4.7k 풀업 -> 3.3V) -> DS18B20 x3 (병렬)"),
         ("", "물리핀 18      GPIO24      OLED RES"),
         ("", "물리핀 19      GPIO10      OLED D1 (MOSI)"),
         ("", "물리핀 22      GPIO25      OLED DC"),
@@ -386,7 +403,9 @@ _COLUMNS: list[tuple[float, list[tuple[str, str]]]] = [
         ("", ""),
         ("h2", "미확보 부품 — 조립 전 확보"),
         ("", "폴리퓨즈 3A, 18650 홀더, JST 2.0 커넥터, 4.7k/10k 저항,"),
-        ("", "5V 3A+ 어댑터, 캡톤 테이프 · 서멀 패드, 외장 케이스."),
+        ("", "5V 3A+ 어댑터, 캡톤 테이프 · 서멀 패드 x3, 외장 케이스."),
+        ("", ""),
+        ("", "예비품 없음: DS18B20 3개와 MLX90614 2개를 전부 투입했다. 고장 시 교체품이 없다."),
     ]),
 ]
 
@@ -394,7 +413,7 @@ _SIZES = {"h1": (3.0, 9.0), "h2": (2.5, 8.0), "": (2.0, 5.2)}
 
 NOTES: list[tuple[float, float, float, str]] = []
 for _x, _lines in _COLUMNS:
-    _y = 288.0
+    _y = 305.0
     for _kind, _s in _lines:
         _size, _step = _SIZES[_kind]
         if _s:
@@ -569,7 +588,7 @@ def write_schematic() -> None:
         '\t(generator "gen_mode1_sch.py")',
         '\t(generator_version "9.0")',
         f'\t(uuid "{_ROOT}")',
-        '\t(paper "A2")',
+        '\t(paper "A1")',   # 주석량 때문에 A2로는 모자란다
         # 제목란은 KiCad가 자체 폰트로 그려서 face 지정이 먹지 않는다.
         # 한글을 넣으면 글자가 통째로 사라지므로 ASCII로만 쓴다.
         '\t(title_block',

@@ -175,7 +175,7 @@
 		(property "Value" "MLX90614 [SEN0206]" (at -16.51 8.89 0) (effects (font (face "Apple SD Gothic Neo") (size 1.27 1.27)) (justify left bottom)))
 		(property "Footprint" "" (at 0 0 0) (effects (font (face "Apple SD Gothic Neo") (size 1.27 1.27)) (hide yes)))
 		(property "Datasheet" "" (at 0 0 0) (effects (font (face "Apple SD Gothic Neo") (size 1.27 1.27)) (hide yes)))
-		(property "Description" "비접촉 IR 표면온도, I2C 0x5A. Gravity 4핀 — 검정 GND / 빨강 VCC / 파랑 SDA / 초록 SCL" (at 0 0 0) (effects (font (face "Apple SD Gothic Neo") (size 1.27 1.27)) (hide yes)))
+		(property "Description" "비접촉 IR 표면온도(MLX90614-DCC, FOV 35°). 주소는 EEPROM 0x0E로 변경 가능. Gravity 4핀 — 검정 GND / 빨강 VCC / 파랑 SDA / 초록 SCL" (at 0 0 0) (effects (font (face "Apple SD Gothic Neo") (size 1.27 1.27)) (hide yes)))
 		(symbol "MLX90614_0_1"
 			(rectangle (start -16.51 7.62) (end 16.51 -7.62)
 				(stroke (width 0.254) (type default))
@@ -269,7 +269,7 @@
 		(property "Value" "DS18B20 방수형 [SEN050007]" (at -19.05 11.43 0) (effects (font (face "Apple SD Gothic Neo") (size 1.27 1.27)) (justify left bottom)))
 		(property "Footprint" "" (at 0 0 0) (effects (font (face "Apple SD Gothic Neo") (size 1.27 1.27)) (hide yes)))
 		(property "Datasheet" "" (at 0 0 0) (effects (font (face "Apple SD Gothic Neo") (size 1.27 1.27)) (hide yes)))
-		(property "Description" "셀 표면 접촉온도, 1-Wire. 빨강 VDD / 노랑 DQ / 검정 GND" (at 0 0 0) (effects (font (face "Apple SD Gothic Neo") (size 1.27 1.27)) (hide yes)))
+		(property "Description" "셀 표면 접촉온도, 1-Wire 멀티드롭(고유 64비트 ROM 코드라 주소 설정 불필요). 빨강 VDD / 노랑 DQ / 검정 GND" (at 0 0 0) (effects (font (face "Apple SD Gothic Neo") (size 1.27 1.27)) (hide yes)))
 		(symbol "DS18B20_0_1"
 			(rectangle (start -19.05 10.16) (end 19.05 -10.16)
 				(stroke (width 0.254) (type default))
