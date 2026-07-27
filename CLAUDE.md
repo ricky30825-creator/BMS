@@ -191,6 +191,18 @@ Raspberry Pi        Kafka  → Consumer → PostgreSQL            Google Colab  
 - 가스·압력·음향 센서의 동시 부착 개수와 ADS1115 채널 배분 — `정의 필요`.
 - 음향 센서 모델 미확정. **미세 크랙의 음향 방출(AE)은 100kHz~1MHz 대역**이라 일반 사운드 센서(20Hz~20kHz)로는 못 잡는다. 피에조로 벤트 파열음·표면 진동을 잡는 수준이므로 `acoustic_raw`의 정의를 그에 맞춰 적었다.
 
+## 회로도 (모드 1만 존재)
+
+정본은 `hardware/mode1/`(KiCad 프로젝트)이고, 조립은 `docs/hardware/mode1_beginner_guide.md`, 에지 데이터 수집은 `docs/hardware/mode1_backend_spec.md`가 계약서다. 모드 2 회로는 아직 없다.
+
+- **회로도는 생성물이다.** KiCad에서 손으로 고치지 말고 `tools/gen_mode1_sch.py`를 고친 뒤 다시 돌린다. 검증은 `kicad-cli sch erc`(위반 0건) + `sch export netlist`로 네트 연결 확인. `kicad-cli`는 `/Applications/KiCad/KiCad.app/Contents/MacOS/kicad-cli`에 있다(PATH에 없음).
+- **회로도 텍스트에 한글을 넣으려면 `(font (face "Apple SD Gothic Neo") …)`를 명시해야 한다.** 안 붙이면 `kicad-cli` 내보내기에서 한글이 통째로 사라진다. 제목란(`title_block`)은 폰트 지정이 안 먹으므로 ASCII만 쓴다.
+- **릴레이는 active-LOW**(`0`=도통, `1`=차단)이고 모든 배터리 경로가 NO 접점을 지나 정전·부팅 중·크래시 시 자동 차단된다. 모드 1 매핑: CH1 충전(GPIO5), CH2 방전(GPIO6), CH3 마스터(GPIO13), CH4 예비(GPIO19). CH1·CH2 동시 도통 금지, 전환 시 50ms 이상 대기.
+- **CH3(마스터)을 열면 BQ27441이 꺼져 I2C `0x55`가 버스에서 사라진다.** 정상 동작이므로 릴레이 상태를 조건으로 걸지 않으면 센서 오류 알림이 폭주한다. INA226은 Pi 3.3V로 동작해 셀 전압 감시는 계속된다.
+- **셀 −(`CELL_N`)를 시스템 GND에 직결하면 안 된다.** BQ27441의 20mΩ 센스 저항이 단락돼 SOC가 안 나온다. `CELL_N`은 Babysitter `BAT−` 하나에만 간다.
+- **100ms로 실제 갱신되는 센서는 INA226뿐이다.** DS18B20 750ms(12비트) / MLX90614 ~500ms / BQ27441 ~1s. `dT_dt`·`d2T_dt2` 특징이 계단 파형이 되므로 `age_ms` 신선도 필드 도입 여부가 미결이다(백엔드 스펙 §13).
+- **모드 1 회로에 MQ-2 가스·음향 센서는 없다** → `gas_raw`, `acoustic_raw`는 `null`. 위 센서 표(모드 1·2 전부 적용)와 어긋난 상태이며 어느 쪽이 정본인지 미결이다.
+
 ## 디바이스 스피커 음성 안내
 
 라즈베리파이에 스피커를 추가해 현장 음성 안내를 제공한다. 음성은 실시간 합성 TTS가 아니라 사전 생성된 한국어 MP3/WAV 파일을 에지에서 로컬 재생한다. 안내 대상은 보조배터리 물리 연결 감지, 웹 측정 세션 시작/종료, 이상 상태, Fail-Safe 차단, 릴레이 상태, 센서·디바이스 오류, 네트워크·서버 상태 이벤트다. 웹 설정은 전체 공통 정책으로 음성 안내 ON/OFF, 음량, 카테고리별 토글(연결/측정, 이상상태, Fail-Safe/릴레이, 센서/디바이스 오류, 네트워크/서버 상태)을 제공한다.
