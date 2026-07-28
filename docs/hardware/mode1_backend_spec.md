@@ -209,7 +209,7 @@ Current_LSB = 0.0001 A이므로 **`current_a = raw_0x04 × 0.0001`**, **`power_w
 
 ### 3-5. ⚠️ `voltage_v`는 셀 단자 전압보다 살짝 낮다
 
-`VBUS`는 `CELL_P`(퓨즈 앞, 셀 + 바로 옆)에서 따지만, 기준점은 **시스템 GND**다. 셀의 −는 GND가 아니라 `CELL_N`(Babysitter `BAT−`)에 있고, 그 사이에 BQ27441의 **20 mΩ 센스 저항**이 있다.
+`VBUS`는 `CELL_P`(셀 + 바로 옆)에서 따지만, 기준점은 **시스템 GND**다. 셀의 −는 GND가 아니라 `CELL_N`(Babysitter `BAT−`)에 있고, 그 사이에 BQ27441의 **20 mΩ 센스 저항**이 있다.
 
 ```
 실제 셀 전압 = voltage_v + |current_a| × 0.02          (방전 중)

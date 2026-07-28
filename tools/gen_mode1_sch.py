@@ -128,11 +128,6 @@ SYMBOLS: dict[str, Sym] = {
         "측정 대상 셀 — 18650 3.7V 2550mAh 또는 리튬폴리머 3.7V 1000mAh",
         right=P("1:+ 2:-"), width=25.4,
     ),
-    "POLYFUSE": Sym(
-        "POLYFUSE", "F", "PolyFuse 3A",
-        "셀 + 경로 과전류 보호 (미확보 — 조립 전 확보 필요)",
-        left=P("1:1"), right=P("2:2"), width=20.32,
-    ),
     "INA226": Sym(
         "INA226", "U", "INA226 [VLT-VCM029]",
         "전압·전류·전력 측정, I2C 0x40. Pi 3.3V로 동작하므로 마스터 차단 후에도 셀 전압 감시가 살아있다",
@@ -228,11 +223,10 @@ I2C = {"SDA": "I2C_SDA", "SCL": "I2C_SCL"}
 INSTANCES: list[Inst] = [
     # ---- 배터리 전력 경로 (좌측 열)
     Inst("CELL", "BT1", 62, 40, nets={"+": "CELL_P", "-": "CELL_N"}),
-    Inst("POLYFUSE", "F1", 62, 72, nets={"1": "CELL_P", "2": "CELL_P_F"}),
-    # VBUS는 퓨즈 '앞'(셀 단자 쪽)에서 딴다. 퓨즈 뒤에서 따면 폴리퓨즈 저항
-    # (3A급이 20~50mohm)만큼 전압이 깎여 3A 방전 시 최대 0.15V를 손해 본다.
+    # 직렬 퓨즈 없음(2026-07-28 결정). 과전류 보호는 셀에 붙은 보호회로(PCM)에
+    # 의존한다. 따라서 셀 +는 INA226 IN-와 VBUS에 같은 노드(CELL_P)로 직결된다.
     Inst("INA226", "U1", 62, 118, nets={
-        "IN+": "RLY_CH3_IN", "IN-": "CELL_P_F", "VBUS": "CELL_P",
+        "IN+": "RLY_CH3_IN", "IN-": "CELL_P", "VBUS": "CELL_P",
         "VCC": "+3V3", "GND": "GND", **I2C,
     }, nc=["ALE"]),
 
@@ -329,8 +323,9 @@ _rpi.nc = [n for n in _all_rpi if n not in _rpi.nets]
 _COLUMNS: list[tuple[float, list[tuple[str, str]]]] = [
     (20, [
         ("h1", "셀가드 — 모드 1 (외부 셀) 충·방전 계측 회로"),
-        ("", "충전:  ZY12PDN 5V -[CH1]- Babysitter VIN -> (BQ24075) -> BAT+ -[CH3]- INA226 션트 - F1 - 셀 +"),
-        ("", "전압 탭:  INA226 VBUS는 퓨즈 앞(CELL_P)에서 딴다. 퓨즈 뒤면 폴리퓨즈 저항만큼 깎인다."),
+        ("", "충전:  ZY12PDN 5V -[CH1]- Babysitter VIN -> (BQ24075) -> BAT+ -[CH3]- INA226 션트 - 셀 +"),
+        ("", "[!] 직렬 퓨즈 없음.  과전류 보호는 셀에 붙은 보호회로(PCM)에만 의존한다."),
+        ("", "    보호회로 없는 맨 셀(unprotected)을 물리면 배선 단락 시 아무 보호도 없다 — 실물 확인 필수."),
         ("", "방전:  셀 + -> ... -> Babysitter SYS+ -[CH2]- ATORCH BW150 부하 +"),
         ("", "부호 규약:  INA226 IN+ -> IN- 방향(릴레이 -> 셀)이 양수 = 충전.  방전은 음수."),
         ("", ""),
@@ -405,7 +400,7 @@ _COLUMNS: list[tuple[float, list[tuple[str, str]]]] = [
         ("", "PCB 없음 — 기성 모듈 + 배선 하네스다."),
         ("", ""),
         ("h2", "미확보 부품 — 조립 전 확보"),
-        ("", "폴리퓨즈 3A, 18650 홀더, JST 2.0 커넥터, 4.7k/10k 저항,"),
+        ("", "18650 홀더, JST 2.0 커넥터, 4.7k/10k 저항,"),
         ("", "5V 3A+ 어댑터, 캡톤 테이프 · 서멀 패드 x3, 외장 케이스."),
         ("", ""),
         ("", "예비품 없음: DS18B20 3개와 MLX90614 2개를 전부 투입했다. 고장 시 교체품이 없다."),
