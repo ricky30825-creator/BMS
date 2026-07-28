@@ -1395,7 +1395,7 @@ v3 테이블 컬럼: `시간 · 관리자 · 행위 · 대상 · 변경 내용` 
   "estimatedEndAt": "2026-07-28T05:22:40.000Z",
   "socHintLevel": 3,
   "partialMetrics": {
-    "vOpenCircuitV": 5.06,
+    "vLightLoadV": 5.06,
     "regulationKneeA": null,
     "kneeIsUpperBound": null,
     "thermalSlopeCPerMin": 2.1,
@@ -1467,7 +1467,7 @@ v3 테이블 컬럼: `시간 · 관리자 · 행위 · 대상 · 변경 내용` 
 
 ```json
 "quick": {
-  "vOpenCircuitV": 5.06,
+  "vLightLoadV": 5.06,
   "regulationKneeA": 1.6,
   "kneeIsUpperBound": false,
   "thermalSlopeCPerMin": 2.4,
@@ -1631,7 +1631,7 @@ v3 테이블 컬럼: `시간 · 관리자 · 행위 · 대상 · 변경 내용` 
 | **Q27** | 전압·전류·SOC 지표 배지 임계값 | **열림** — 온도(55/60°C)만 확정. 나머지는 `status: null`이라 대시보드 구현은 진행 가능. 전압은 `chemistry`·`seriesCount`로 셀당 환산 필요 |
 | **Q35** | 세션 타임아웃 임계 N분 | **열림** — 5분 제안. 에지 발행이 100ms이므로 5분 무수신이면 전원 이탈로 본다. 현장 테스트로 확정 |
 | **Q34** | 문구 `code` 전체 목록 | **열림** — §1.10 규약은 확정. 개별 코드는 엔드포인트 구현하며 채운다 |
-| **Q36** | F21 부하 수단과 진단 문턱값 | **열림** — 부하 수단(MOSFET 정전류 권장), 발열 기울기 `S1`, 표면온도 중단 문턱, 부스트 효율 η 기본값. `mode2_powerbank_diagnosis_spec.md` §8 H1~H8. **API 계약(§4.13)은 이와 무관하게 확정**이며, 막히는 것은 `hardware/mode2/` 회로도뿐이다 |
+| **Q36** | F21 진단 문턱값 | **열림** — 발열 기울기 `S1`, 표면온도 중단 문턱, 부스트 효율 η 기본값, 최소 유지 부하 크기. `mode2_powerbank_diagnosis_spec.md` §8 H2~H4·H6~H10. **부하 수단(보유 BW150)과 릴레이 매핑(모드 1과 동일)은 2026-07-28에 닫혔다.** **API 계약(§4.13)은 이와 무관하게 확정**이며, 막히는 것은 `hardware/mode2/` 회로도뿐이고 그것도 H1의 V1(BW150이 5V를 부하하는가) 하나만 남았다 |
 | **Q6** | SOH/RUL 산출 주체 | **모드 2 확정 / 모드 1 보류** — 모드 2는 백엔드가 §4.13 진단 결과를 집계하고 `cycleCount`·`rulCycles`·`internalResistanceMohm`은 `null` 확정(§4.2). 모드 1은 BQ27441 경로가 있으나 산출 주체 미정이라 보류 유지 |
 
 ### 확정된 결정 (31건)
