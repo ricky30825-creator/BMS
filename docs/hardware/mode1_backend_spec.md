@@ -517,6 +517,8 @@ SEN0206은 FOV 35°다. 거리에 따른 측정 스팟 지름은 `2 × 거리 ×
 9. #1을 다시 연결하고 둘 다 확인:  5a 와 5b 가 같이 보인다
 ```
 
+> ⚠️ **쓰기 프레임에는 PEC 바이트를 반드시 붙여야 한다.** MLX90614의 write word 프레임은 `SA+W | 커맨드 | LSByte | MSByte | PEC`이고(데이터시트 Figure 7), PEC는 `SA<<1`부터 MSByte까지에 대한 **CRC-8(다항식 X⁸+X²+X¹+1, 초기값 0)**이다. PEC가 없거나 틀리면 칩이 **에러를 내지 않고 그냥 무시한다** — "지우기는 된 것 같은데 쓰기가 안 먹는다"는 형태로 나타난다. `smbus2`의 `write_word_data()`는 기본적으로 PEC를 붙이지 않으므로, `bus.pec = 1`을 켜거나 `i2c_msg.write()`로 프레임을 직접 구성해 CRC-8을 붙인다. 동작하는 파이썬 예제는 `docs/hardware/mode1_beginner_guide.md` §3-⑤에 있다. **이 주의는 §6-3의 ConfigRegister1(`0x25`) 재설정에도 똑같이 적용된다.**
+>
 > EEPROM 커맨드는 `0x20 | EEPROM주소`다. EEPROM `0x0E` → SMBus 커맨드 **`0x2E`**. (같은 이유로 ConfigRegister1의 EEPROM `0x05` → 커맨드 `0x25`.)
 >
 > **주소 `0x00`은 general call이라 MLX90614가 자기 주소와 무관하게 항상 응답한다.** 주소를 잘못 써서 센서를 못 찾게 됐다면 `0x00`으로 접근해 복구할 수 있다. 다만 이때도 버스에 센서가 하나뿐이어야 한다.
