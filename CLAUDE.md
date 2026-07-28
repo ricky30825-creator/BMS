@@ -153,6 +153,20 @@ Raspberry Pi        Kafka  → Consumer → PostgreSQL            Google Colab  
 
 > **모드 2의 `soc_pct`는 INA226 적산으로 낸 상대값이다(2026-07-28 확정).** 완제품 보조배터리는 셀에 접근할 수 없어 Battery Babysitter(BQ27441)를 못 붙인다. 대신 **측정 시작 시점을 100%로 보고 INA226으로 방전 Wh를 적산해 감산**하며, 정격 용량은 사용자가 배터리 자산 등록 시 입력한 값을 쓴다. 절대 SOC가 아니므로 **모드 1의 `soc_pct`와 같은 값으로 취급하면 안 된다** — AI가 쓰는 건 SOC 변화 추이다.
 
+> **진단 중에는 `diag_phase`·`load_target_a` 두 필드가 추가로 실린다.** `diag_phase`는 `null`(진단 아님) 또는 `P0`~`P6`·`CAPACITY`, `load_target_a`는 그 프레임에서 **지시한** 목표 전류다(실측은 `current_a`이며 둘의 차이가 부하 제어 오차다). 아래 「보조배터리 열화 진단」 참조.
+
+## 보조배터리 열화 진단 (모드 2)
+
+정본은 `docs/hardware/mode2_powerbank_diagnosis_spec.md`, API는 `docs/backend_contract.md` §4.13, 기능 계약은 `docs/product_contract.md` F21·T16이다. 아래는 **모르면 반드시 틀리는 것만** 적었다.
+
+- **출력단 내부저항으로 셀 열화를 재려 하면 안 된다.** 완제품 보조배터리는 셀과 USB 출력 사이에 **DC-DC 부스트**가 있어 셀이 3.0V든 4.2V든 출력을 5V로 붙잡는다. 출력단 `ΔV/ΔI`가 재는 건 컨버터 출력 임피던스이며 셀 상태와 거의 무관하다. **`internalResistanceMohm`은 모드 2에서 `null` 확정.** 대신 부하를 걸었을 때의 반응 3지표를 쓴다 — 레귤레이션 이탈 전류(무부하값의 94% 붕괴점) / 발열 기울기 / 스펙 도달률.
+- **부스트 효율을 보정하지 않으면 새 배터리도 SOH 85%가 된다.** 정격 Wh는 **셀 기준**(3.7V × mAh)이고 측정은 **출력단**(5V) 기준이라, 10000mAh(=37Wh) 제품에서 실제로 뽑히는 건 31~33Wh다. η는 제품·부하마다 달라 가정할 수 없으므로 **신뢰값은 그 자산의 첫 정밀 테스트를 기준선으로 삼은 `sohRelPct`**이고, η 가정 기반 `sohAbsPct`는 `assumedEfficiency`를 반드시 동봉하는 참고값이다. **첫 테스트는 `sohRelPct: null` + `isBaseline: true`** — 기준선 자신을 100%로 내면 "열화 없음"으로 오독된다.
+- **모드 2의 `cycleCount`·`rulCycles`는 `null` 확정.** 내부 BMS에 접근할 수 없어 실제 생애 사이클을 모른다. 우리가 아는 건 **우리 장비로 측정한 세션 수**뿐이며, 3년 쓴 보조배터리를 처음 물려도 카운트는 1이다. **v3의 `SOH 92% · RUL ~480 사이클 · 누적 사이클 312 · 내부 저항 18.4 mΩ`는 목업 숫자이며 모드 2에서 이 네 값이 다 채워진 화면은 만들 수 없다.**
+- **열화 등급과 이상점수 4등급은 다른 축이다.** 열화는 수명(`HEALTHY`/`CAUTION`/`SUSPECT_DEGRADED`/`BASELINE_PENDING`), 이상점수는 열폭주 위험(`NORMAL`/`CAUTION`/`WARNING`/`DANGER`). **양쪽에 `CAUTION`이 있으므로** 합산하거나 같은 enum으로 취급하면 조용히 틀린다.
+- **케이스 표면온도는 셀 온도가 아니다.** 외장이 열을 막아 셀 70°C에 표면 45°C가 가능하고 수십 초 늦게 따라온다. **모드 1의 55/60°C를 모드 2에 그대로 쓰면 안 된다** — 절대값보다 상승률이 주 근거이며 문턱은 실측 미정(§8 H2).
+- **`diag_phase != null` 프레임은 AI 정상패턴 학습에서 제외한다.** 계단 스윙은 사람이 만든 전류 계단이라 정상으로 배우면 실제 이상을 놓친다. 이상점수는 계속 산출하되 **알림만 억제**하고, **Fail-Safe는 억제하지 않는다.** 안전 조건이 걸리면 **부하를 0A로 내린 다음** 릴레이를 차단한다(순서가 뒤바뀌면 아크가 생긴다).
+- **부하 수단이 아직 없다(H1).** 계단 스윙은 프로그램이 전류를 지정할 수 있는 부하를 요구하는데 BOM에 그런 소자가 없다. BW150은 수동 설정이라 못 쓰고, 고정저항 뱅크는 미세 스윕 불가 + 릴레이 채널 부족이다. 권장은 **MOSFET 정전류 + MCP4725 I2C DAC**(부품 추가 구매). **이게 닫히기 전에는 `hardware/mode2/` 회로도를 그릴 수 없다.**
+
 ## AI 모델 핵심 파라미터
 
 이중 모델 구조 — LSTM-AutoEncoder(현재 상태 진단)와 Informer(미래 상태 예측)가 동일 Sequence 입력을 공유하고, 두 모델의 점수를 Score Fusion(가중합)으로 결합해 최종 이상점수를 산출한다. 2개 측정 모드(외부 셀/보조배터리) 공통 아키텍처다.
@@ -213,7 +227,7 @@ Raspberry Pi        Kafka  → Consumer → PostgreSQL            Google Colab  
 
 ## 회로도 (모드 1만 존재)
 
-정본은 `hardware/mode1/`(KiCad 프로젝트)이고, 조립은 `docs/hardware/mode1_beginner_guide.md`, 에지 데이터 수집은 `docs/hardware/mode1_backend_spec.md`가 계약서다. 모드 2 회로는 아직 없다.
+정본은 `hardware/mode1/`(KiCad 프로젝트)이고, 조립은 `docs/hardware/mode1_beginner_guide.md`, 에지 데이터 수집은 `docs/hardware/mode1_backend_spec.md`가 계약서다. **모드 2 회로는 아직 없다** — 설계 스펙(`docs/hardware/mode2_powerbank_diagnosis_spec.md`)은 확정됐으나 부하 수단(§8 H1)이 미정이라 그릴 수 없다.
 
 - **회로도는 생성물이다.** KiCad에서 손으로 고치지 말고 `tools/gen_mode1_sch.py`를 고친 뒤 다시 돌린다. 검증은 `kicad-cli sch erc`(위반 0건) + `sch export netlist`로 네트 연결 확인. `kicad-cli`는 `/Applications/KiCad/KiCad.app/Contents/MacOS/kicad-cli`에 있다(PATH에 없음).
 - **회로도 텍스트에 한글을 넣으려면 `(font (face "Apple SD Gothic Neo") …)`를 명시해야 한다.** 안 붙이면 `kicad-cli` 내보내기에서 한글이 통째로 사라진다. 제목란(`title_block`)은 폰트 지정이 안 먹으므로 ASCII만 쓴다.
@@ -244,6 +258,8 @@ Raspberry Pi        Kafka  → Consumer → PostgreSQL            Google Colab  
 
 > 웹에서 이 기능의 화면/메뉴 명칭은 **"배터리 자산관리"**다(하위 액션: 새 배터리 등록 / 저장된 배터리 선택, 별도 페이지: 배터리 상세/이력).
 
+> **모드 2 자산은 용량 입력이 필수다**(`capacity_wh` 또는 `capacity_mah`). `soc_pct`와 절대 SOH가 이 값을 분모로 쓴다. 여기에 `rated_output_current_a`(겉면 광고 정격 전류, 선택 — 빠른 진단의 스펙 도달률용)와 `baseline_wh`(시스템 산출 — 첫 정밀 용량 테스트값, 상대 SOH의 분모)가 더해진다(2026-07-28).
+
 > 데이터 모델(`battery_asset`/`measurement_session`)·태깅 흐름·엣지 케이스 상세는 `PLAN.md` 참조.
 
 ## 프로토타입 번들 다루기
@@ -260,7 +276,8 @@ Raspberry Pi        Kafka  → Consumer → PostgreSQL            Google Colab  
 
 기능·유저플로우의 디자인 무관 정본은 `docs/product_contract.md`다. **새 디자인 작업은 이 문서를 입력으로 삼는다.**
 
-- 기능 영역 19개(F5는 결번 — `devices`는 도달 불가 고아 라우트), 과업 16개(T0~T15), 게이트·불변 표시로 안전 규칙을 고정한다.
+- 기능 영역 20개(F5는 결번 — `devices`는 도달 불가 고아 라우트), 과업 17개(T0~T16), 게이트·불변 표시로 안전 규칙을 고정한다.
+- **F21(보조배터리 진단)·T16·REQ-WEB-137~143만 v3에 없는 신규분이다**(2026-07-28). 나머지는 v3 실측 기준이므로, v3에 없다고 F21을 지우면 안 된다. 린터의 `EXPECTED_AREAS`·`EXPECTED_REQS`도 여기에 맞춰져 있다.
 - 형태 어휘(모달·카드·버튼·사이드바 등)를 쓰지 않는다. 화면 개수·경계, 정보를 담는 그릇, 목록 탐색 방식, 이동 수단 구조는 전부 자유다.
 - `tools/contract_lint.py`가 어휘·영역·REQ 인용·게이트 표시를 기계 검증한다. 계약서를 고치면 반드시 다시 돌린다.
 - 범위 밖 REQ 5건(030·031·069·071·135)은 본문에서 인용하면 위반이다. 부록 B에서만 언급한다.
@@ -297,4 +314,4 @@ Raspberry Pi        Kafka  → Consumer → PostgreSQL            Google Colab  
 - **릴레이 자동 복구는 없다.** 한 번 차단되면 재인증·사유 입력으로 수동 복구만 가능하다.
 - 사용자당 진단기는 **1대 고정**이다. `deviceId`를 API로 받지 않고 서버가 자동 선택한다.
 
-미결정 항목은 `docs/backend_contract.md` §9에 모아 두었다. 33건 중 30건이 닫혔고, 열린 것은 지표 임계값(Q27)·문구 코드 목록(Q34)·세션 타임아웃 분수(Q35)뿐이다. 새로 결정되면 표에서 확정으로 옮기고 본문에 반영한다.
+미결정 항목은 `docs/backend_contract.md` §9에 모아 두었다. 37건 중 32건이 닫혔고, 열린 것은 지표 임계값(Q27)·문구 코드 목록(Q34)·세션 타임아웃 분수(Q35)·보조배터리 진단 부하 수단과 문턱값(Q36)뿐이다. Q6(SOH/RUL 산출 주체)은 **모드 2만 확정**이고 모드 1은 보류다. 새로 결정되면 표에서 확정으로 옮기고 본문에 반영한다.

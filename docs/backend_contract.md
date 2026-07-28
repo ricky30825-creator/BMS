@@ -548,7 +548,50 @@ const locked = gated && r !== 'battery';
 ```
 
 - `health` 4개 필드는 v3 화면에 실측 확인했다 — `SOH 92% · RUL ~480 사이클 · 누적 사이클 312 · 내부 저항 18.4 mΩ` `[v3]` `[REQ-WEB-044]`.
-  **산출 주체는 보류다** `[Q6 보류]` — AI 파이프라인 산출물인지 백엔드 집계인지 정하지 않았다. 필드는 계약에 두되, 값이 없으면 `health: null`을 내려주고 프론트는 섹션을 감춘다.
+  **모드 1은 여전히 보류다** `[Q6 보류]` — BQ27441이 사이클과 내부저항을 아는 경로가 있으나, AI 파이프라인 산출물인지 백엔드 집계인지 정하지 않았다. 값이 없으면 `health: null`을 내려주고 프론트는 그 사실을 드러낸다.
+  **모드 2는 2026-07-28에 확정됐다** `[Q6 모드 2 확정]` — 아래 §모드 2 `health` 참조. 산출 주체는 **백엔드**다(§4.13의 진단 결과를 집계한다).
+
+##### 모드 2 `health` — `targetMode: 2`일 때 `[확정 2026-07-28]` `[REQ-WEB-137]`
+
+물리 근거·산식의 정본은 `docs/hardware/mode2_powerbank_diagnosis_spec.md`다.
+
+```json
+"health": {
+  "source": "CAPACITY",
+  "confidence": "HIGH",
+  "measuredAt": "2026-07-28T11:40:00.000Z",
+  "socHintLevel": null,
+  "latestQuickDiagnosisId": "dg_01H...",
+  "latestCapacityDiagnosisId": "dg_01H...",
+  "quick": {
+    "regulationKneeA": 1.6, "kneeIsUpperBound": false,
+    "thermalSlopeCPerMin": 2.4, "specAttainmentPct": 80,
+    "grade": "SUSPECT_DEGRADED"
+  },
+  "capacity": {
+    "deliveredWh": 31.2, "ratedWh": 37.0, "baselineWh": 34.8,
+    "sohRelPct": 89.7, "sohAbsPct": 95.8, "assumedEfficiency": 0.88,
+    "dischargeCurrentA": 1.0, "isBaseline": false, "partial": false
+  },
+  "sohPct": 89.7,
+  "cycleCount": null,
+  "rulCycles": null,
+  "internalResistanceMohm": null
+}
+```
+
+**모드 2에서 세 필드는 `null` 확정이다. 값이 채워지는 경로를 만들지 않는다.**
+
+| 필드 | 왜 `null`인가 |
+|---|---|
+| `internalResistanceMohm` | 셀과 USB 출력 사이에 **부스트 컨버터**가 있어 출력단 `ΔV/ΔI`는 컨버터 출력 임피던스다. 셀 내부저항이 아니다 (스펙 §1) |
+| `cycleCount` | 내부 BMS에 접근할 수 없다. 우리가 아는 건 **우리 장비로 측정한 세션 수**뿐이며 배터리의 생애 사이클이 아니다 — 3년 쓴 보조배터리를 처음 물려도 카운트는 1이다 |
+| `rulCycles` | 사이클을 모르니 사이클 단위 잔존수명도 못 낸다 |
+
+- `sohPct`는 `capacity.sohRelPct`를 그대로 넣는다. 정밀 테스트가 **2회 이상**이어야 값이 생기고 그 전에는 `null`이다.
+- ⚠️ **`sohAbsPct`를 `sohPct`에 넣지 않는다.** 정격 Wh는 셀 기준(3.7V×mAh)이고 측정은 출력단(5V) 기준이라, 부스트 효율 η를 보정하지 않으면 **새 배터리도 SOH 85%로 나온다.** η는 제품마다 달라 가정할 수 없으므로 `sohAbsPct`는 `assumedEfficiency`를 동봉한 **참고값**이며, 신뢰값은 같은 자산의 첫 테스트를 기준선으로 삼은 `sohRelPct`다 (스펙 §4-2).
+- 진단을 한 번도 하지 않았으면 `health: null`. 빠른 진단만 있으면 `capacity: null`, `confidence: "LOW"`, `sohPct: null`.
+- ⚠️ **v3의 `SOH 92% · RUL ~480 사이클 · 누적 사이클 312 · 내부 저항 18.4 mΩ`는 목업 숫자다.** 모드 2에서 이 네 값이 다 채워진 화면은 만들 수 없다. `REQ-WEB-044`를 모드 2에서 구현할 때는 **비어 있는 이유가 드러나야 한다.**
 - `scoreTrend30d`는 일 단위 집계 30건 `[v3: T.scoreTrend30]`.
 - 상세 화면은 `battery_id`의 UUID 앞자리를 **화면에 직접 노출한다**(`battery_id · a7f3c9-…`) `[v3]`. §2의 `id`/`label` 분리가 v3 설계와 일치한다.
 - 상세 화면에는 **V·I·T·SOC 추세 4차트 + 기간 탭(24시간/7일/30일)** 이 함께 있다 `[v3]`. §4.7 `GET /api/trends`를 `batteryIds` 1개로 호출해 재사용한다.
@@ -1298,6 +1341,163 @@ v3 테이블 컬럼: `시간 · 관리자 · 행위 · 대상 · 변경 내용` 
 
 > **`REQ-WEB-135`(감사 로그 상세 확인)는 계약에서 제외한다.** v3에서 행을 클릭해도 아무 반응이 없다(상세 모달 미구현) `[v3 실측]`. 다만 `before`/`after`를 이미 구조화해 내려주므로, 나중에 상세 모달을 만들 때 **서버 변경 없이** 붙일 수 있다.
 
+### 4.13 보조배터리 진단 (F21) `[확정 2026-07-28]`
+
+> 절 번호는 추가 순서다. 이 절은 **일반 사용자 기능**이며 §4.12(관리자)와 무관하다. 기존 절 번호를 흔들지 않기 위해 뒤에 붙였다.
+>
+> 물리 근거·산식·안전 조건의 정본은 `docs/hardware/mode2_powerbank_diagnosis_spec.md`다. 이 절은 그 스펙의 API 표면만 정의한다. **산식을 이 문서에서 다시 정의하지 않는다.**
+
+**모드 2 전용이다.** `targetMode`가 1인 배터리에 호출하면 `409 MODE_NOT_SUPPORTED`.
+
+#### `POST /api/diagnosis/quick` — 빠른 진단 시작 `[REQ-WEB-138]`
+
+```json
+{ "socHintLevel": 3, "acknowledged": true }
+```
+
+- `socHintLevel` — 보조배터리 겉면 잔량 표시 단수(`1`~`4`). 모름은 `null`. 결과 비교 가능성 판정에만 쓴다
+- `acknowledged` — 부하를 걸어 의도적으로 발열시킨다는 안내를 확인했다는 표시. **`true`가 아니면 `400 ACK_REQUIRED`**
+- 응답 `202`: `Diagnosis` 객체(아래), `status: "RUNNING"`
+
+| 거절 | 조건 |
+|---|---|
+| `409 NO_ACTIVE_SESSION` | 활성 세션 없음 (§3.1) |
+| `409 MODE_NOT_SUPPORTED` | 대상 배터리의 `targetMode`가 2가 아님 |
+| `409 DIAGNOSIS_IN_PROGRESS` | 이미 진행 중인 진단이 있음 |
+| `409 DEVICE_OFFLINE` | 진단기 오프라인 |
+| `409 RELAY_CUT` | 릴레이가 차단 상태라 부하 경로가 없음 |
+
+#### `POST /api/diagnosis/capacity` — 정밀 용량 테스트 시작 `[REQ-WEB-139]`
+
+```json
+{ "dischargeCurrentA": 1.0, "fullyChargedConfirmed": true, "acknowledged": true }
+```
+
+- `dischargeCurrentA` — 생략하면 서버 기본값 `1.0`
+- `fullyChargedConfirmed` — **`true`가 아니면 `400 FULL_CHARGE_REQUIRED`.** 시작 SOC가 100%가 아니면 결과는 SOH가 아니다(스펙 §4-1)
+- `acknowledged` — 소요 시간 안내 확인
+- 응답 `202`: `Diagnosis` 객체, `status: "RUNNING"`, `estimatedEndAt`
+- 위 표의 거절 전부 + `409 CAPACITY_NOT_REGISTERED` — 자산에 `capacityWh`/`capacityMah`가 없어 비교할 분모가 없음
+
+#### `GET /api/diagnosis/active` — 진행 상태 `[REQ-WEB-140]`
+
+```json
+{
+  "id": "dg_01H...",
+  "batteryId": "b_01H...", "batteryLabel": "PB-002",
+  "sessionId": "s_01H...",
+  "kind": "QUICK",
+  "status": "RUNNING",
+  "phase": "P3",
+  "loadTargetA": 1.5,
+  "loadActualA": 1.47,
+  "startedAt": "2026-07-28T05:20:00.000Z",
+  "estimatedEndAt": "2026-07-28T05:22:40.000Z",
+  "socHintLevel": 3,
+  "partialMetrics": {
+    "vOpenCircuitV": 5.06,
+    "regulationKneeA": null,
+    "kneeIsUpperBound": null,
+    "thermalSlopeCPerMin": 2.1,
+    "specAttainmentPct": null
+  }
+}
+```
+
+- 진행 중인 진단이 없으면 `200`에 `null`을 준다. `404`가 아니다 — "없음"은 정상 상태다
+- `phase`는 `P0`~`P6` \| `CAPACITY`. `battery-raw-metrics`의 `diag_phase`와 **같은 값**이다(스펙 §6-1)
+- `partialMetrics`는 아직 확정되지 않은 지표를 `null`로 둔다. 중간값을 추정해 채우지 않는다
+
+#### `DELETE /api/diagnosis/active` — 중단 `[REQ-WEB-141]`
+
+- **재인증·사유를 요구하지 않는다.** 중단은 언제나 더 안전한 방향이다. (릴레이 차단·복구는 별개이며 §3.4의 게이트를 그대로 받는다.)
+- 응답 `200`: `Diagnosis` 객체, `status: "ABORTED"`, `abortReason: "USER"`
+- 진행 중인 진단이 없으면 `409 NO_DIAGNOSIS_IN_PROGRESS`
+
+#### `GET /api/batteries/{id}/diagnoses` — 진단 이력 `[REQ-WEB-142]`
+
+§1.5 목록 공통 규약을 따른다. 최신순 고정.
+
+```json
+{
+  "items": [{
+    "id": "dg_01H...", "kind": "CAPACITY", "status": "COMPLETED",
+    "confidence": "HIGH", "measuredAt": "2026-07-28T11:40:00.000Z",
+    "socHintLevel": null,
+    "summary": { "sohRelPct": 89.7, "deliveredWh": 31.2 }
+  }],
+  "page": { "total": 4, "limit": 20, "offset": 0 }
+}
+```
+
+- `summary`는 `kind`에 따라 다르다 — `QUICK`이면 `{ regulationKneeA, thermalSlopeCPerMin, grade }`, `CAPACITY`면 `{ sohRelPct, deliveredWh }`
+
+#### `GET /api/diagnoses/{id}` — 결과 상세 `[REQ-WEB-143]`
+
+`Diagnosis` 객체 전체를 준다. 아래가 완료된 진단의 전체 형태다.
+
+```json
+{
+  "id": "dg_01H...",
+  "batteryId": "b_01H...", "batteryLabel": "PB-002",
+  "sessionId": "s_01H...",
+  "kind": "CAPACITY",
+  "status": "COMPLETED",
+  "confidence": "HIGH",
+  "startedAt": "2026-07-28T05:20:00.000Z",
+  "measuredAt": "2026-07-28T11:40:00.000Z",
+  "socHintLevel": null,
+  "abortReason": null,
+  "quick": null,
+  "capacity": {
+    "deliveredWh": 31.2,
+    "ratedWh": 37.0,
+    "baselineWh": 34.8,
+    "sohRelPct": 89.7,
+    "sohAbsPct": 95.8,
+    "assumedEfficiency": 0.88,
+    "dischargeCurrentA": 1.0,
+    "isBaseline": false,
+    "partial": false
+  }
+}
+```
+
+`kind: "QUICK"`이면 `capacity`가 `null`이고 `quick`이 채워진다.
+
+```json
+"quick": {
+  "vOpenCircuitV": 5.06,
+  "regulationKneeA": 1.6,
+  "kneeIsUpperBound": false,
+  "thermalSlopeCPerMin": 2.4,
+  "specAttainmentPct": 80,
+  "ratedOutputCurrentA": 2.0,
+  "grade": "SUSPECT_DEGRADED"
+}
+```
+
+**enum**
+
+| 필드 | 값 |
+|---|---|
+| `kind` | `QUICK` \| `CAPACITY` |
+| `status` | `RUNNING` \| `COMPLETED` \| `ABORTED` |
+| `confidence` | `LOW`(=`QUICK` 항상) \| `HIGH`(=`CAPACITY` 완료) |
+| `abortReason` | `USER` \| `TEMP_ABSOLUTE` \| `TEMP_SLOPE` \| `GAS` \| `VOLTAGE_COLLAPSE` \| `SESSION_ENDED` \| `RELAY_CUT` \| `DEVICE_OFFLINE` |
+| `grade` | `HEALTHY` \| `CAUTION` \| `SUSPECT_DEGRADED` \| `BASELINE_PENDING` |
+
+⚠️ **`grade`는 §1.7의 이상등급(`NORMAL`/`CAUTION`/`WARNING`/`DANGER`)과 다른 축이다.** 열화는 수명, 이상점수는 열폭주 위험이다. **두 값을 합산하거나 같은 enum으로 취급하지 않는다.** `CAUTION`이 양쪽에 다 있으므로 특히 주의한다.
+
+#### 서버가 반드시 강제할 것
+
+- **§3.3 Fail-Safe 우선순위가 진단보다 위다.** 안전 조건이 걸리면 진단 절차와 무관하게 개입하며, 그때 **부하를 0A로 내린 다음** 릴레이를 차단한다. 순서를 뒤바꾸는 경로를 만들지 않는다
+- **중단·부분 결과를 SOH로 쓰지 않는다.** `partial: true`면 `sohRelPct`·`sohAbsPct`는 `null`이고 `baselineWh` 후보로도 쓰지 않는다
+- **첫 정밀 테스트는 `sohRelPct: null` + `isBaseline: true`.** 기준선 자신을 100%로 내면 "열화 없음"으로 오독된다
+- 세션이 끝나면(`TIMEOUT`/`SUPERSEDED`/`BLOCKED`, §4.3) 진행 중 진단을 `ABORTED`로 닫는다
+- **진단 구간의 이상 알림은 억제하되 Fail-Safe는 억제하지 않는다**(스펙 §6-3)
+- 문구는 만들지 않는다(§1.10). `abortReason`·`grade` 같은 code만 내려주고 문장은 프론트 사전이 조립한다
+
 ---
 
 ## 5. WebSocket 계약
@@ -1343,6 +1543,9 @@ v3 테이블 컬럼: `시간 · 관리자 · 행위 · 대상 · 변경 내용` 
 | `event.created` | 새 이벤트 | `Event` 객체 (§4.6) |
 | `session.ended` | 세션 종료 | `{ sessionId, endReason }` — `TIMEOUT`\|`SUPERSEDED`\|`BLOCKED` (§4.3) |
 | `device.status` | 진단기 상태 변경 | `{ deviceId, status, lastSeenAt }` |
+| `diagnosis.progress` | 진단 단계 전환 시 | `{ id, kind, phase, loadTargetA, loadActualA, estimatedEndAt, partialMetrics }` (§4.13) |
+| `diagnosis.done` | 진단 완료 | `Diagnosis` 객체 (§4.13) |
+| `diagnosis.aborted` | 진단 중단 | `{ id, kind, abortReason }` — 사유 code만, 문구는 프론트 사전 |
 | `pong` | `ping` 응답 | `{}` |
 
 **중요한 설계 지점**
@@ -1352,6 +1555,7 @@ v3 테이블 컬럼: `시간 · 관리자 · 행위 · 대상 · 변경 내용` 
   - `CLAUDE.md`·`PLAN.md`의 100ms와 모순이 아니다: **에지→Kafka→DB 적재는 100ms, 브라우저 푸시는 1초**로 계층이 다르다. `[확정]`
 - **`relay.autoCut`은 별도 타입으로 분리한다.** 프론트가 이 메시지 하나로 자동 차단 모달을 띄운다 `[REQ-WEB-064]`. `relay.changed`에 섞으면 "사용자가 직접 차단한 경우"와 구분이 안 된다.
 - **`anomaly.gradeChanged`도 별도다.** 매 tick마다 등급을 비교하는 대신 서버가 전이만 알려주면, 프론트는 토스트·알림음·모달 트리거를 안전하게 걸 수 있다.
+- **`diagnosis.progress`는 단계 전환에서만 보낸다.** 진단 중 실시간 측정값은 `metrics.tick`이 이미 1초마다 흘리므로 중복 푸시하지 않는다. 다만 `loadActualA`(부하 제어 실측 전류)는 `metrics.tick`에 없는 값이라 여기 싣는다 — `loadTargetA`와의 차이가 부하 제어 오차이며, 크면 결과를 신뢰할 수 없다(스펙 §7-5).
 
 ### 5.5 재연결 규약 `[제안]`
 
@@ -1387,6 +1591,7 @@ v3 테이블 컬럼: `시간 · 관리자 · 행위 · 대상 · 변경 내용` 
 | F18 | 공지사항 관리 | `adminNotice` | `/api/admin/notices/*` |
 | F19 | 감사 로그 | `adminAudit` | `GET /api/admin/audit-logs` |
 | F20 | 이벤트 추이 | `adminEventTrend` | `GET /api/admin/event-trend` |
+| F21 | 보조배터리 진단 | `powerbankDiag` | `POST /api/diagnosis/quick`·`/capacity`, `GET`/`DELETE /api/diagnosis/active`, `GET /api/batteries/{id}/diagnoses`, `GET /api/diagnoses/{id}`, WS `diagnosis.*` (§4.13) |
 
 > **F5 `devices`(디바이스 상태)는 제외되었다.** v3에 섹션과 데이터가 존재하지만 해당 라우트로 전환하는 코드가 0건인 고아 라우트다(browser 검증 완료, `docs/superpowers/specs/2026-07-22-...`). `REQ-WEB-030/031`은 현재 도달 불가 기능이므로 **백엔드 구현 대상에서 뺀다.** 되살릴 경우 `GET /api/devices`가 추가로 필요하다.
 
@@ -1419,14 +1624,15 @@ v3 테이블 컬럼: `시간 · 관리자 · 행위 · 대상 · 변경 내용` 
 
 ## 9. 미결정 항목
 
-**35건 중 31건 확정, 1건 보류, 3건 열림.** 열린 3건은 모두 착수를 막지 않는다.
+**37건 중 32건 확정, 1건 보류, 4건 열림.** 열린 4건 중 착수를 막는 것은 Q36뿐이며, 그것도 F21 회로도 단계에서만 막는다.
 
 | # | 항목 | 상태 |
 |---|---|---|
 | **Q27** | 전압·전류·SOC 지표 배지 임계값 | **열림** — 온도(55/60°C)만 확정. 나머지는 `status: null`이라 대시보드 구현은 진행 가능. 전압은 `chemistry`·`seriesCount`로 셀당 환산 필요 |
 | **Q35** | 세션 타임아웃 임계 N분 | **열림** — 5분 제안. 에지 발행이 100ms이므로 5분 무수신이면 전원 이탈로 본다. 현장 테스트로 확정 |
 | **Q34** | 문구 `code` 전체 목록 | **열림** — §1.10 규약은 확정. 개별 코드는 엔드포인트 구현하며 채운다 |
-| **Q6** | SOH/RUL 산출 주체 | **보류** — 필드는 계약에 두고 `health: null` 허용. 구현 순서상 뒤라 지금 막지 않는다 |
+| **Q36** | F21 부하 수단과 진단 문턱값 | **열림** — 부하 수단(MOSFET 정전류 권장), 발열 기울기 `S1`, 표면온도 중단 문턱, 부스트 효율 η 기본값. `mode2_powerbank_diagnosis_spec.md` §8 H1~H8. **API 계약(§4.13)은 이와 무관하게 확정**이며, 막히는 것은 `hardware/mode2/` 회로도뿐이다 |
+| **Q6** | SOH/RUL 산출 주체 | **모드 2 확정 / 모드 1 보류** — 모드 2는 백엔드가 §4.13 진단 결과를 집계하고 `cycleCount`·`rulCycles`·`internalResistanceMohm`은 `null` 확정(§4.2). 모드 1은 BQ27441 경로가 있으나 산출 주체 미정이라 보류 유지 |
 
 ### 확정된 결정 (31건)
 
