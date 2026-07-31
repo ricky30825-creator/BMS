@@ -1,92 +1,34 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
-
-## 프로젝트 소개
-
-리튬이온 배터리의 전압·전류·온도·SOC 시계열 데이터를 Kafka 파이프라인으로 수집하고, LSTM-AutoEncoder(현재 상태 진단)와 Informer(미래 상태 예측)를 결합한 이중 모델 AI로 열폭주 전조를 조기 탐지하여 React 반응형 웹 대시보드에서 실시간 관제하는 시스템이다. 임계치 차단(사후 대응)이 아니라 정상패턴 학습 기반 이상탐지(사전 예측)가 핵심 차별점이다.
-
-## 문서 작성 기준
-
-- 기능정의서나 화면 흐름을 와이어프레임 HTML에서 추출할 때는 HTML에 명확히 표시된 화면·버튼·입력·탭·필터·모달·카드·상태값을 우선한다.
-- `PLAN.md`와 사용자가 제공한 최신 HTML 와이어프레임이 충돌하면 HTML을 기준으로 `PLAN.md`, `docs/userflow.md`, `docs/admin_userflow.md`, `docs/feature_definition.md`, `docs/admin_feature_definition.md`를 맞춘다.
-- HTML만으로 동작이 불명확한 항목은 추정하지 않고 `정의 필요`로 표시한다.
-
-## 아키텍처
+리튬이온 배터리의 전압·전류·온도·SOC를 100ms로 수집해 Kafka로 흘리고, LSTM-AutoEncoder(현재 진단) + Informer(미래 예측) 이중 모델로 열폭주 전조를 조기 탐지해 React 대시보드에서 관제한다. 임계치 차단(사후)이 아니라 정상패턴 학습 기반 이상탐지(사전)가 핵심 차별점이며, 위험 시 라즈베리파이가 릴레이로 물리 차단한다.
 
 ```
-[Edge]              [AWS EC2 (클라우드 서버)]                 [AI]                    [Web]
-Raspberry Pi        Kafka  → Consumer → PostgreSQL            Google Colab            React
-(센서 수집·          battery-raw-       + TimescaleDB          LSTM-AutoEncoder        대시보드
- Kafka 프로듀서)     metrics            (시계열 하이퍼테이블)    + Informer 이중 모델
-   │                battery-anomaly-                          (학습·실시간 추론,
-   │  TLS/SASL       alerts  ◀───────── 추론결과 발행 ─────────  Score Fusion)
-   └───────────────▶ battery-events            ▲                     │
-                     백엔드(REST/WebSocket)     └ raw-metrics 구독 (TLS)
-                       │
-                       └ WebSocket ─▶ React 대시보드
-                       └ 카카오톡 알림
-
-릴레이/Kill-Switch(물리 차단)와 스피커 음성 안내는 에지(Raspberry Pi)측에서 동작
+[Edge]              [AWS EC2]                          [AI]                 [Web]
+Raspberry Pi        Kafka → Consumer → PostgreSQL      Google Colab         React
+(센서·릴레이·        battery-raw-metrics + TimescaleDB   LSTM-AE + Informer   대시보드
+ 음성안내)          battery-anomaly-alerts ◀── 추론결과 ──  (Score Fusion)
+   │  TLS/SASL      battery-events            └─ raw-metrics 구독 (TLS)
+   └──────────────▶ 백엔드(REST/WebSocket) ─▶ React / 카카오톡
 ```
 
-데이터 흐름: 에지(라즈베리파이)가 Raw 값만 **AWS EC2의 Kafka 브로커에 TLS로 직접 발행** → EC2의 Consumer가 TimescaleDB 적재 → **Google Colab의 AI(LSTM-AutoEncoder + Informer)가 Kafka에서 raw-metrics를 구독·추론 후 두 모델의 점수를 Score Fusion으로 결합해 anomaly-alerts 토픽 발행** → EC2 백엔드가 WebSocket으로 프론트엔드에 푸시. 에지는 보조배터리 연결, 측정 시작/종료, 이상·오류·릴레이 이벤트를 사전 생성된 로컬 음성파일로 안내한다.
+스택: Python(Pi 5, smbus2·w1thermsensor) / Kafka·PostgreSQL+TimescaleDB / Node.js+TypeScript+Express+Better Auth / PyTorch 또는 TensorFlow(Colab) / React 반응형 웹 / Kakao Talk API.
 
-## 레포 구조 (예정)
+## 정본 문서 지도
 
-```
-/
-├── edge/           # Raspberry Pi 센서 수집 (Python)
-│   ├── sensors/    # INA226, BQ27441, DS18B20, MLX90614, ADS1115(가스·압력·음향) 드라이버
-│   ├── modes/      # 측정 모드 선택 및 릴레이 인터락
-│   └── producer/   # Kafka 프로듀서
-├── backend/        # REST API 서버 (Node.js + TypeScript + Express)
-│   ├── auth/       # Better Auth 세션 인증/RBAC
-│   ├── devices/    # 디바이스 관리
-│   ├── consumer/   # Kafka Consumer → TimescaleDB 적재
-│   ├── relay/      # 릴레이/Kill-Switch 제어 API
-│   └── notify/     # 카카오톡 알림 발송
-├── ai/             # LSTM-AutoEncoder + Informer 이중 모델 이상 탐지 서비스 (Python)
-│   ├── train/      # 모델 학습 (LSTM-AutoEncoder, Informer 개별 학습)
-│   ├── inference/  # 실시간 추론 서버 (AE/Informer 점수 계산 + Score Fusion)
-│   └── features/   # 특징 추출·윈도우링
-└── frontend/       # React 반응형 웹 대시보드
-    ├── dashboard/  # 실시간 게이지·요약 카드
-    ├── charts/     # 추세 차트 (전압/온도/전류)
-    ├── events/     # 이벤트 이력·이상 탐지 목록
-    ├── settings/   # 알림 설정
-    └── control/    # 릴레이/Kill-Switch 제어
-```
+여기(CLAUDE.md)에는 **모르면 반드시 틀리는 것**만 적는다. 서술·목록·요구사항은 아래가 정본이다.
 
-## 기술 스택
-
-| 계층 | 기술 |
+| 주제 | 정본 |
 |---|---|
-| 에지 | Python (Raspberry Pi 5), smbus2 (I2C), w1thermsensor (1-Wire), ADS1115 (아날로그 ADC) |
-| 클라우드/인프라 | AWS EC2 (Kafka·PostgreSQL·백엔드 호스팅), TLS/SASL |
-| 스트리밍 | Apache Kafka |
-| DB | PostgreSQL + TimescaleDB (시계열 하이퍼테이블) |
-| 백엔드 | Node.js + TypeScript + Express + Better Auth |
-| AI | PyTorch 또는 TensorFlow (LSTM-AutoEncoder + Informer 이중 모델, Score Fusion) — Google Colab에서 학습·추론 |
-| 프론트엔드 | React (반응형 웹: 데스크톱/태블릿/모바일) |
-| 알림 | Kakao Talk API |
-| 센서 | INA226(V·I·W), BQ27441(SOC — SparkFun Battery Babysitter 탑재), DS18B20(접촉 온도), MLX90614(IR 온도), ADS1115 경유 가스(MQ-2)·압력(FSR 406)·음향 |
-| 하드웨어 | 릴레이 모듈 (GPIO 제어), 스피커 모듈(로컬 음성 안내), 전자부하 테스터(ATORCH BW150), 충방전모듈(SZH-MIN002), PD 트리거(ZY12PDN), 0.96" OLED(SPI) |
+| 요구사항·기능·데이터 모델(`battery_asset`/`measurement_session`) | `PLAN.md` (Manyfast 프로젝트 ID `7241ba62-d21a-4de4-ba45-fe572dd0f4de`) |
+| 기능·유저플로우 (디자인 무관) | `docs/product_contract.md` — 새 디자인 작업의 입력 |
+| REST·WebSocket 인터페이스 | `docs/backend_contract.md` |
+| 관리자 기능·플로우 | `docs/admin_feature_definition.md`, `docs/admin_userflow.md` |
+| 사용자 기능·플로우 | `docs/feature_definition.md`(v3 커밋 `9bb6d8e` 기준), `docs/userflow.md` |
+| 시각 디자인·반응형 3종·토큰 | `design-system/cellguard/MASTER.md`, 목업 `web/cellguard_mockup_v4.html` |
+| 모드 1 회로 / 조립 / 에지 수집 계약 | `hardware/mode1/`(KiCad), `docs/hardware/mode1_beginner_guide.md`, `docs/hardware/mode1_backend_spec.md` |
+| 모드 2 진단 설계 | `docs/hardware/mode2_powerbank_diagnosis_spec.md` |
 
-## 웹 디자인 원칙
-
-- 웹 대시보드는 데스크톱/태블릿/모바일 반응형 웹으로 설계한다.
-- 데스크톱은 좌측 사이드바와 다중 컬럼 관제 화면으로 정보 밀도를 높이고, 태블릿은 접힘 메뉴와 2컬럼 레이아웃을 기본으로 한다.
-- 모바일은 하단 내비게이션과 단일 컬럼 카드 흐름을 사용하며, 긴급 경고·현재 이상점수·알림·Kill-Switch 진입을 우선 노출한다.
-- 표 중심 화면은 모바일에서 카드 목록/상세 화면으로 전환하고, 차트·필터·제어 버튼은 터치 조작 가능한 크기를 유지한다.
-- 실시간 갱신 중 레이아웃 흔들림을 최소화하고, 다크모드·명도 대비·키보드 탐색·스크린리더 라벨을 고려한다.
-
-## 관리자 기능
-
-- 일반 사용자와 별도로 관리자 역할(RBAC)을 둔다.
-- 인증은 Better Auth 세션 쿠키와 서버 세션 검증을 기준으로 구현하며, `/api/auth/*`는 Better Auth 핸들러가 담당한다.
-- 제공 기능: 사용자/계정 조회, 계정 활성/정지, 비밀번호 재설정, 전체 배터리·디바이스 **통합 관제**, 배터리 운영 상태·관리자 메모, 공지사항 관리, **감사 로그**(제어·접근 이력), **시스템 상태 모니터링**(Kafka·Consumer·DB·AI 헬스).
-- 상세 요구사항·기능 목록은 `PLAN.md`, `docs/feature_definition.md`, `docs/admin_feature_definition.md`, `docs/userflow.md`, `docs/admin_userflow.md`를 기준으로 하되, 사용자가 제공한 최신 HTML 와이어프레임과 충돌하면 HTML을 우선한다.
+**충돌 해소 순서**: 회로 > 사용자가 준 최신 와이어프레임 HTML > 계약서 > 나머지 문서. v3 프로토타입과 계약서가 어긋나면 **v3가 틀린 것**이다(v3 수정 목록 25건은 `docs/backend_contract.md` §12). HTML만으로 동작이 불명확하면 추정하지 말고 `정의 필요`로 표시한다.
 
 ## Kafka 토픽 규약
 
@@ -174,21 +116,12 @@ Raspberry Pi        Kafka  → Consumer → PostgreSQL            Google Colab  
 - **방전은 USB-A 출력, 충전은 별도 입력 포트, 션트는 R010(CAL=2560) 확정(2026-07-28).** USB-A라 CC 5.1kΩ 풀다운이 필요 없다(USB-C였으면 없이는 `VBUS`가 0V다). **케이블은 20cm 이내·20AWG 이상** — 28AWG 1m를 쓰면 2A에서 800mV가 떨어져 판정 문턱의 2.7배를 먹고 멀쩡한 배터리가 열화로 나온다. INA226은 브레이크아웃 바로 옆에 두고, 릴레이·BW150으로 가는 긴 배선은 전부 `IN+` 하류에 둔다.
 - **보조배터리는 무부하가 되면 출력을 스스로 끊는다.** 수십 mA 이하가 10~30초 지속되면 절전으로 꺼진다. 그래서 빠른 진단의 P0·P5는 무부하가 아니라 **최소 유지 부하 0.1A**이고, 기준전압은 무부하가 아니라 **경부하 출력전압**(`vLightLoadV`, `vOpenCircuitV`가 아니다)이다. 진짜 무부하로 두면 0V를 읽는다.
 
-## AI 모델 핵심 파라미터
+## 이상점수와 등급
 
-이중 모델 구조 — LSTM-AutoEncoder(현재 상태 진단)와 Informer(미래 상태 예측)가 동일 Sequence 입력을 공유하고, 두 모델의 점수를 Score Fusion(가중합)으로 결합해 최종 이상점수를 산출한다. 2개 측정 모드(외부 셀/보조배터리) 공통 아키텍처다.
+LSTM-AutoEncoder(재구성 오차 = 현재 이상)와 Informer(예측 오차 = 미래 위험)가 **동일 Sequence 입력을 공유**하고, `Final Score = α × AE Score + β × Informer Score`로 결합한다. α·β는 고정값이 아니라 테스트하며 튜닝한다. 2개 측정 모드 공통 아키텍처.
 
-- **모델 구성**:
-  - **LSTM-AutoEncoder** (현재 상태 진단): Encoder → Latent Space → Decoder로 현재 센서 패턴을 복원
-  - **Informer** (미래 상태 예측): Encoder(ProbSparse Attention) → Decoder(Generative Decoder)로 미래 센서 변화 흐름을 예측
-- **전처리**: 정규화 + Sliding Window로 일정 길이의 Sequence 데이터 생성 → 두 모델에 동시 입력
-- **윈도우**: 30 time-steps
-- **특징**: `V_scaled`, `V_delta`, `V_drop`, `I_smooth`, `dT_dt`, `d2T_dt2`, `Wh_cumsum` (전압·전류·온도·SOC 원시값을 전처리해 산출, 두 모델 공통 입력)
-- **AE Score**: 입력값과 LSTM-AutoEncoder 복원값의 차이 = Reconstruction Error(재구성 오차, MSE) 기반 현재 이상점수
-- **Informer Score**: Informer의 미래 예측값과 실제값의 차이 = Prediction Error(예측 오차) 기반 미래 위험점수
-- **Score Fusion(최종 이상점수)**: `Final Score = α × AE Score + β × Informer Score` (가중합, α·β는 고정값이 아니라 테스트하며 튜닝해 결정)
-- **판정**: 최종 이상점수가 기준값 이하면 정상(대시보드 반입 가능 표시), 초과하면 위험(대시보드 경고·사용자 알림 발생), 위험등급이 높으면 Relay Kill-Switch로 전원 차단
-- **상태 등급** (최종 이상점수 Final Score 기준):
+- **윈도우**: 30 time-steps (정규화 + Sliding Window)
+- **특징**: `V_scaled`, `V_delta`, `V_drop`, `I_smooth`, `dT_dt`, `d2T_dt2`, `Wh_cumsum` (두 모델 공통 입력)
 
 | 등급 | 이상점수 범위 | UI 표시값 |
 |---|---|---|
@@ -225,6 +158,7 @@ Raspberry Pi        Kafka  → Consumer → PostgreSQL            Google Colab  
 - **OLED(CN0219)는 SPI다.** 핀이 `GND VCC D0 D1 RES DC CS`인 7핀 버전이라 I2C가 아니다.
 - **FSR 406은 분압저항이 있어야 읽힌다.** 저항성 소자라 고정저항(10kΩ 등) 없이는 ADC로 값이 안 나온다.
 - 라즈베리파이 5에는 3.5mm 오디오 잭이 없다. 음성 안내용 스피커는 USB 또는 I2S DAC로 붙인다.
+- **음성 안내는 실시간 합성 TTS가 아니라 사전 생성된 한국어 MP3/WAV의 로컬 재생이다.** 안내할 이벤트가 늘면 코드가 아니라 음성 파일을 먼저 만들어야 한다. 운영 보조 기능이므로 **릴레이/Kill-Switch 판단에는 영향을 주지 않는다.** 설정 항목(전체 ON/OFF·음량·카테고리 5종)은 `docs/product_contract.md`가 정본.
 
 **미해결 — 조립하면서 지운다**
 
@@ -234,7 +168,7 @@ Raspberry Pi        Kafka  → Consumer → PostgreSQL            Google Colab  
 
 ## 회로도 (모드 1만 존재)
 
-정본은 `hardware/mode1/`(KiCad 프로젝트)이고, 조립은 `docs/hardware/mode1_beginner_guide.md`, 에지 데이터 수집은 `docs/hardware/mode1_backend_spec.md`가 계약서다. **모드 2 회로는 아직 없다** — 설계 스펙(`docs/hardware/mode2_powerbank_diagnosis_spec.md`)은 확정됐으나 부하 수단(§8 H1)이 미정이라 그릴 수 없다.
+**모드 2 회로는 아직 없다** — 설계 스펙은 확정됐으나 부하 수단(§8 H1)이 미정이라 그릴 수 없다.
 
 - **회로도는 생성물이다.** KiCad에서 손으로 고치지 말고 `tools/gen_mode1_sch.py`를 고친 뒤 다시 돌린다. 검증은 `kicad-cli sch erc`(위반 0건) + `sch export netlist`로 네트 연결 확인. `kicad-cli`는 `/Applications/KiCad/KiCad.app/Contents/MacOS/kicad-cli`에 있다(PATH에 없음).
 - **회로도 텍스트에 한글을 넣으려면 `(font (face "Apple SD Gothic Neo") …)`를 명시해야 한다.** 안 붙이면 `kicad-cli` 내보내기에서 한글이 통째로 사라진다. 제목란(`title_block`)은 폰트 지정이 안 먹으므로 ASCII만 쓴다.
@@ -255,21 +189,14 @@ Raspberry Pi        Kafka  → Consumer → PostgreSQL            Google Colab  
 - **ROM 코드는 물리 위치를 알려주지 않는다.** 어느 센서가 셀의 어디에 붙었는지는 조립 시 손으로 하나씩 잡아 확인해 설정 파일에 고정한다. 하드코딩 금지.
 - **모드 1 회로에 MQ-2 가스·음향 센서는 없다** → `gas_raw`, `acoustic_raw`는 `null` 고정이다. **회로가 정본이며**(2026-07-28 확정) 위 센서 표를 여기에 맞춰 고쳤다. 모드 1의 사후 대응 안전계층은 **압력 단독**이다.
 
-## 디바이스 스피커 음성 안내
-
-라즈베리파이에 스피커를 추가해 현장 음성 안내를 제공한다. 음성은 실시간 합성 TTS가 아니라 사전 생성된 한국어 MP3/WAV 파일을 에지에서 로컬 재생한다. 안내 대상은 보조배터리 물리 연결 감지, 웹 측정 세션 시작/종료, 이상 상태, Fail-Safe 차단, 릴레이 상태, 센서·디바이스 오류, 네트워크·서버 상태 이벤트다. 웹 설정은 전체 공통 정책으로 음성 안내 ON/OFF, 음량, 카테고리별 토글(연결/측정, 이상상태, Fail-Safe/릴레이, 센서/디바이스 오류, 네트워크/서버 상태)을 제공한다.
-
-> 음성 안내는 운영 보조 기능이며, 릴레이/Kill-Switch 판단에는 영향을 주지 않는다.
-
 ## 배터리 자산(Battery Asset)과 이력 추적
 
-측정 **장비**(`device_id`, 라즈베리파이)와 측정 **대상**(`battery_id`, 셀/보조배터리)을 분리한다. 보조배터리는 자동 인식이 불가하므로 사용자가 자산으로 등록해두고 재연결 시 목록에서 **수동 선택**해 이전 이력을 잇는다. 배터리에는 `target_mode`가 고정되어 재연결 시 모드 재선택이 불필요하다. 등록 시 배터리 종류(`chemistry`: 리튬이온/리튬폴리머, **필수**)와 직렬 셀 수(`series_count`, 선택)를 함께 받아 전압 임계값 해석·AI 이상탐지 추정의 기준으로 쓴다(임계값은 LSTM-AutoEncoder + Informer 정상패턴 학습으로 추정). `battery_id` 귀속은 에지가 아니라 백엔드 세션 태깅으로 부여한다.
+측정 **장비**(`device_id`, 라즈베리파이)와 측정 **대상**(`battery_id`, 셀/보조배터리)을 분리한다. 보조배터리는 자동 인식이 불가하므로 사용자가 자산으로 등록해두고 재연결 시 목록에서 **수동 선택**해 이전 이력을 잇는다. `battery_id` 귀속은 에지가 아니라 백엔드 세션 태깅으로 부여한다. 데이터 모델·태깅 흐름·엣지 케이스는 `PLAN.md` 참조.
 
-> 웹에서 이 기능의 화면/메뉴 명칭은 **"배터리 자산관리"**다(하위 액션: 새 배터리 등록 / 저장된 배터리 선택, 별도 페이지: 배터리 상세/이력).
-
-> **모드 2 자산은 용량 입력이 필수다**(`capacity_wh` 또는 `capacity_mah`). `soc_pct`와 절대 SOH가 이 값을 분모로 쓴다. 여기에 `rated_output_current_a`(겉면 광고 정격 전류, 선택 — 빠른 진단의 스펙 도달률용)와 `baseline_wh`(시스템 산출 — 첫 정밀 용량 테스트값, 상대 SOH의 분모)가 더해진다(2026-07-28).
-
-> 데이터 모델(`battery_asset`/`measurement_session`)·태깅 흐름·엣지 케이스 상세는 `PLAN.md` 참조.
+- 배터리에 `target_mode`가 고정되어 재연결 시 모드 재선택이 불필요하다.
+- `chemistry`(리튬이온/리튬폴리머)는 **필수** — 전압 임계값 해석과 AI 이상탐지 추정의 기준이다. `series_count`는 선택.
+- **모드 2 자산은 용량 입력이 필수다**(`capacity_wh` 또는 `capacity_mah`). `soc_pct`와 절대 SOH가 이 값을 분모로 쓴다. 여기에 `rated_output_current_a`(겉면 광고 정격 전류, 선택 — 빠른 진단의 스펙 도달률용)와 `baseline_wh`(시스템 산출 — 첫 정밀 용량 테스트값, 상대 SOH의 분모)가 더해진다(2026-07-28).
+- 웹에서 이 기능의 화면/메뉴 명칭은 **"배터리 자산관리"**다(하위 액션: 새 배터리 등록 / 저장된 배터리 선택, 별도 페이지: 배터리 상세/이력).
 
 ## 프로토타입 번들 다루기
 
@@ -281,20 +208,15 @@ Raspberry Pi        Kafka  → Consumer → PostgreSQL            Google Colab  
 - 마크업은 `{{ 바인딩 }}` 자리표시자를 쓰므로 한국어 문자열로 grep하면 안 나온다. **바인딩 이름으로 찾는다.** 어떤 화면이 무엇을 보여주는지 확인할 때 이 방법이 유일하게 신뢰할 수 있다.
 - 브라우저로 확인할 때는 `file://`이 확장에 차단되므로 로컬 HTTP 서버로 띄운다 — `설계 산출물/`에서 `python3 -m http.server 8807 --bind 127.0.0.1`.
 
-## 디자인 무관 제품 계약서
-
-기능·유저플로우의 디자인 무관 정본은 `docs/product_contract.md`다. **새 디자인 작업은 이 문서를 입력으로 삼는다.**
+## 제품 계약서 (디자인 무관)
 
 - 기능 영역 20개(F5는 결번 — `devices`는 도달 불가 고아 라우트), 과업 17개(T0~T16), 게이트·불변 표시로 안전 규칙을 고정한다.
 - **F21(보조배터리 진단)·T16·REQ-WEB-137~143만 v3에 없는 신규분이다**(2026-07-28). 나머지는 v3 실측 기준이므로, v3에 없다고 F21을 지우면 안 된다. 린터의 `EXPECTED_AREAS`·`EXPECTED_REQS`도 여기에 맞춰져 있다.
 - 형태 어휘(모달·카드·버튼·사이드바 등)를 쓰지 않는다. 화면 개수·경계, 정보를 담는 그릇, 목록 탐색 방식, 이동 수단 구조는 전부 자유다.
 - `tools/contract_lint.py`가 어휘·영역·REQ 인용·게이트 표시를 기계 검증한다. 계약서를 고치면 반드시 다시 돌린다.
 - 범위 밖 REQ 5건(030·031·069·071·135)은 본문에서 인용하면 위반이다. 부록 B에서만 언급한다.
-- v3와 계약서가 어긋나면 v3가 틀린 것이다. v3 자체의 수정 목록은 `docs/backend_contract.md` §12에 25건으로 정리돼 있다.
 
 ## 새 디자인 (계약서 기반)
-
-계약서를 입력으로 만든 디자인의 정본은 `design-system/cellguard/MASTER.md`, 목업은 `web/cellguard_mockup_v4.html`(자립형 단일 HTML)이다.
 
 - **제1원칙 — 녹·황·주황·적은 등급 표시 전용이다.** 배경·테두리·기본 버튼 등 크롬에 쓰면 상태 판독이 무너진다. 주요 동작은 파랑(`--primary`), 파괴적 동작은 등급 배지와 같은 화면에서 채움 대신 외곽선.
 - 등급은 언제나 **색 + 도형 + 라벨 + 숫자** 네 겹으로 표시한다. `주의`(#A16207)와 `경고`(#C2410C)가 인접색이라 색만으로는 구분되지 않는다. 목업의 `badge()` 함수 하나가 이 네 겹을 만든다 — 등급을 직접 그리지 말고 이 함수를 쓴다.
@@ -302,13 +224,9 @@ Raspberry Pi        Kafka  → Consumer → PostgreSQL            Google Colab  
 - 목업 확인은 로컬 HTTP 서버로 — `web/`에서 `python3 -m http.server 8811 --bind 127.0.0.1`.
 - `search.py --design-system`의 자동 매칭은 이 제품에서 신뢰할 수 없다. 배경·CTA에 상태색을, 타이포에 Cinzel(럭셔리용)을 배정했다. 개별 도메인 조회(`--domain style/color/product`)로 `Data-Dense Dashboard`·`Real-Time Monitoring`·`Status Page`를 직접 골라야 맞는다. `--persist --force`는 손으로 고친 MASTER.md를 덮어쓴다.
 
-## 요구사항 추적
-
-상세 요구사항·기능·스펙은 `PLAN.md` 참조. Manyfast 프로젝트 ID: `7241ba62-d21a-4de4-ba45-fe572dd0f4de`
-
 ## API 계약
 
-프론트↔백엔드 인터페이스(REST·WebSocket)의 정본은 `docs/backend_contract.md`다. 엔드포인트·페이로드·에러코드·enum을 여기서 확정하며, 아래 규약은 반드시 지킨다.
+정본은 `docs/backend_contract.md`. 아래 규약은 반드시 지킨다.
 
 - **이상점수는 API에서 0.0–1.0 실수로 주고받는다.** v3 프로토타입 UI의 0–100 정수는 표시용이며, 프론트가 `round(score*100)`으로 변환한다.
 - **등급 임계치는 시스템 고정값(0.3/0.6/0.8)이다.** 임계치 설정 기능은 제거되었으니 `/api/settings/thresholds` 같은 엔드포인트를 만들지 않는다. 그래도 응답에 `grade`를 서버가 계산해 동봉한다 — 판정 로직을 한 곳에만 두기 위해서다.
@@ -316,11 +234,11 @@ Raspberry Pi        Kafka  → Consumer → PostgreSQL            Google Colab  
 - **배터리 미연결 게이트**: 연결된 배터리가 없는 일반 사용자는 `배터리 자산관리`를 제외한 8개 메뉴가 전부 잠긴다(v3 실측). 서버도 `409 NO_ACTIVE_SESSION`으로 재검증한다.
 - `devices`(디바이스 상태) 라우트는 v3에 마크업만 있고 전환 코드가 없는 고아 라우트다. `REQ-WEB-030/031`은 구현 대상이 아니다.
 - **셀 단위 데이터는 전부 범위 밖이다.** 히트맵도, 이벤트·알림의 `cellIndex`도 만들지 않는다. 프론트에 노출하는 온도는 `temp_contact`·`temp_ir_surface` 두 값뿐이며, 이벤트명에서 `· 셀 N`을 뺀다. (에지가 함께 싣는 `temp_points`는 **셀 1개 표면의 여러 지점**이라 여기서 말하는 '셀 단위'가 아니다 — AI 특징용이고 프론트에 노출하지 않는다.)
-- **기능정의서(`docs/feature_definition.md`)는 v3 기준(커밋 `9bb6d8e`)이며 점수 스케일·4등급·게이지 범례 버그를 이미 담고 있다.** 다만 일부 기능의 **화면 위치**가 v3와 어긋난다: REQ-WEB-026(최근 이벤트)은 대시보드가 아니라 이상 탐지 화면, REQ-WEB-051(정렬)은 이벤트가 아니라 배터리 관리 화면, REQ-WEB-054/055(CSV·PDF)는 이벤트가 아니라 추세 화면, REQ-WEB-037의 제조사/모델 입력은 등록 폼에 없음. 충돌 시 v3 HTML이 우선한다.
-
+- **인증은 Better Auth 세션 쿠키 + 서버 세션 검증이다.** `/api/auth/*`는 우리가 만들지 말고 Better Auth 핸들러에 넘긴다. 관리자는 RBAC로 분리한다.
 - **서버는 사용자에게 보일 문구를 만들지 않는다.** 한/영 토글이 있으므로 code+params만 내려주고 문장은 프론트 사전이 조립한다. 예외는 사용자가 입력한 자유 텍스트(공지 본문, 메모, 제어 사유)뿐이다.
 - **계정 제재와 안전 감시는 분리한다.** 계정을 정지해도 측정 세션·데이터 적재·Fail-Safe는 계속 돈다(웹 로그인만 차단). 배터리 `BLOCKED`만 세션을 끊고, 그것도 릴레이는 건드리지 않는다.
 - **릴레이 자동 복구는 없다.** 한 번 차단되면 재인증·사유 입력으로 수동 복구만 가능하다.
 - 사용자당 진단기는 **1대 고정**이다. `deviceId`를 API로 받지 않고 서버가 자동 선택한다.
+- **기능정의서의 화면 위치는 v3와 어긋난 게 있다.** REQ-WEB-026(최근 이벤트)은 대시보드가 아니라 이상 탐지 화면, REQ-WEB-051(정렬)은 이벤트가 아니라 배터리 관리 화면, REQ-WEB-054/055(CSV·PDF)는 이벤트가 아니라 추세 화면, REQ-WEB-037의 제조사/모델 입력은 등록 폼에 없음. 충돌 시 v3 HTML이 우선한다.
 
-미결정 항목은 `docs/backend_contract.md` §9에 모아 두었다. 37건 중 32건이 닫혔고, 열린 것은 지표 임계값(Q27)·문구 코드 목록(Q34)·세션 타임아웃 분수(Q35)·보조배터리 진단 부하 수단과 문턱값(Q36)뿐이다. Q6(SOH/RUL 산출 주체)은 **모드 2만 확정**이고 모드 1은 보류다. 새로 결정되면 표에서 확정으로 옮기고 본문에 반영한다.
+> 미결정 항목은 `docs/backend_contract.md` §9. 37건 중 32건이 닫혔고, 열린 것은 지표 임계값(Q27)·문구 코드 목록(Q34)·세션 타임아웃 분수(Q35)·보조배터리 진단 부하 수단과 문턱값(Q36)뿐이다. Q6(SOH/RUL 산출 주체)은 **모드 2만 확정**이고 모드 1은 보류다.
