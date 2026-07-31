@@ -137,7 +137,10 @@ SYMBOLS: dict[str, Sym] = {
     ),
     "BABYSITTER": Sym(
         "BABYSITTER", "U", "Battery Babysitter [PRT-13777]",
-        "BQ24075 충전기 + BQ27441 퓨얼게이지(SOC), I2C 0x55",
+        "BQ24075 충전기 + BQ27441 퓨얼게이지(SOC), I2C 0x55. "
+        "핀 이름은 회로도 규약이며 보드 실크스크린과 다르다 -- "
+        "VIN/GND_IN=VIN +/-, SYS+/SYS-=VOUT +/-, BAT+/BAT-=JST +/-. "
+        "GND/GND_IN/SYS-는 보드 안에서 같은 GND 네트",
         left=P("1:VIN 2:GND_IN"),
         right=P("3:BAT+ 4:BAT- 5:SYS+ 6:SYS- 7:SDA 8:SCL 9:GPOUT 10:GND"),
         width=45.72,
@@ -336,9 +339,16 @@ _COLUMNS: list[tuple[float, list[tuple[str, str]]]] = [
         ("", "3. INA226 보드의 션트 저항값을 실크스크린에서 읽었는가."),
         ("", "   R100=0.1ohm / R010=0.01ohm / R002=0.002ohm -> Calibration 레지스터 값이 달라진다."),
         ("", "   전류 측정 상한은 션트가 아니라 16비트 Current 레지스터가 정한다 -> 기본 설정에서 3.28A."),
-        ("", "4. 셀 -(음극)를 시스템 GND에 직접 연결하지 마라."),
-        ("", "   CELL_N은 Babysitter BAT- 하나에만 간다. BQ27441의 20mohm 센스 저항이"),
-        ("", "   BAT-와 GND 사이에 있어서, 직결하면 이 저항이 단락되고 SOC가 안 나온다."),
+        ("", "4. 셀 -(음극)는 Babysitter BAT-(보드의 배터리 - 단자) 한 점에만 문다."),
+        ("", "   이유는 SOC가 아니라 스타 그라운드다. 방전 2A가 신호 GND 레일을 지나면"),
+        ("", "   전압 강하만큼 모든 센서의 기준점이 흔들린다."),
+        ("", "   [주의] 공식 회로도 v10 확인: 배터리 -는 보드 GND에 직결이고, BQ27441"),
+        ("", "   센스 저항 R11(10mohm)은 배터리 + 쪽 하이사이드(BATTERY_IN<->V_BATT)다."),
+        ("", "   따라서 CELL_N <-> GND 도통은 정상이며 SOC와 무관하다."),
+        ("", "5. Babysitter 온보드 스위치 2개를 맞춰라."),
+        ("", "   S1 슬라이드 = SYSOFF (active-high, HIGH=OFF). OFF면 SYS+ 출력이 0이다."),
+        ("", "   S2 DIP = EN1/EN2 (10k로 OUT 풀업). 출고 기본 1,1 = Standby = 충전 안 함."),
+        ("", "   우리 설정: EN2=1, EN1=0 (DIP 1만 ON). I_CHG=890/590=1.5A, I_INMAX=1650/1100=1.5A."),
         ("", ""),
         ("h2", "[!] 릴레이는 active-LOW다"),
         ("", "GPIO=0 -> 접점 붙음(도통) / GPIO=1 -> 접점 떨어짐(차단)."),

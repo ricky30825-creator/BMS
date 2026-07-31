@@ -89,7 +89,7 @@
 		(property "Value" "Battery Babysitter [PRT-13777]" (at -22.86 24.13 0) (effects (font (face "Apple SD Gothic Neo") (size 1.27 1.27)) (justify left bottom)))
 		(property "Footprint" "" (at 0 0 0) (effects (font (face "Apple SD Gothic Neo") (size 1.27 1.27)) (hide yes)))
 		(property "Datasheet" "" (at 0 0 0) (effects (font (face "Apple SD Gothic Neo") (size 1.27 1.27)) (hide yes)))
-		(property "Description" "BQ24075 충전기 + BQ27441 퓨얼게이지(SOC), I2C 0x55" (at 0 0 0) (effects (font (face "Apple SD Gothic Neo") (size 1.27 1.27)) (hide yes)))
+		(property "Description" "BQ24075 충전기 + BQ27441 퓨얼게이지(SOC), I2C 0x55. 핀 이름은 회로도 규약이며 보드 실크스크린과 다르다 -- VIN/GND_IN=VIN +/-, SYS+/SYS-=VOUT +/-, BAT+/BAT-=JST +/-. GND/GND_IN/SYS-는 보드 안에서 같은 GND 네트" (at 0 0 0) (effects (font (face "Apple SD Gothic Neo") (size 1.27 1.27)) (hide yes)))
 		(symbol "BABYSITTER_0_1"
 			(rectangle (start -22.86 22.86) (end 22.86 -22.86)
 				(stroke (width 0.254) (type default))
