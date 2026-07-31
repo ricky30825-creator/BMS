@@ -331,7 +331,7 @@ INA226 칩 옆의 **굵고 납작한 저항**에 인쇄된 글자를 읽는다.
 
 **확인**: 나중에 STEP 17에서 `40`으로 나타난다. 지금은 눈으로만 확인한다.
 
-## STEP 3. U2 Babysitter — 신호부만
+## STEP 3. U2 Babysitter — 신호부만ㄹ
 
 **전력 핀(`VIN`·`SYS+`·`BAT+`·`BAT−`)은 아직이다.** `VIN`·`SYS+`는 STEP 13, `BAT+`는 STEP 14, `BAT−`는 STEP 23다.
 
@@ -625,9 +625,9 @@ sudo i2cdetect -y 1
    python3 - <<'EOF'
    from smbus2 import SMBus, i2c_msg
    import time
-
+   
    OLD, NEW, CMD = 0x5A, 0x5B, 0x2E     # CMD = EEPROM 0x0E + 0x20
-
+   
    def crc8(data):                       # SMBus PEC: CRC-8, 다항식 X^8+X^2+X^1+1
        crc = 0
        for b in data:
@@ -635,11 +635,11 @@ sudo i2cdetect -y 1
            for _ in range(8):
                crc = ((crc << 1) ^ 0x07) & 0xFF if crc & 0x80 else (crc << 1) & 0xFF
        return crc
-
+   
    def write_eeprom(bus, addr, cmd, value):
        body = [cmd, value & 0xFF, (value >> 8) & 0xFF]
        bus.i2c_rdwr(i2c_msg.write(addr, body + [crc8([addr << 1] + body)]))
-
+   
    with SMBus(1) as bus:
        print("현재:", hex(bus.read_word_data(OLD, CMD) & 0xFF))
        write_eeprom(bus, OLD, CMD, 0x0000)   # 지우기
@@ -680,12 +680,12 @@ sudo i2cdetect -y 1
    python3 - <<'EOF'
    from smbus2 import SMBus, i2c_msg
    import time
-
+   
    CMD   = 0x25            # ConfigRegister1 = EEPROM 0x05 + 0x20
    ADDRS = (0x5A, 0x5B)
    MASK  = 0x0707          # FIR = 비트 10..8, IIR = 비트 2..0
    WANT  = 0x0704          # FIR=111(1024탭), IIR=100(감쇠 없음)
-
+   
    def crc8(data):
        crc = 0
        for b in data:
@@ -693,11 +693,11 @@ sudo i2cdetect -y 1
            for _ in range(8):
                crc = ((crc << 1) ^ 0x07) & 0xFF if crc & 0x80 else (crc << 1) & 0xFF
        return crc
-
+   
    def write_eeprom(bus, addr, cmd, value):
        body = [cmd, value & 0xFF, (value >> 8) & 0xFF]
        bus.i2c_rdwr(i2c_msg.write(addr, body + [crc8([addr << 1] + body)]))
-
+   
    with SMBus(1) as bus:
        for addr in ADDRS:
            cur = bus.read_word_data(addr, CMD)          # ← 반드시 읽고 시작한다
