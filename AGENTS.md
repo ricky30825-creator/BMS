@@ -30,6 +30,8 @@ Raspberry Pi가 배터리 전압·전류·온도·SOC 시계열을 Kafka로 보�
 | 모드 2 보조배터리 진단 | [`docs/hardware/mode2_powerbank_diagnosis_spec.md`](docs/hardware/mode2_powerbank_diagnosis_spec.md) |
 | 시각 디자인·반응형·디자인 토큰 | [`design-system/cellguard/MASTER.md`](design-system/cellguard/MASTER.md), [`web/cellguard_mockup_v4.html`](web/cellguard_mockup_v4.html) |
 | 백엔드 구현 진입점 | [`backend/README.md`](backend/README.md), [`docs/backend_contract.md`](docs/backend_contract.md) |
+| 실제 구현 상태·미착수 영역 | [`docs/implementation_status.md`](docs/implementation_status.md) |
+| 작업별 검증·테스트·중단 조건 | [`docs/verification_matrix.md`](docs/verification_matrix.md) |
 | Claude 작업 규칙·정본 문서 지도 | [`CLAUDE.md`](CLAUDE.md) |
 
 특정 기능의 과거 작업 계획·컴포넌트 레시피가 필요할 때만 [`docs/superpowers/`](docs/superpowers/)에서 해당 문서를 찾아 읽는다. 모든 Markdown 파일을 이 파일에 복제하거나 상시 로드하지 않는다.
