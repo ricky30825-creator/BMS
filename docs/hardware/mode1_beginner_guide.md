@@ -5,6 +5,59 @@
 - 회로도: `hardware/mode1/cellguard_mode1.kicad_pro` (KiCad로 열기) 또는 `hardware/mode1/cellguard_mode1.svg` (브라우저로 열기)
 - 백엔드 개발자용 문서: `docs/hardware/mode1_backend_spec.md`
 
+## 한눈에 보기 — 전체 회로 파이프라인
+
+**이 회로는 세 갈래가 전부다 — 전기가 흐르는 길 / 값을 읽는 길 / 끊는 길.** 괄호 안 숫자는 그 연결을 실제로 만드는 STEP 번호이므로, 조립 중 막혔을 때 그림에서 바로 해당 STEP으로 갈 수 있다.
+
+```
+■ 전기가 흐르는 길 ─ 0.75SQ 굵은 선. 배터리 경로는 전부 릴레이 NO(평소 열림) 접점을
+                    지나므로, 전원이 끊기면 셀이 저절로 분리된다 (fail-safe).
+
+  USB-C 어댑터 5V 3A+
+       │
+  [J2 ZY12PDN] ──V5_PD──▶ K1 CH1 ──VIN─▶ [U2 Babysitter] ──SYS+──▶ K1 CH2 ──▶ [J3 BW150]
+                (11)      충전 (11)      (13)                      방전 (15)  부하 (15)
+                                        BQ24075 : 5V를 4.2V로 낮춰 셀에 넣는다
+                                        BQ27441 : SOC 측정 ──▶ I2C 0x55
+                                                │ BAT+ (14)
+                                                ▼
+                                       K1 CH3 마스터 (14)  ◀── 열면 셀이 떨어져 나간다
+                                                │
+                                        [U1 INA226] 션트 ──▶ I2C 0x40   ← 전류를 재는 곳
+                                                │ CELL_P = IN− 와 VBUS 한 점 (23)
+                                           ┌────┴────┐
+                                           │ BT1 셀  │ (26)
+                                           └────┬────┘
+                                          CELL_N│──▶ Babysitter BAT− 한 점에만 (23)
+
+  충전 = CH1·CH3 닫힘 / 방전 = CH2·CH3 닫힘 (INA226 전류 부호가 뒤집힌다).
+  CH1·CH2 동시 닫힘 금지, 전환 시 50ms 이상 대기. CH3을 열면 셀이 회로에서 떨어져
+  0x55(SOC)가 사라지는데 이건 고장이 아니다 — 부록 A "차단됨".
+
+■ 값을 읽는 길 ─ 가는 점퍼선. 전부 라즈베리파이 5(J1)로 모인다.
+
+  [U1 INA226]   0x40  전압·전류·전력            ┐
+  [U2 BQ27441]  0x55  SOC (Babysitter 안)       │  I2C
+  [U3 MLX90614] 0x5A  IR — 셀 중앙 조준         ├──────▶ Pi 핀 3 SDA · 핀 5 SCL
+  [U9 MLX90614] 0x5B  IR — 단자쪽 조준          │        (2·3·4·5·18)
+  [U4 ADS1115]  0x48  ◀─A0─ [RV1 FSR406]+R1 (6) ┘
+
+  [U5·U7·U8 DS18B20 ×3] 접촉온도 ── 1-Wire ──▶ Pi 핀 7 GPIO4 + R2 4.7kΩ  (7)
+
+  Pi ── SPI (핀 19·23·22·24·18) ──▶ [U6 OLED] 현장 표시                  (8)
+
+■ 끊는 길 ─ 라즈베리파이가 릴레이를 움직인다. active-LOW : 0 = 붙음, 1 = 떨어짐.
+
+  Pi GPIO5  ──▶ K1 IN1 ─▶ CH1 충전   ┐
+     GPIO6  ──▶ K1 IN2 ─▶ CH2 방전   │ 네 GPIO는 R3~R6(10kΩ)로 3.3V에 묶어 둔다.
+     GPIO13 ──▶ K1 IN3 ─▶ CH3 마스터 │ 부팅하는 순간 릴레이가 멋대로 붙는 것을
+     GPIO19 ──▶ K1 IN4 ─▶ CH4 예비   ┘ 막는 풀업이다.                       (9)
+
+  Pi 핀 2 (5V) ──▶ K1 JD-VCC 릴레이 코일 전원 (VCC–JD-VCC 점퍼는 뽑는다, §2-②) (12)
+```
+
+> **셀(BT1)은 29개 STEP 중 STEP 26에 들어간다.** 위 그림에서 셀에 닿는 두 선(`CELL_P`·`CELL_N`, STEP 23)이 마지막 전력 배선인 것도 그래서다. 그 전까지 회로에는 배터리가 아예 없다.
+
 ## 이 문서를 쓰는 법
 
 **§0 → §1 → §2 → §3으로 준비를 마치고, §4부터 STEP 번호대로 손을 움직인다.** 설명은 전부 뒤쪽 부록으로 뺐다. 왜 그렇게 하는지 궁금할 때만 부록을 열면 된다.
@@ -331,7 +384,7 @@ INA226 칩 옆의 **굵고 납작한 저항**에 인쇄된 글자를 읽는다.
 
 **확인**: 나중에 STEP 17에서 `40`으로 나타난다. 지금은 눈으로만 확인한다.
 
-## STEP 3. U2 Babysitter — 신호부만ㄹ
+## STEP 3. U2 Babysitter — 신호부만
 
 **전력 핀(`VIN`·`SYS+`·`BAT+`·`BAT−`)은 아직이다.** `VIN`·`SYS+`는 STEP 13, `BAT+`는 STEP 14, `BAT−`는 STEP 23다.
 
@@ -625,9 +678,9 @@ sudo i2cdetect -y 1
    python3 - <<'EOF'
    from smbus2 import SMBus, i2c_msg
    import time
-   
+
    OLD, NEW, CMD = 0x5A, 0x5B, 0x2E     # CMD = EEPROM 0x0E + 0x20
-   
+
    def crc8(data):                       # SMBus PEC: CRC-8, 다항식 X^8+X^2+X^1+1
        crc = 0
        for b in data:
@@ -635,11 +688,11 @@ sudo i2cdetect -y 1
            for _ in range(8):
                crc = ((crc << 1) ^ 0x07) & 0xFF if crc & 0x80 else (crc << 1) & 0xFF
        return crc
-   
+
    def write_eeprom(bus, addr, cmd, value):
        body = [cmd, value & 0xFF, (value >> 8) & 0xFF]
        bus.i2c_rdwr(i2c_msg.write(addr, body + [crc8([addr << 1] + body)]))
-   
+
    with SMBus(1) as bus:
        print("현재:", hex(bus.read_word_data(OLD, CMD) & 0xFF))
        write_eeprom(bus, OLD, CMD, 0x0000)   # 지우기
@@ -680,12 +733,12 @@ sudo i2cdetect -y 1
    python3 - <<'EOF'
    from smbus2 import SMBus, i2c_msg
    import time
-   
+
    CMD   = 0x25            # ConfigRegister1 = EEPROM 0x05 + 0x20
    ADDRS = (0x5A, 0x5B)
    MASK  = 0x0707          # FIR = 비트 10..8, IIR = 비트 2..0
    WANT  = 0x0704          # FIR=111(1024탭), IIR=100(감쇠 없음)
-   
+
    def crc8(data):
        crc = 0
        for b in data:
@@ -693,11 +746,11 @@ sudo i2cdetect -y 1
            for _ in range(8):
                crc = ((crc << 1) ^ 0x07) & 0xFF if crc & 0x80 else (crc << 1) & 0xFF
        return crc
-   
+
    def write_eeprom(bus, addr, cmd, value):
        body = [cmd, value & 0xFF, (value >> 8) & 0xFF]
        bus.i2c_rdwr(i2c_msg.write(addr, body + [crc8([addr << 1] + body)]))
-   
+
    with SMBus(1) as bus:
        for addr in ADDRS:
            cur = bus.read_word_data(addr, CMD)          # ← 반드시 읽고 시작한다
