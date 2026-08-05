@@ -6,7 +6,7 @@
 > 관리자 전용 흐름은 `docs/admin_userflow.md`에서 별도로 관리한다.
 
 - **기준 문서**: `PLAN.md`, `docs/feature_definition.md`
-- **HTML 프로토타입 반영**: `web/AI_배터리_열폭주_관제_시스템_v2.html` 기준 일반 사용자 기능정의서는 `docs/feature_definition.md`
+- **HTML 프로토타입 반영**: `설계 산출물/셀가드 프로토타입_v3.html` 기준 일반 사용자 기능정의서는 `docs/feature_definition.md`
 - **참조 기능**: `docs/feature_definition.md`의 `REQ-WEB-001~072`
 - **섹션**: 인증/계정 · 디바이스/배터리 · 실시간 관제 · 이상 분석 · 알림/릴레이 · 추세/이벤트 · 공지사항 · 설정
 - **반응형 기준**: 데스크톱 사이드바 · 태블릿 접힘 메뉴 · 모바일 하단 내비게이션
@@ -239,7 +239,7 @@
 
 ## S9. 보조배터리 진단
 
-> 신설 2026-07-28. v3 프로토타입에 없다. 정본은 `docs/product_contract.md` F21·T16과 `docs/hardware/mode2_powerbank_diagnosis_spec.md`다.
+> 신설 2026-07-28, v3 화면 반영 2026-08-06. 정본은 `docs/product_contract.md` F21·T16과 `docs/hardware/mode2_powerbank_diagnosis_spec.md`다. 기본 프로필에서는 실행이 잠기며 미지원값을 `—`로 표시한다.
 >
 > **측정 모드 2 전용이다.** 모드 1 배터리가 연결된 상태에서는 이 섹션에 들어가지 않는다.
 

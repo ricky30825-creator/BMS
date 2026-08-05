@@ -6,13 +6,13 @@
 
 | 항목 | 값 |
 |---|---|
-| 작성일 / 최종 검증일 | 2026-08-05 |
+| 작성일 / 최종 검증일 | 2026-08-06 |
 | 근거 기준 | `설계 산출물/셀가드 프로토타입_v3.html`, `docs/feature_definition.md`(REQ-WEB-001~073, 069 결번), `docs/admin_feature_definition.md`(REQ-WEB-101~136), `PLAN.md` |
-| 검증 방법 | v3 번들 소스 복원·정적 대조 + 로컬 HTTP 실행 + **Codex 인앱 브라우저 직접 입력·선택·모달·화면 전환 검증**(2026-08-05) |
-| 검증 대상 SHA-256 | `d834f84af1c0a04b6f35554ed62bae5fa7a48bfa5814a4f72ba3510d40ba7011` (`설계 산출물/셀가드 프로토타입_v3.html`) |
-| 대상 화면 | 19개 영역 (공개 3 · 일반 사용자 10 · 관리자 6) |
+| 검증 방법 | v3 번들 소스 복원·정적 대조 + 로컬 HTTP 실행 + **Codex 인앱 브라우저 직접 입력·선택·모달·화면 전환 검증**(2026-08-06) |
+| 검증 대상 SHA-256 | `a9966a960ca275e066ddc435b62a1c121b08b465f53828b43989169ece5d0415` (`설계 산출물/셀가드 프로토타입_v3.html`) |
+| 대상 화면 | 20개 영역 (공개 3 · 일반 사용자 11 · 관리자 6) |
 
-> **관련 문서**: `docs/product_contract.md`(디자인 무관 제품 계약서)가 같은 v3를 근거로 **과업 플로우 T0~T15**를 기술한다. 이 문서는 그 플로우를 지탱하는 **API 인터페이스**를 정의한다. 둘이 충돌하면 화면·플로우는 `product_contract.md`, 요청/응답 스키마는 이 문서가 우선한다.
+> **관련 문서**: `docs/product_contract.md`(디자인 무관 제품 계약서)가 같은 v3를 근거로 **과업 플로우 T0~T16**을 기술한다. 이 문서는 그 플로우를 지탱하는 **API 인터페이스**를 정의한다. 둘이 충돌하면 화면·플로우는 `product_contract.md`, 요청/응답 스키마는 이 문서가 우선한다.
 
 > **기능정의서와의 관계**: 2026-08-05 검증에서 모드·필드·동기화·Raw CSV·릴레이 승인 규칙을 연관 정본과 함께 갱신했다. 남은 의도적 제외·미구현은 §11~12에만 기록한다.
 
@@ -96,7 +96,7 @@ Better Auth 세션 쿠키 기반. `[PLAN]`
 | 409 | `BATTERY_BLOCKED` | `POST /api/sessions` — 대상 배터리 운영 상태가 `BLOCKED` (§4.12) |
 | 409 | `DEVICE_OFFLINE` | `POST /api/sessions`, `POST /api/relay/*` — 대상 진단기 오프라인 |
 | 409 | `NOTICE_NOT_DELETABLE` | `DELETE /api/admin/notices/{id}` — `DRAFT`가 아닌 공지 삭제 시도 |
-| 422 | `REASON_REQUIRED` | `/relay/cut`·`/restore`, `/users/{id}/suspend`·`/restore`, `/batteries/{id}/ops-status`(BLOCKED 전환 시) |
+| 422 | `REASON_REQUIRED` | `/relay/cut`·`/restore`, `/users/{id}/suspend`·`/restore`, `/batteries/{id}/ops-status`(모든 실제 상태 전환) |
 | 429 | `RATE_LIMITED` | 인증 계열(`/api/auth/*`, `/api/me/password`)과 내보내기(`/api/trends/export`). `Retry-After` 헤더 동반 |
 | 500 | `INTERNAL_ERROR` | 그 외 |
 
@@ -390,7 +390,7 @@ const locked = gated && r !== 'battery';
 | `USER_SUSPEND` / `USER_RESTORE` | user | ✅ `[REQ-WEB-117]` |
 | `USER_UPDATE` | user | — |
 | `USER_PASSWORD_RESET_SENT` | user | — 재설정 **링크 발송** `[REQ-WEB-116]` |
-| `BATTERY_OPS_STATUS_CHANGE` | battery | `BLOCKED`로 변경 시 ✅ `[REQ-WEB-125]` |
+| `BATTERY_OPS_STATUS_CHANGE` | battery | 모든 실제 상태 전환 시 ✅ `[REQ-WEB-125]` |
 | `BATTERY_MEMO_UPDATE` | battery | — `[REQ-WEB-124]` |
 | `NOTICE_PUBLISH` / `NOTICE_UPDATE` / `NOTICE_ARCHIVE` / `NOTICE_DELETE` | notice | — |
 | `ADMIN_ACCESS_DENIED` | route | 시스템 자동 |
@@ -1312,13 +1312,14 @@ v3 실측 구성: KPI 카드 4개 → 이벤트 추이 차트 + 배터리 상태
 - **`location`(설치 위치)은 삭제한다** `[확정]`. `PLAN.md`의 `battery_asset`에도, 등록/수정 폼에도 없어 **저장할 방법 자체가 없다.** v3 코드에 값이 있지만 렌더링되지 않는다 `[v3]`. 필요해지면 그때 등록 폼과 함께 추가한다.
 - **`device`(연결 진단기)는 유지한다** — Q7에서 사용자당 진단기 1대로 확정됐으므로, 계정에 묶인 진단기를 서버가 역참조해 채운다. 활성 세션이 없으면 `null`.
 
-> **v3 상세 모달은 조회 전용이다** `[v3 실측]`. 실제로 열어보면 `이상점수 / 온도 / 전압 / SOC` 4칸과 `운영 로그` 목록, 그리고 `닫기` 버튼뿐이다. **운영 상태를 바꾸는 UI도, 관리자 메모를 입력하는 UI도 없다.** 코드에 정의된 `info[]`(직렬 구성·설치 위치·연결 진단기·관리자 메모)조차 렌더링되지 않는다.
-> 그럼에도 `REQ-WEB-123/124/125`는 **계약에 포함하기로 결정했다** — 감사 로그에 이미 `배터리 상태 변경 · NORMAL → BLOCKED` 기록이 존재하므로 기획상 있어야 하는 기능이다. **프론트가 상세 모달에 입력 UI를 추가해야 한다.**
+> **v3 동기화 상태(2026-08-06):** 상세에 직렬 구성·연결 진단기, native 운영 상태 선택·사유 입력, 별도 관리자 메모 입력과 각각의 저장 동작을 추가했다. 폐기된 설치 위치는 렌더링하지 않는다.
 
 **운영 상태 변경** — `{ "opsStatus": "BLOCKED", "reason": "열폭주 징후" }`
-`BLOCKED`로 변경 시 `reason` **필수** `[REQ-WEB-125]`, 감사 기록 `[REQ-WEB-126]`.
+현재 값과 다른 `NORMAL|WATCH|BLOCKED`로 전환할 때는 언제나 trim 후 비어 있지 않은 `reason`이 **필수**다 `[REQ-WEB-125]`. 같은 상태 요청은 변경·감사 없이 `409 NO_STATUS_CHANGE`, 사유 누락은 `422 REASON_REQUIRED`. 서버 성공 전에 화면·목록·로그를 낙관적으로 바꾸지 않는다. 모든 성공 전환은 독립 감사 기록을 남긴다 `[REQ-WEB-126]`.
 
-**관리자 메모** — `{ "memo": "열폭주 징후로 차단 유지" }`, 감사 기록 `[REQ-WEB-124/126]`.
+상태 레코드 변경과 감사 기록은 한 트랜잭션으로 성공하거나 함께 실패한다. `BLOCKED` 전환은 상태 변경·활성 세션 종료·감사 이벤트(또는 동일 트랜잭션의 outbox)를 원자적으로 기록하고, 일부만 성공한 응답을 내지 않는다. `BLOCKED`에서 다른 상태로 풀어도 이전 세션이나 릴레이를 자동 복구하지 않는다. 성공 응답은 정본의 `{ "opsStatus", "updatedAt", "updatedBy" }`를 반환한다.
+
+**관리자 메모** — `{ "memo": "열폭주 징후로 차단 유지" }`, 상태와 별도 요청·별도 저장·별도 감사 기록 `[REQ-WEB-124/126]`. 메모 변경에는 상태 변경 사유를 요구하지 않는다. 메모 변경과 감사 기록도 한 트랜잭션으로 처리하며 성공 응답은 `{ "memo", "updatedAt", "updatedBy" }`를 반환한다.
 
 **`BLOCKED` 전환의 효과** — 운영 통제이며 **물리 제어가 아니다**:
 
@@ -1408,6 +1409,14 @@ v3 테이블 컬럼: `시간 · 관리자 · 행위 · 대상 · 변경 내용` 
 
 에지 배포의 `hardware_profile`을 함께 검사한다. 이 값은 Raw 프레임에서 받지 않고 서버가 `device_id`별 배포 메타데이터로 관리한다. 값이 없거나 알 수 없으면 준비되지 않은 것으로 닫는다. `MODE2_FULL`만 F21 진단 실행이 가능하다. `COMBINED_EXISTING_PARTS_V1`은 MQ-2·확정 안전 문턱·연속 감시가 없는 0.5A·10초 시운전 프로필이므로, Raw의 `gas_raw`·`pressure_raw`·`temp_contact`·`temp_points.contact`·`soc_pct`·`diag_phase`·`load_target_a`는 **모두 반드시 `null`**이다. 모드 1 캐시값이나 추정값으로 채우지 않는다. 이 프로필에서 빠른 진단·정밀 용량시험 시작 요청은 `409 SAFETY_PROFILE_NOT_READY`로 거절한다.
 
+F21 화면이 실행 전에 잠금 사유를 알 수 있도록 `GET /api/batteries/{id}`는 아래 capability를 함께 내려준다. 내부 `hardware_profile` 원문은 노출하지 않아도 된다.
+
+```json
+{ "diagnosisCapability": { "executionAllowed": false, "reasonCode": "SAFETY_PROFILE_NOT_READY" } }
+```
+
+`reasonCode`는 `SAFETY_PROFILE_NOT_READY|MODE_NOT_SUPPORTED|DEVICE_OFFLINE|RELAY_CUT|null`이다. capability는 설명용 선조회이며 POST의 서버 안전 검증을 대체하거나 우회하지 않는다. v3의 숨은 `hardwareProfile` 프로토타입 속성은 두 화면 상태를 검토하기 위한 목업 전환일 뿐 실제 서버 capability를 바꾸지 않는다.
+
 **모드 2 전용이다.** `targetMode`가 1인 배터리에 호출하면 `409 MODE_NOT_SUPPORTED`.
 
 #### `POST /api/diagnosis/quick` — 빠른 진단 시작 `[REQ-WEB-138]`
@@ -1437,7 +1446,7 @@ v3 테이블 컬럼: `시간 · 관리자 · 행위 · 대상 · 변경 내용` 
 
 - `dischargeCurrentA` — 생략하면 서버 기본값 `1.0`
 - `fullyChargedConfirmed` — **`true`가 아니면 `400 FULL_CHARGE_REQUIRED`.** 시작 SOC가 100%가 아니면 결과는 SOH가 아니다(스펙 §4-1)
-- `acknowledged` — 소요 시간 안내 확인
+- `acknowledged` — 소요 시간 안내 확인. **`true`가 아니면 `400 ACK_REQUIRED`**
 - 응답 `202`: `Diagnosis` 객체, `status: "RUNNING"`, `estimatedEndAt`
 - 위 표의 거절 전부 + `409 CAPACITY_NOT_REGISTERED` — 자산에 `capacityWh`/`capacityMah`가 없어 비교할 분모가 없음
 
@@ -1702,7 +1711,7 @@ v3 테이블 컬럼: `시간 · 관리자 · 행위 · 대상 · 변경 내용` 
 
 ## 9. 미결정 항목
 
-**37건 중 32건 확정, 1건 보류, 4건 열림. 열린 4건 모두 착수를 막지 않는다.**
+**38건 중 31건 확정, 1건 보류, 6건 열림. 열린 6건 모두 API 골격 착수를 막지는 않지만, 해당 입력 검증·동시성 정책을 배포하기 전 확정해야 한다.**
 
 | # | 항목 | 상태 |
 |---|---|---|
@@ -1710,6 +1719,8 @@ v3 테이블 컬럼: `시간 · 관리자 · 행위 · 대상 · 변경 내용` 
 | **Q35** | 세션 타임아웃 임계 N분 | **열림** — 5분 제안. 에지 발행이 100ms이므로 5분 무수신이면 전원 이탈로 본다. 현장 테스트로 확정 |
 | **Q34** | 문구 `code` 전체 목록 | **열림** — §1.10 규약은 확정. 개별 코드는 엔드포인트 구현하며 채운다 |
 | **Q36** | F21 진단 문턱값 | **열림** — 발열 기울기 `S1`, 표면온도 중단 문턱, 부스트 효율 η 기본값, 최소 유지 부하 크기. `mode2_powerbank_diagnosis_spec.md` §8 H2~H4·H6~H10. **부하 수단(보유 BW150)과 릴레이 매핑(모드 1과 동일)은 2026-07-28에 닫혔다.** **API 계약(§4.13)은 이와 무관하게 확정**이다. BW150의 5V 부하 가능 여부도 제조사 사양표(`DC1V~200V`)로 통과해 **회로도를 막는 항목은 없다** |
+| **Q37** | F21 광고 정격 출력 전류의 등록·수정 경로 | **열림** — `rated_output_current_a`는 빠른 진단 `specAttainmentPct`의 분모지만 자산 API와 v3 입력에는 없다(H8). 입력 필드로 추가할지, 미등록이면 결과를 항상 `null`로 둘지 확정 필요 |
+| **Q38** | 관리자 사유·메모 입력 및 동시 수정 정책 | **열림** — 최대 길이, 허용/정규화 문자, 빈 메모로 삭제하는 규칙, 민감정보 마스킹, `version`/ETag 또는 idempotency key 기반 충돌 처리 확정 필요. 상태·세션·감사의 원자성 및 상태/메모 분리 저장 자체는 §4.12로 확정 |
 | **Q6** | SOH/RUL 산출 주체 | **모드 2 확정 / 모드 1 보류** — 모드 2는 백엔드가 §4.13 진단 결과를 집계하고 `cycleCount`·`rulCycles`·`internalResistanceMohm`은 `null` 확정(§4.2). 모드 1은 BQ27441 경로가 있으나 산출 주체 미정이라 보류 유지 |
 
 ### 확정된 결정 (31건)
@@ -1803,7 +1814,7 @@ v3 테이블 컬럼: `시간 · 관리자 · 행위 · 대상 · 변경 내용` 
 | 요구사항 | 상태 | 계약 처리 |
 |---|---|---|
 | REQ-WEB-030/031 디바이스 상태 | 라우트 도달 불가 (고아) | **제외** |
-| REQ-WEB-123/124/125 운영상태·메모 | 상세 모달이 조회 전용 | **포함** — 프론트가 입력 UI 추가 |
+| REQ-WEB-123/124/125 운영상태·메모 | 2026-08-06 상세에 native 입력·분리 저장·상태 변경 확인 추가 | **동기화 완료** |
 | REQ-WEB-135 감사 로그 상세 | 행 클릭 무반응 | **제외** |
 | REQ-WEB-072 음성 안내 설정 | 어느 화면에도 없음 | **포함** — 프론트가 설정에 섹션 추가 |
 | REQ-WEB-071 캘리브레이션 이력 | 조회 화면만, 등록 수단 없음 | **제외**(Q14) — 화면도 제거 |
@@ -1844,13 +1855,13 @@ v3 테이블 컬럼: `시간 · 관리자 · 행위 · 대상 · 변경 내용` 
 - WS cursor/sequence/eventId/idempotency/replay/reconnect 규약 추가
 - 가입·계정 찾기·배터리 폼·이벤트 검색·릴레이·감사 필터·공지 알림처럼 입력처럼 보이던 요소를 실제 입력/선택 요소로 교체하고 API 매핑 명시
 - 관리자 유저의 ID·등록 배터리 수·권한·상태는 읽기 전용으로 바꾸고 비밀번호 직접 지정은 재설정 링크 발송으로 교체
+- F21 기본 화면은 안전 미준비 profile에서 실행 잠금·미지원값 `—`를 표시하고, 숨은 속성에서만 `MODE2_FULL` 검토 상태를 제공
+- 관리자 배터리 상세에 모든 상태 전환 사유·확인과 상태/메모 분리 저장을 추가
 
 ### 남은 의도적 범위/미구현
 
 | 항목 | 상태 |
 |---|---|
-| F21 모드 2 진단 화면 | API 계약은 유지하되 v3 화면에는 미구현 |
-| 관리자 배터리 운영상태·관리자 메모 입력 | 계약은 유지하되 v3 상세는 조회 중심 |
 | 음성 안내 설정 | 요구사항에는 있으나 v3 미구현 |
 | 감사 로그 상세 모달 | v3에서 행 클릭 동작이 없어 제외 유지 |
 | 상대시간·mock 수치 | 프로토타입 표현이며 실제 구현은 서버 UTC와 실데이터 사용 |

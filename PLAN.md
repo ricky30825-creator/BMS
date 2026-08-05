@@ -264,7 +264,7 @@ ADS1115         TLS/SASL  battery-anomaly-alerts  테이블)           이중 �
 - **요구사항 표 형식 통일(2026-06-30)**: 요구사항 표를 5열 형식으로 통일하고, 현재 확인 가능한 요구사항 행을 `SRS-WEB-001~060`으로 연속 재번호화했다.
 - **요구사항 표 빈칸 보완(2026-06-30)**: 요구사항 표의 빈 ID, 중요도, 비고 칸을 현재 보이는 행 기준으로 보완했고, 내부 중복 항목을 정리했다.
 - **일반 사용자 유저 플로우 갱신(2026-06-30)**: `docs/userflow.md`를 HTML 프로토타입 기준으로 재정리했다. 랜딩/인증, 디바이스·배터리, 배터리 연결 확인, 실시간 관제, XAI, SOH/RUL, 알림 Ack, SOP, 위험 제어 승인, 추세/이벤트/내보내기 흐름을 일반 사용자 여정에 반영했다.
-- **HTML 프로토타입 기능정의서 작성(2026-07-03)**: `/Users/jungjeahwan/Downloads/셀가드 프로토타입 (standalone).html`에 실제 표시된 화면·버튼·입력·탭·필터·모달·카드·상태값을 기준으로 일반 사용자 기능정의서 `docs/feature_definition.md`(72개)와 관리자 기능정의서 `docs/admin_feature_definition.md`(36개)를 분리 작성했다. 사용자 흐름은 `docs/userflow.md`, 관리자 흐름은 `docs/admin_userflow.md`에 HTML 확인 흐름으로 보강했다. `PLAN.md`와 HTML이 충돌하는 관리자 공지사항 관리, 관리자 비밀번호 재설정은 HTML을 우선 기준으로 MVP 포함 기능에 반영했다. 추가 정의 필요 항목은 랜딩 메뉴 목적지, 데모 영상 동작, 프로필 사진 변경 동작이다.
+- **HTML 프로토타입 기능정의서 작성(2026-07-03, 정본 경로 갱신 2026-08-06)**: 현재 정본 `설계 산출물/셀가드 프로토타입_v3.html`에 실제 표시된 화면·버튼·입력·탭·필터·모달·카드·상태값을 기준으로 일반 사용자 기능정의서와 관리자 기능정의서를 관리한다. 사용자 흐름은 `docs/userflow.md`, 관리자 흐름은 `docs/admin_userflow.md`가 따른다. 프로필 사진 변경은 제거됐고, 남은 제품 결정은 랜딩 메뉴 목적지와 데모 영상 동작이다.
 - **웹서버 기준값 변경 기능 제거(2026-07-07)**: 웹서버/대시보드 범위에서 사용자가 직접 기준값을 변경하는 화면, UI, API 산출물 항목을 제외했다. 남는 `임계값 초과` 표현은 이벤트/Fail-Safe 상태 설명으로만 사용하며, 설정 기능으로 추적하지 않는다.
 - **GitHub 공유 레포 정리(2026-07-10)**: 원격 저장소를 `https://github.com/ricky30825-creator/BMS`로 정리하고, 발표자료·설계 산출물 원본·클로드 보고·백업·샘플 PDF/DOCX/PPTX를 레포 추적 대상에서 제외했다. 이후 공유 기준 문서는 `PLAN.md`와 `docs/*.md`, 화면 참고 산출물은 `web/*.html`과 `assets/*.svg`를 우선한다.
 - **AI 알고리즘 이중 모델 업데이트(2026-07-09)**: AI 아키텍처를 단일 LSTM-AutoEncoder에서 **LSTM-AutoEncoder(현재 상태 진단) + Informer(미래 상태 예측) 이중 모델**로 갱신했다. 두 모델은 정규화·Sliding Window로 생성한 동일 Sequence를 공유 입력으로 받고, AE Score(재구성 오차)와 Informer Score(예측 오차)를 Score Fusion(`Final Score = α × AE Score + β × Informer Score`)으로 결합해 최종 이상점수를 산출한다. 상태 등급 4단계(정상/주의/경고/위험, 0.0–1.0 구간)는 이 최종 이상점수 기준으로 유지하며, 아키텍처는 측정 모드 공통 적용이다(2026-07-27 2모드로 축소: 외부 셀/보조배터리). 입력 특징 목록(V_scaled 등 파생 특징)은 기존과 동일하다. Score Fusion 가중치 α·β는 고정값이 아니라 테스트를 통해 튜닝하며 찾아간다. `CLAUDE.md`, `AGENTS.md`, `PLAN.md`를 함께 갱신했다.
@@ -295,7 +295,7 @@ ADS1115         TLS/SASL  battery-anomaly-alerts  테이블)           이중 �
 - 배터리 이름, 소유자, 측정 모드, 상태, 최근 측정 여부 기준으로 검색/필터링한다.
 - 배터리 상세에서 기본 정보, 소유자, 최근 측정 세션, 최근 센서 요약값, 최근 이상 이벤트, 관리자 운영 상태/메모를 확인한다.
 - 관리자 운영 상태는 `NORMAL`(정상 운영), `WATCH`(주시 대상), `BLOCKED`(운영상 사용 제한)로 둔다.
-- `BLOCKED` 변경 시 사유 입력을 필수로 하고, 모든 상태 변경은 감사 로그에 기록한다.
+- 현재와 다른 모든 관리자 운영 상태 변경은 사유·확인을 필수로 하고 감사 로그에 기록한다. 관리자 메모는 상태와 별도 저장하며 독립 감사 기록을 남긴다.
 - 배터리 삭제, 소유자 변경, 센서 데이터 수정, 측정 이력 삭제, AI 판정값 수정은 MVP 제외다.
 
 **배터리 통계**
@@ -324,10 +324,10 @@ ADS1115         TLS/SASL  battery-anomaly-alerts  테이블)           이중 �
 
 **관리자 데이터 모델/API**
 - `users`: `role`(`USER`/`ADMIN`), `status`(`ACTIVE`/`SUSPENDED`), `suspended_reason`, `suspended_at`
-- `battery_asset`: `admin_status`(`NORMAL`/`WATCH`/`BLOCKED`), `admin_memo`, `admin_status_updated_at`, `admin_status_updated_by`
+- `battery_asset`: `admin_status`(`NORMAL`/`WATCH`/`BLOCKED`), `admin_memo`, `admin_status_updated_at`, `admin_status_updated_by`, `admin_memo_updated_at`, `admin_memo_updated_by`
 - `device`: `device_id`, `display_name`, `last_seen_at`, `status`(`ONLINE`/`DELAYED`/`OFFLINE`/`UNKNOWN`), `hardware_profile`(`MODE2_FULL`/`COMBINED_EXISTING_PARTS_V1`; 서버 배포 메타데이터, Raw에는 미포함)
 - `audit_log`: `log_id`, `actor_id`, `action`, `target_type`, `target_id`, `before_value`, `after_value`, `reason`, `created_at`
-- 관리자 API: `GET /admin/users`, `GET /admin/users/{userId}`, `PATCH /admin/users/{userId}/status`, `PATCH /admin/users/{userId}/password`, `GET /admin/batteries`, `GET /admin/batteries/{batteryId}`, `PATCH /admin/batteries/{batteryId}/admin-status`, `GET /admin/stats/summary`, `GET /admin/stats/batteries`, `GET /admin/stats/anomalies`, `GET /admin/devices`, `GET /admin/devices/{deviceId}`, `GET /admin/system-health`, `GET /admin/notices`, `POST /admin/notices`, `PATCH /admin/notices/{noticeId}`, `PATCH /admin/notices/{noticeId}/archive`, `GET /admin/audit-logs`
+- 관리자 API: `GET /api/admin/users`, `GET /api/admin/users/{userId}`, `PATCH /api/admin/users/{userId}`, `POST /api/admin/users/{userId}/suspend`, `POST /api/admin/users/{userId}/restore`, `POST /api/admin/users/{userId}/password-reset`, `GET /api/admin/batteries`, `GET /api/admin/batteries/{batteryId}`, `PATCH /api/admin/batteries/{batteryId}/ops-status`, `PATCH /api/admin/batteries/{batteryId}/memo`, `GET /api/admin/stats/summary`, `GET /api/admin/stats/batteries`, `GET /api/admin/stats/anomalies`, `GET /api/admin/devices`, `GET /api/admin/devices/{deviceId}`, `GET /api/admin/system-health`, `GET /api/admin/notices`, `POST /api/admin/notices`, `PATCH /api/admin/notices/{noticeId}`, `POST /api/admin/notices/{noticeId}/archive`, `GET /api/admin/audit-logs`
 
 **MVP 제외 항목**
 - 문의/고객지원 관리, 관리자 권한 세분화, 계정 삭제
@@ -508,8 +508,8 @@ ADS1115         TLS/SASL  battery-anomaly-alerts  테이블)           이중 �
 
 [배터리 운영 관리]
 배터리 목록 → 검색/필터 → 배터리 상세
-└── 운영 상태(NORMAL/WATCH/BLOCKED)·메모 변경
-    └── BLOCKED 사유 입력 → 변경 확인 → 감사 로그 기록
+├── 운영 상태(NORMAL/WATCH/BLOCKED) 변경 → 모든 전환 사유 입력 → 변경 확인 → 감사 로그 기록
+└── 관리자 메모 별도 저장 → 별도 감사 로그 기록
 
 [통계·디바이스·헬스]
 배터리 통계 → 상태/모드/제조사/이상 이벤트 집계
@@ -716,6 +716,7 @@ ADS1115         TLS/SASL  battery-anomaly-alerts  테이블)           이중 �
 | 정밀 테스트 | 1.0A 정전류 방전으로 `∫V·I dt` 적산. **완충 확인 게이트 필수**, 중단된 부분 결과는 SOH로 쓰지 않음 |
 | 정보 출처 | **등록값 + 실측값 조합.** PD 컨트롤러(FUSB302) 추가 구매 없음 — ZY12PDN은 버튼식 범용 트리거라 Pi에 값을 못 넘긴다 |
 | 진입 흐름 | **기존 T2 게이트 유지.** 자산 등록 → 선택 → 세션 시작은 그대로이고, 그 위에 전용 요약 영역(F21)을 더한다 |
+| 프로토타입 기본 상태 | **`COMBINED_EXISTING_PARTS_V1` 안전 준비 전·실행 잠금.** 미지원 센서·SOC·진단 단계는 `—`로 표시하고 확인 입력으로 우회할 수 없다. 숨은 프로토타입 속성에서만 `MODE2_FULL` 실행·진행·중단·이력을 검토하며, 실제 제품은 서버 `diagnosisCapability`가 정본이다 |
 | 산출 불가 | 모드 2의 `cycleCount`·`rulCycles`·`internalResistanceMohm`은 **`null` 확정.** BMS 접근 불가 + 부스트 뒤라 원리적으로 못 낸다. **v3의 `RUL ~480 사이클`은 목업 숫자다** |
 | 스키마 | `battery-raw-metrics`에 `diag_phase`·`load_target_a` 추가. 진단 이벤트는 **새 토픽 없이** `battery-events`에 싣는다 |
 | AI 취급 | `diag_phase != null` 프레임은 **정상패턴 학습에서 제외.** 이상점수는 계속 산출하되 **알림만 억제**하고 Fail-Safe는 억제하지 않는다 |
@@ -822,6 +823,6 @@ H9가 닫히면서 따라온 조치: 18650 홀더를 **보호회로 셀용(68~70
 | **동시 측정 1개 확정** | BQ27441(0x55) 주소가 하드웨어 고정이라 다중 배터리 불가. 멀티플렉서 미도입. **MLX90614는 주소 고정이 아님**(EEPROM 0x0E) — 2026-07-27 데이터시트 재확인으로 정정 |
 | **신규 부품** | 0.96" OLED(CN0219, **SPI**) → **3.5" TFT SPI 480×320 V1.0(ILI9488)로 교체(2026-08-05)**, 18650 3.7V 2550mAh ×3, 리튬폴리머 3.7V 1000mAh ×2 |
 
-**미해결(`정의 필요`)**: 모드 2의 `soc_pct` 출처, 가스·압력·음향의 동시 부착 개수와 ADS1115 채널 배분, 음향 센서 모델. → **셋 다 2026-07-28에 확정됨** (아래 항목 참조).
+**과거 미해결 항목의 종료 기록**: 모드 2의 `soc_pct` 출처, 가스·압력·음향 채널 배분, 음향 센서 모델은 **2026-07-28에 모두 확정됨** (아래 항목 참조).
 
 **유지**: 스피커 음성 안내(F-VOICEA·S-VOCALR·REQ-WEB-072)와 음향 센서는 기능으로 유지하되 하드웨어는 별도 확보한다.

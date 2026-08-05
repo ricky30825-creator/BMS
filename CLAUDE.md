@@ -179,9 +179,9 @@ LSTM-AutoEncoder(재구성 오차 = 현재 이상)와 Informer(예측 오차 = �
 
 > **셀에 보호회로가 있다(2026-07-28 확인).** 이게 회로에 퓨즈가 없는 상태의 유일한 과전류 보호다. 파생 제약: ① 전체 길이 68~70mm라 **65mm용 홀더에 안 들어간다** ② 양 끝의 PCB·버튼탑은 셀이 아니므로 센서 축방향 기준은 **금속 캔 몸통 `L`(≈65mm)** ③ **니켈 탭이 옆구리를 타고 올라가** 수축튜브 아래 숨어 있으니 그 면을 피해 센서를 붙인다 ④ PCM이 끊기면 전압 0 + `0x55` 소실인데 **센서 오류가 아니다.**
 
-## 회로도 (모드 1만 존재)
+## 회로도
 
-**모드 2 회로는 아직 없다** — 설계 스펙은 확정됐으나 부하 수단(§8 H1)이 미정이라 그릴 수 없다.
+**모드 2 부하 수단과 릴레이 매핑은 2026-07-28에 확정됐다.** 보유 BW150을 사용하며 상세 회로·실물 게이트는 `docs/hardware/mode2_powerbank_diagnosis_spec.md`와 통합 조립 가이드를 따른다. 안전 문턱과 연속 감시가 검증되기 전 `COMBINED_EXISTING_PARTS_V1`을 제품 F21 진단으로 승격하지 않는다.
 
 - **회로도는 생성물이다.** KiCad에서 손으로 고치지 말고 `tools/gen_mode1_sch.py`를 고친 뒤 다시 돌린다. 검증은 `kicad-cli sch erc`(위반 0건) + `sch export netlist`로 네트 연결 확인. `kicad-cli`는 `/Applications/KiCad/KiCad.app/Contents/MacOS/kicad-cli`에 있다(PATH에 없음).
 - **회로도 텍스트에 한글을 넣으려면 `(font (face "Apple SD Gothic Neo") …)`를 명시해야 한다.** 안 붙이면 `kicad-cli` 내보내기에서 한글이 통째로 사라진다. 제목란(`title_block`)은 폰트 지정이 안 먹으므로 ASCII만 쓴다.

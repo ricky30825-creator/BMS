@@ -60,7 +60,7 @@ v3 프로토타입과 정본 문서에는 모드 1/2, 대표 온도 최댓값, s
 
 ## 현재 확인된 결정·미결정 게이트
 
-1. `PLAN.md`가 참조하는 외부 원본 `/Users/jungjeahwan/Downloads/셀가드 프로토타입 (standalone).html`은 현재 존재하지 않는다. 최신 HTML을 계속 권위 기준으로 삼으려면 저장소에 보존하거나, [`web/cellguard_mockup_v4.html`](../web/cellguard_mockup_v4.html)을 현재 정본으로 명시해야 한다.
+1. 최신 화면 정본은 `설계 산출물/셀가드 프로토타입_v3.html`이다. F21 안전 잠금·숨은 `MODE2_FULL` 검토 상태와 관리자 상태/메모 분리 저장 화면까지 반영됐지만, 실제 REST·안전 제어 구현 완료를 뜻하지 않는다.
 2. 모드 1은 [`docs/hardware/mode1_backend_spec.md` §13](hardware/mode1_backend_spec.md#13-실물로-확인해야-하는-것)의 H1~H8을 실물로 확인하기 전 센서 해석을 확정하지 않는다.
 3. 모드 2의 표면온도·상승률·부스트 효율·컷오프 복귀 등은 [`docs/hardware/mode2_powerbank_diagnosis_spec.md` §8](hardware/mode2_powerbank_diagnosis_spec.md#8-미결정)의 미결정 항목을 임의로 채우지 않는다.
 4. 백엔드 계약의 `[정의 필요]` 항목은 [`docs/backend_contract.md` §9](backend_contract.md#9-미결정-항목)를 확인하고, 값을 추정해 API나 UI에 하드코딩하지 않는다.
