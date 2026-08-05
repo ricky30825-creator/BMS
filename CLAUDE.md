@@ -27,6 +27,7 @@ Raspberry Pi        Kafka → Consumer → PostgreSQL      Google Colab         
 | 시각 디자인·반응형 3종·토큰 | `design-system/cellguard/MASTER.md`, 목업 `web/cellguard_mockup_v4.html` |
 | 모드 1 회로 / 조립 / 에지 수집 계약 | `hardware/mode1/`(KiCad), `docs/hardware/mode1_beginner_guide.md`, `docs/hardware/mode1_backend_spec.md` |
 | 모드 2 진단 설계 | `docs/hardware/mode2_powerbank_diagnosis_spec.md` |
+| 남은 1개월 실행 전략 (조립 순서·데이터 수집·시연 시나리오·BW150 활용) | `docs/final_month_strategy.md` (2026-08-05 확정) |
 
 **충돌 해소 순서**: 회로 > 사용자가 준 최신 와이어프레임 HTML > 계약서 > 나머지 문서. v3 프로토타입과 계약서가 어긋나면 **v3가 틀린 것**이다(v3 수정 목록 25건은 `docs/backend_contract.md` §12). HTML만으로 동작이 불명확하면 추정하지 말고 `정의 필요`로 표시한다.
 
@@ -152,7 +153,11 @@ LSTM-AutoEncoder(재구성 오차 = 현재 이상)와 Informer(예측 오차 = �
 
 부품은 2026-07-27자 구매 승인 목록으로 확정됐다. 전체 목록·수량은 `PLAN.md` §센서·기자재 구성 참조. 코드에 영향을 주는 제약만 여기 적는다.
 
-- **ATORCH BW150은 데이터 경로가 아니다.** 방전 부하 + INA226 검증용 기준기로만 쓴다. 시리얼(`0xFF 0x55` 프레임, 9600 8N1, CH340G)로 값을 읽을 수는 있으나 **주기가 1초**라 100ms 스트림에 못 섞이고, **USB 절연이 없어** 측정 회로와 GND가 묶인다. 추출한 값은 Kafka가 아니라 오프라인 검증용 CSV로만 남긴다.
+- **ATORCH BW150은 데이터 경로가 아니다.** 방전 부하 + INA226 검증용 기준기로만 쓴다. 시리얼(`0xFF 0x55` 프레임)로 값을 읽을 수는 있으나 **주기가 1초**라 100ms 스트림에 못 섞이고, **USB 절연이 없어** 측정 회로와 GND가 묶인다. 추출한 값은 Kafka가 아니라 오프라인 검증용 CSV로만 남긴다.
+  - **1초 주기는 웹 재검증 완료(2026-08-05)** — `0xFF 0x55` 상태 패킷은 1초/1회·36바이트(tshaddack/dl24, syssi/esphome-atorch-dl24, sigrok 교차 확인). 폴링·설정으로 단축 불가, 1초보다 빠른 사례 없음. **1초를 우회할 방법을 다시 찾지 마라.**
+  - **보유 개체는 WiFi판(Tuya 앱 연동 동작 확인, 2026-08-05).** Pi 제어는 Tuya 로컬(`tinytuya`) 1순위, BLE·USB 시리얼 순 fallback. ⚠️ 공식 매뉴얼은 PC 연결을 **"HID (Type-C)"**로 명명해 기존 "CH340G" 전제와 다를 수 있다 — 실물 확인 전까지 CH340G를 가정한 코드를 짜지 말 것.
+  - **배터리에는 CC(필요시 CR)만 쓴다 — CV·CP 모드는 매뉴얼이 배터리 테스트 금지를 명시한다.** CDC류 자동 사이클은 별매 충전 제어 모듈이 필요해 쓰지 않고, **릴레이 CH1(충전)·CH2(방전) 전환으로 무인 충·방전 사이클을 대체**한다.
+  - 부하 이상의 활용 7종(BRT 내부저항→모드 1 세션 메타, PT 정격 교차검증, CT 배선 실측, 외부 온도 프로브 독립 알람, 종지전압·시간제한, 캘리브레이션, 시연 기준기 연출)을 채택했다 — 정본은 `docs/final_month_strategy.md` §3.
 - **MQ-2 AOUT은 5V까지 올라간다.** ADS1115를 3.3V로 구동하면 입력 정격을 넘으므로 분압이 필요하고, ADS1115를 5V로 구동하면 I2C 라인이 5V가 되어 라즈베리파이 GPIO가 위험하다(이 모듈엔 레벨 시프터가 없다).
 - **MQ-2 히터는 상시 발열**(약 150mA@5V)이라 DS18B20·MLX90614와 떨어뜨려 배치한다. 붙여 두면 온도 측정이 오염된다.
 - **BQ27441은 배터리마다 재설정이 필요하다.** Design Capacity와 화학 프로파일을 셀에 맞춰 써 넣어야 SOC가 맞는다. 18650(2550mAh)과 리튬폴리머(1000mAh)를 번갈아 물리면 그때마다 다시 써야 한다.
