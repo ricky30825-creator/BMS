@@ -45,7 +45,7 @@ python3 -m unittest discover -s tools -p 'test_*.py'
 | 변경 범위 | 검증 | 통과 기준 |
 |---|---|---|
 | 모드 1 회로 | `tools/gen_mode1_sch.py` 실행 후 KiCad ERC와 netlist 확인 | 생성 회로와 네트 연결이 일치하고 ERC 위반 0건 |
-| 모드 1 센서 | [`docs/hardware/mode1_backend_spec.md` §13](hardware/mode1_backend_spec.md#13-실물로-확인해야-하는-것)의 H1~H8 순서 | 실측값·주소·ROM 위치·프레임·baseline을 기록하기 전 구현 확정 금지 |
+| 모드 1 센서 | [`docs/hardware/mode1_backend_spec.md` §13](hardware/mode1_backend_spec.md#13-실물로-확인해야-하는-것)의 H1~H9 순서 | 실측값·주소·ROM 위치·프레임·baseline·TFT 전원 호환성을 기록하기 전 구현 확정 금지 |
 | 모드 2 진단 | [`docs/hardware/mode2_powerbank_diagnosis_spec.md` §3~§8](hardware/mode2_powerbank_diagnosis_spec.md#8-미결정) | 안전 중단·완충 게이트·기준선·미결정 문턱을 구분 |
 | 보유부품 통합형 | [`docs/hardware/mode1_mode2_combined_beginner_guide.md`](hardware/mode1_mode2_combined_beginner_guide.md) | `SOURCE_P` 양극 한 가닥, INA226 ID·CAL·OVF·션트 검산, 0.5A·10초 중단. 서버 `device_id` 프로필=V1에서 quick/capacity 각각 `409 SAFETY_PROFILE_NOT_READY`, Raw의 `gas_raw`·`temp_contact`·`temp_points.contact`·`pressure_raw`·`soc_pct`·`diag_phase`·`load_target_a` 모두 `null`, 릴레이 `1,0,0,0` 요청 거부 증적 |
 | 릴레이·Fail-Safe | 무부하·전류 0A·인터락 순서 포함한 벤치 시험 | AI 결과와 무관한 안전 차단, 자동 복구 금지, 감사 이벤트 기록 |
