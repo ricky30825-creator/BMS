@@ -6,6 +6,7 @@
 - 디자인 무관 기능 계약: `docs/product_contract.md` F21
 - 모드 1 대응 문서: `docs/hardware/mode1_backend_spec.md`
 - 회로도: **아직 없지만 막는 것도 없다.** 부하 수단(§2-4)·릴레이 매핑(§2-5)·배선(§2-7)이 모두 확정됐고 BW150의 5V 부하 가능 여부도 제조사 사양표로 통과했다. `hardware/mode2/` 작업을 착수할 수 있다
+- 보유부품 통합형 조립 가이드: [`mode1_mode2_combined_beginner_guide.md`](mode1_mode2_combined_beginner_guide.md) — 모드 1 STEP 12 상태를 유지하는 대신 **모드 2 자동 충전을 제외한 방전 진단 프로토타입**이다. 아래의 완전한 모드 2 릴레이 매핑과 혼용하지 않는다
 
 **범위**: 모드 2(보조배터리)만. 이 문서는 설계 계약이며 회로도·목업·구현 코드는 후속이다.
 

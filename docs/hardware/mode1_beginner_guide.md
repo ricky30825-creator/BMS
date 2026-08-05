@@ -676,6 +676,8 @@ I2C가 아니라 **SPI**다. 보드 뒷면에 핀이 **14개** 한 줄로 나 �
 
 **확인**: `VCC`는 3.3V-A, `JD-VCC`는 핀 2(5V). 두 개가 서로 바뀌지 않았다.
 
+> **모드 1·2를 현재 보유 부품으로 한 회로에 합칠 경우 여기서 분기한다.** STEP 13부터 이 문서를 계속 따라가지 말고 [`mode1_mode2_combined_beginner_guide.md`](mode1_mode2_combined_beginner_guide.md)로 이동한다. 그 통합형은 모드 1 전체 기능과 모드 2 방전 진단을 지원하며, 기존 STEP 14와 CH4 배선이 다르다.
+
 ## STEP 13. U2 Babysitter 전력부
 
 | ☐ | 회로도 네트 | 어디서 | → | 어디로 |
