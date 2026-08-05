@@ -162,10 +162,13 @@ SYMBOLS: dict[str, Sym] = {
         "셀 표면 접촉온도, 1-Wire 멀티드롭(고유 64비트 ROM 코드라 주소 설정 불필요). 빨강 VDD / 노랑 DQ / 검정 GND",
         right=P("1:VDD 2:DQ 3:GND"), width=38.1,
     ),
-    "OLED": Sym(
-        "OLED", "U", "OLED 0.96in SPI [CN0219]",
-        "SSD1306 SPI 7핀. I2C가 아니다",
-        right=P("1:GND 2:VCC 3:D0 4:D1 5:RES 6:DC 7:CS"), width=38.1,
+    "TFT35": Sym(
+        "TFT35", "U", "TFT 3.5in SPI 480x320 V1.0",
+        "ILI9488 + 저항막 터치 14핀. 표시 전용 9핀만 쓰고 T_* 5핀과 SDO는 미결선. "
+        "로직은 3.3V(TTL)",
+        right=P("1:VCC 2:GND 3:CS 4:RESET 5:DC/RS 6:SDI 7:SCK 8:LED 9:SDO "
+                "10:T_CLK 11:T_CS 12:T_DIN 13:T_DO 14:T_IRQ"),
+        width=45.72,
     ),
     "RELAY4": Sym(
         "RELAY4", "K", "4CH Relay [SZH-RLBG-012]",
@@ -268,10 +271,10 @@ INSTANCES: list[Inst] = [
         "GND (9)": "GND",
         "(14) GND": "GND",
         "3V3 (17)": "+3V3",
-        "(18) GPIO24": "OLED_RES",
+        "(18) GPIO24": "TFT_RES",
         "GPIO10/MOSI (19)": "SPI_MOSI",
         "(20) GND": "GND",
-        "(22) GPIO25": "OLED_DC",
+        "(22) GPIO25": "TFT_DC",
         "GPIO11/SCLK (23)": "SPI_SCLK",
         "(24) GPIO8/CE0": "SPI_CE0",
         "GND (25)": "GND",
@@ -294,20 +297,25 @@ INSTANCES: list[Inst] = [
          nets={"VDD": "+3V3", "DQ": "OW_DATA", "GND": "GND"}),
 
     # ---- I2C / SPI 주변 (최우측 열)
+    # ---- 현장 표시 화면. OLED(CN0219)를 3.5in TFT로 교체(2026-08-05).
+    #      SPI 배선은 OLED와 1:1로 같고 LED(백라이트) 한 가닥만 늘었다.
+    #      터치를 쓰지 않으므로 T_* 5핀은 미결선. SDO도 읽기가 필요 없어 미결선.
+    #      14핀이라 심볼이 길다 — 이 열의 맨 위에 두고 나머지를 아래로 밀었다.
+    Inst("TFT35", "U6", 590, 68, nets={
+        "VCC": "+3V3", "GND": "GND",
+        "CS": "SPI_CE0", "RESET": "TFT_RES", "DC/RS": "TFT_DC",
+        "SDI": "SPI_MOSI", "SCK": "SPI_SCLK", "LED": "+3V3",
+    }, nc=["SDO", "T_CLK", "T_CS", "T_DIN", "T_DO", "T_IRQ"]),
+
     # ---- IR 표면온도 2존. 둘 다 출고 시 0x5A이므로 U9는 EEPROM 0x0E를 0x5B로
     #      바꿔 두어야 한다. 반드시 한 개씩 따로 연결해서 작업할 것.
-    Inst("MLX90614", "U3", 590, 42, value="MLX90614 #1 (0x5A, 셀 중앙)",
+    Inst("MLX90614", "U3", 590, 124, value="MLX90614 #1 (0x5A, 셀 중앙)",
          nets={"VCC": "+3V3", "GND": "GND", **I2C}),
-    Inst("MLX90614", "U9", 590, 74, value="MLX90614 #2 (0x5B, 셀 단자쪽)",
+    Inst("MLX90614", "U9", 590, 152, value="MLX90614 #2 (0x5B, 셀 단자쪽)",
          nets={"VCC": "+3V3", "GND": "GND", **I2C}),
-    Inst("ADS1115", "U4", 590, 114, nets={
+    Inst("ADS1115", "U4", 590, 188, nets={
         "A0": "FSR_OUT", "VDD": "+3V3", "GND": "GND", **I2C, "ADDR": "GND",
     }, nc=["A1", "A2", "A3", "ALRT"]),
-    Inst("OLED", "U6", 590, 174, nets={
-        "GND": "GND", "VCC": "+3V3",
-        "D0": "SPI_SCLK", "D1": "SPI_MOSI",
-        "RES": "OLED_RES", "DC": "OLED_DC", "CS": "SPI_CE0",
-    }),
 
     # ---- 릴레이 IN 풀업 (부팅 중 오동작 방지)
     Inst("R", "R3", 590, 216, value="10k", nets={"1": "+3V3", "2": "RLY_IN1"}),
@@ -392,18 +400,30 @@ _COLUMNS: list[tuple[float, list[tuple[str, str]]]] = [
     ]),
     (580, [
         ("h1", "Raspberry Pi 5 헤더 배선"),
-        ("", "물리핀 1, 17   3.3V        센서 · OLED · 릴레이 VCC(옵토측)"),
+        ("", "물리핀 1, 17   3.3V        센서 · TFT(VCC+LED) · 릴레이 VCC(옵토측)"),
         ("", "물리핀 2       5V          릴레이 JD_VCC(코일측)"),
         ("", "물리핀 3       GPIO2/SDA   I2C 데이터"),
         ("", "물리핀 5       GPIO3/SCL   I2C 클럭"),
         ("", "물리핀 7       GPIO4       1-Wire (+ 4.7k 풀업 -> 3.3V) -> DS18B20 x3 (병렬)"),
-        ("", "물리핀 18      GPIO24      OLED RES"),
-        ("", "물리핀 19      GPIO10      OLED D1 (MOSI)"),
-        ("", "물리핀 22      GPIO25      OLED DC"),
-        ("", "물리핀 23      GPIO11      OLED D0 (SCLK)"),
-        ("", "물리핀 24      GPIO8       OLED CS (SPI0 CE0)"),
+        ("", "물리핀 18      GPIO24      TFT RESET"),
+        ("", "물리핀 19      GPIO10      TFT SDI (MOSI)"),
+        ("", "물리핀 22      GPIO25      TFT DC/RS"),
+        ("", "물리핀 23      GPIO11      TFT SCK"),
+        ("", "물리핀 24      GPIO8       TFT CS (SPI0 CE0)"),
         ("", "물리핀 29/31/33/35         릴레이 IN1 / IN2 / IN3 / IN4"),
         ("", "물리핀 6,9,14,20,25,30,34,39   GND (스타 그라운드)"),
+        ("", ""),
+        ("h2", "[!] TFT 3.5in — 표시 전용 9핀만 쓴다"),
+        ("", "14핀 중 T_CLK / T_CS / T_DIN / T_DO / T_IRQ 5핀은 터치용이라 미결선."),
+        ("", "SDO(MISO)도 화면에서 읽을 일이 없어 미결선 -> SPI0 은 MOSI 단방향이다."),
+        ("", "LED(백라이트)는 3.3V 직결 = 상시 점등. 밝기 제어를 원하면 PWM GPIO 로 옮긴다."),
+        ("", "SPI 배선 5가닥(CS/RESET/DC/SDI/SCK)은 교체 전 OLED와 GPIO가 완전히 같다."),
+        ("", "[주의] VCC 는 3.3V 로 넣는다. 보드에 3.3V LDO 가 얹힌 개체는 3.3V 입력으로"),
+        ("", "       드롭아웃이 모자라 화면이 안 켜질 수 있다 -> 그때만 5V(물리핀 2·4)로 옮긴다."),
+        ("", "       로직(CS/SCK/SDI/DC/RESET)은 어느 쪽이든 3.3V TTL 이다."),
+        ("", "[주의] ILI9488 은 SPI 에서 RGB565 를 못 쓴다. 픽셀당 3바이트(RGB666)라"),
+        ("", "       480x320 전체 갱신이 약 460KB 다. 100ms 계측 루프에 전체 화면 갱신을"),
+        ("", "       올리지 마라 -> 바뀐 영역만 부분 갱신하고, 표시는 계측과 별도 스레드로."),
         ("", ""),
         ("h2", "이번 회로에 없는 것"),
         ("", "MQ-2 가스(보류) / 음향 센서(미구매)  ->  gas_raw, acoustic_raw 는 null."),
