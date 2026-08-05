@@ -1083,7 +1083,10 @@ v3 알림 센터 상단에 **"오늘의 알림 요약 — 확인이 필요한 �
 ```
 
 - `dedupeWindowMinutes: 5` — *"동일 이벤트는 5분 내 중복 발송을 억제합니다."* `[v3: T.dedupeNote]` `[REQ-WEB-066]`
-- v3는 토글을 켤 때 확인 모달을 띄운다 `[v3: toggleConfirm]`. 순수 UI이며 API에 영향 없음.
+- 채널 토글은 카카오(`KAKAO`), 이메일(`EMAIL`), SMS(`SMS`), 웹푸시(`WEBPUSH`) 각각 독립적으로 켜고 끈다. 토글 클릭은 해당 채널의 새 상태를 저장 요청하는 동작이며, 다른 채널 상태를 바꾸지 않는다.
+- 프론트는 토글 클릭 시 `PATCH /api/settings/alerts`를 호출한다. 요청은 서버가 보유한 전체 채널 상태를 기준으로 다음처럼 보낸다: `{ "channels": { "KAKAO": true, "EMAIL": true, "SMS": false, "WEBPUSH": true } }`.
+- `200` 응답의 `channels`를 화면의 최종 상태로 반영한다. 저장 실패 시 토글을 이전 상태로 되돌리고 `details.fields[]`의 오류를 표시하며, 실패한 상태를 서버에 저장된 것으로 표시하지 않는다.
+- 토글 상태는 `/api/me` 응답의 `preferences`와 섞지 않는다. 테마·언어는 `/api/settings/preferences`, 알림 채널은 `/api/settings/alerts`가 각각의 정본이다.
 
 **`/api/settings/voice-alert`** — 필드는 `PLAN.md`에 이미 확정되어 있다 `[PLAN]`
 
