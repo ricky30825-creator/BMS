@@ -412,6 +412,7 @@ const locked = gated && r !== 'battery';
   "user": {
     "id": "u_01H...",
     "name": "홍길동",
+    "loginId": "hong",
     "email": "hong@cellguard.io",
     "phone": "010-1234-5678",
     "role": "USER",
@@ -436,6 +437,12 @@ const locked = gated && r !== 'battery';
 - `activeSession`이 `null`이면 프론트는 **§3.1 게이트 모드**로 진입한다.
 - `unreadAlertCount` → 사이드바 `알림 센터` 배지 `[v3: badge '2']`
 - `activeAnomalyCount` → 사이드바 `이상 탐지` 배지 `[v3: badge '9']`
+
+**사용자 프로필 정본과 표시 필드**
+
+- `GET /api/me.user`의 `id`, `name`, `loginId`, `email`, `phone`, `role`, `status`가 로그인 사용자 프로필의 정본이다. 앱 셸, 설정 화면, 알림·감사 표시의 사용자 이름은 이 객체의 `name`을 사용한다.
+- 관리자 목록의 `items[].name`과 관리자 상세의 사용자 `name`은 같은 `user.name`을 내려주는 조회용 투영이다. `loginId`는 로그인 식별자이고 표시 이름의 대체값이 아니다.
+- 별도의 `displayName`, `profileLabel`, `adminName` 같은 중복 필드를 만들지 않는다. 화면의 한국어 레이블(예: `이름`, `사용자명`)은 API 필드 `name` 하나에 매핑한다.
 
 #### `POST /api/auth/sign-out` — Better Auth 위임 `[REQ-WEB-014]`
 
@@ -1191,6 +1198,13 @@ v3 실측 구성: KPI 카드 4개 → 이벤트 추이 차트 + 배터리 상태
 > - `status` 변경은 `/suspend`·`/restore` 전용 — **사유 필수 + 감사 기록**(§3.4·§3.6)이 걸려 있다. `PATCH`로 뚫리면 그 통제가 통째로 우회된다.
 > - **`role` 변경은 웹에서 아예 불가하다.** 관리자 계정은 운영자가 DB·스크립트로 직접 만든다. 권한 상승 경로를 웹에 두지 않아 공격면이 줄어든다. **프론트는 유저 수정 모달에서 `권한` 셀렉트를 제거해야 한다**(§12-16).
 > - `batteryCount`는 **파생값**이다. v3 유저 수정 모달이 `등록 배터리 수`를 편집 가능한 입력으로 그리지만 `[v3 실측]`, 이는 프로토타입 오류다 — 프론트가 읽기 전용으로 바꿔야 한다(§12-15).
+
+**관리자 수정 후 일반 사용자 반영 규칙** `[REQ-WEB-115/067]`
+
+- `PATCH /api/admin/users/{id}`는 관리자 화면 전용 복사본이 아니라 canonical `user` 레코드를 트랜잭션으로 수정한다. 성공 응답은 `200`과 검증·정규화된 최신 `user` 객체를 반환한다.
+- 대상 사용자가 이후 로그인하거나 앱을 부팅하면 `GET /api/me`가 같은 canonical 레코드에서 최신 `name`·`phone`·`loginId`를 읽어야 한다. 따라서 새 로그인에서 관리자 수정값이 자동으로 계정 정보와 좌측 하단 로그인 계정 표시까지 반영된다. 프론트는 로그인 시점의 세션 클레임에 남은 이전 이름을 정본으로 사용하지 않는다.
+- 이미 로그인한 세션을 강제로 로그아웃시키지는 않는다. 열린 앱의 즉시 갱신이 필요하면 프론트가 앱 포커스/재진입 시 `GET /api/me`를 재조회해 최신 `user` 객체를 적용한다. 관리자 수정 이벤트를 실시간으로 푸시하는 별도 채널은 이 계약의 필수가 아니다.
+- 관리자 수정이 실패하면 `user` 프로필과 사용자 표시값을 변경하지 않으며, `400 VALIDATION_FAILED`의 `details.fields[]`를 기준으로 관리자 화면에 오류를 표시한다.
 
 **`POST /api/admin/users/{id}/password-reset`** `[REQ-WEB-116]`
 
