@@ -325,7 +325,7 @@ ADS1115         TLS/SASL  battery-anomaly-alerts  테이블)           이중 �
 **관리자 데이터 모델/API**
 - `users`: `role`(`USER`/`ADMIN`), `status`(`ACTIVE`/`SUSPENDED`), `suspended_reason`, `suspended_at`
 - `battery_asset`: `admin_status`(`NORMAL`/`WATCH`/`BLOCKED`), `admin_memo`, `admin_status_updated_at`, `admin_status_updated_by`
-- `device`: `device_id`, `display_name`, `last_seen_at`, `status`(`ONLINE`/`DELAYED`/`OFFLINE`/`UNKNOWN`)
+- `device`: `device_id`, `display_name`, `last_seen_at`, `status`(`ONLINE`/`DELAYED`/`OFFLINE`/`UNKNOWN`), `hardware_profile`(`MODE2_FULL`/`COMBINED_EXISTING_PARTS_V1`; 서버 배포 메타데이터, Raw에는 미포함)
 - `audit_log`: `log_id`, `actor_id`, `action`, `target_type`, `target_id`, `before_value`, `after_value`, `reason`, `created_at`
 - 관리자 API: `GET /admin/users`, `GET /admin/users/{userId}`, `PATCH /admin/users/{userId}/status`, `PATCH /admin/users/{userId}/password`, `GET /admin/batteries`, `GET /admin/batteries/{batteryId}`, `PATCH /admin/batteries/{batteryId}/admin-status`, `GET /admin/stats/summary`, `GET /admin/stats/batteries`, `GET /admin/stats/anomalies`, `GET /admin/devices`, `GET /admin/devices/{deviceId}`, `GET /admin/system-health`, `GET /admin/notices`, `POST /admin/notices`, `PATCH /admin/notices/{noticeId}`, `PATCH /admin/notices/{noticeId}/archive`, `GET /admin/audit-logs`
 

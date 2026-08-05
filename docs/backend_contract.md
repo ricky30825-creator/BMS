@@ -1347,6 +1347,8 @@ v3 테이블 컬럼: `시간 · 관리자 · 행위 · 대상 · 변경 내용` 
 >
 > 물리 근거·산식·안전 조건의 정본은 `docs/hardware/mode2_powerbank_diagnosis_spec.md`다. 이 절은 그 스펙의 API 표면만 정의한다. **산식을 이 문서에서 다시 정의하지 않는다.**
 
+에지 배포의 `hardware_profile`을 함께 검사한다. 이 값은 Raw 프레임에서 받지 않고 서버가 `device_id`별 배포 메타데이터로 관리한다. 값이 없거나 알 수 없으면 준비되지 않은 것으로 닫는다. `MODE2_FULL`만 F21 진단 실행이 가능하다. `COMBINED_EXISTING_PARTS_V1`은 MQ-2·확정 안전 문턱·연속 감시가 없는 0.5A·10초 시운전 프로필이므로, Raw의 `gas_raw`·`pressure_raw`·`temp_contact`·`temp_points.contact`·`soc_pct`·`diag_phase`·`load_target_a`는 **모두 반드시 `null`**이다. 모드 1 캐시값이나 추정값으로 채우지 않는다. 이 프로필에서 빠른 진단·정밀 용량시험 시작 요청은 `409 SAFETY_PROFILE_NOT_READY`로 거절한다.
+
 **모드 2 전용이다.** `targetMode`가 1인 배터리에 호출하면 `409 MODE_NOT_SUPPORTED`.
 
 #### `POST /api/diagnosis/quick` — 빠른 진단 시작 `[REQ-WEB-138]`
@@ -1366,6 +1368,7 @@ v3 테이블 컬럼: `시간 · 관리자 · 행위 · 대상 · 변경 내용` 
 | `409 DIAGNOSIS_IN_PROGRESS` | 이미 진행 중인 진단이 있음 |
 | `409 DEVICE_OFFLINE` | 진단기 오프라인 |
 | `409 RELAY_CUT` | 릴레이가 차단 상태라 부하 경로가 없음 |
+| `409 SAFETY_PROFILE_NOT_READY` | `COMBINED_EXISTING_PARTS_V1` 등 필수 안전계층·연속 감시가 준비되지 않은 하드웨어 프로필 |
 
 #### `POST /api/diagnosis/capacity` — 정밀 용량 테스트 시작 `[REQ-WEB-139]`
 
