@@ -1,6 +1,6 @@
 # 구현 상태 및 문서 지도
 
-> 기준일: 2026-08-02
+> 기준일: 2026-08-05
 
 이 문서는 설계 문서의 요구사항과 현재 저장소에 실제로 존재하는 구현을 구분하기 위한 실행용 지도다. 요구사항의 정본이 아니며, 상세 계약은 아래 링크의 원본 문서를 따른다.
 
@@ -27,6 +27,10 @@
 | 모드 2 하드웨어 | [`docs/hardware/mode2_powerbank_diagnosis_spec.md`](hardware/mode2_powerbank_diagnosis_spec.md) | 설계 계약 있음, 구현 전 |
 | 디자인·목업 | [`design-system/cellguard/MASTER.md`](../design-system/cellguard/MASTER.md), [`web/cellguard_mockup_v4.html`](../web/cellguard_mockup_v4.html) | 참고 산출물 있음 |
 | 자동 검증 도구 | `tools/contract_lint.py`, `landing_lint.py`, `bundle_io.py` 및 단위 테스트 | 부분 구현 |
+
+### 2026-08-05 계약 동기화 주의
+
+v3 프로토타입과 정본 문서에는 모드 1/2, 대표 온도 최댓값, signed 전류, 모드 2 상대 SOC, 서버 Fail-Safe 자동 차단, 서버 자동 승인 릴레이, 100ms Raw CSV, WS 재연결·중복 방지 규약이 반영됐다. 이는 **화면·계약 동기화 결과이지 백엔드 구현 완료를 뜻하지 않는다.** 해당 REST/WS, export job, Fail-Safe 판정·승인·감사 원자 처리는 현재 구현 상태상 미착수 또는 스텁이다.
 
 `backend/dist/`는 TypeScript 빌드 산출물이며 소스 구현의 근거로 세지 않는다. `PLAN.md`의 예정 폴더 구조도 실제 디렉터리 존재를 의미하지 않는다.
 

@@ -6,15 +6,15 @@
 
 | 항목 | 값 |
 |---|---|
-| 작성일 | 2026-07-22 |
+| 작성일 / 최종 검증일 | 2026-08-05 |
 | 근거 기준 | `설계 산출물/셀가드 프로토타입_v3.html`, `docs/feature_definition.md`(REQ-WEB-001~073, 069 결번), `docs/admin_feature_definition.md`(REQ-WEB-101~136), `PLAN.md` |
-| 검증 방법 | v3 번들에서 앱 소스 복원(코드 실측) + **로컬 HTTP로 띄워 전 화면 육안 확인**(2026-07-22, 사용자 10화면 + 관리자 6화면) |
+| 검증 방법 | v3 번들 소스 복원·정적 대조 + 로컬 HTTP 실행 + **Codex 인앱 브라우저 직접 입력·선택·모달·화면 전환 검증**(2026-08-05) |
+| 검증 대상 SHA-256 | `3d3d8870f56538fc8401949b8d51a82459709070da005ad439aebf11dc5c4462` (`설계 산출물/셀가드 프로토타입_v3.html`) |
 | 대상 화면 | 19개 영역 (공개 3 · 일반 사용자 10 · 관리자 6) |
 
 > **관련 문서**: `docs/product_contract.md`(디자인 무관 제품 계약서)가 같은 v3를 근거로 **과업 플로우 T0~T15**를 기술한다. 이 문서는 그 플로우를 지탱하는 **API 인터페이스**를 정의한다. 둘이 충돌하면 화면·플로우는 `product_contract.md`, 요청/응답 스키마는 이 문서가 우선한다.
 
-> **기능정의서와의 관계**: `docs/feature_definition.md`는 2026-07-22 커밋 `9bb6d8e`로 v3 기준에 맞춰졌고, 이상점수 0.0–1.0 스케일·4등급 임계·게이지 범례 버그를 이미 명시하고 있다. 이 문서의 §1.6은 그 문서와 **일치**한다.
-> 다만 기능 항목의 **화면 위치** 일부는 아직 v3와 어긋난다(§11). 충돌 시 v3 화면이 우선한다.
+> **기능정의서와의 관계**: 2026-08-05 검증에서 모드·필드·동기화·Raw CSV·릴레이 승인 규칙을 연관 정본과 함께 갱신했다. 남은 의도적 제외·미구현은 §11~12에만 기록한다.
 
 ## 0. 표기 규칙
 
@@ -146,7 +146,7 @@ v3 UI는 이상점수를 **0–100 정수**로 표시하고(`score: 82`), `PLAN.
 
 **임계치는 시스템 고정값이다.** 사용자·관리자 모두 변경할 수 없다(임계치 설정 기능은 제거됨). 그래도 `grade`를 서버가 계산해 동봉하는 이유는 **판정 로직을 한 곳에만 두기 위해서다** — 프론트·백엔드·AI가 각자 임계값을 들고 있으면 v3에서 실제로 벌어진 것과 똑같은 3-벌 분기 사고가 재현된다.
 
-> **프론트 작업 메모:** v3의 Raw 데이터 모달은 `anomaly_score`를 `82`로 표시한다. "원본 데이터"를 표방하는 화면이 가공값을 보여주는 셈이므로, 실제 구현에서는 `0.82`로 고친다.
+> **v3 동기화 상태(2026-08-05):** Raw 데이터 화면도 `anomaly_score: 0.82`를 표시하도록 수정했다.
 
 **등급 정의** `[PLAN]`
 
@@ -157,26 +157,25 @@ v3 UI는 이상점수를 **0–100 정수**로 표시하고(`score: 82`), `PLAN.
 | `WARNING` | 경고 | 0.6 ≤ s < 0.8 |
 | `DANGER` | 위험 | 0.8 ≤ s ≤ 1.0 |
 
-**⚠ v3 프로토타입의 알려진 버그 — 구현하지 말 것**
+**v3 프로토타입 과거 버그 기록 — 2026-08-05 수정 완료**
 
-v3에는 판정 로직이 **세 벌** 존재하고 서로 어긋난다.
+v3에 흩어져 있던 표시 로직은 아래처럼 하나의 4등급 규칙으로 맞췄다.
 
 | 위치 | 로직 | 등급 수 |
 |---|---|---|
 | 랜딩 게이지 (`scoreLabel` 계산) | `≥80 위험 / ≥60 경고 / ≥30 주의` | 4등급 — **정상** |
-| 대시보드 (`dScoreLabel` 계산) | `≥70 위험 / ≥40 주의` | 3등급 — **버그** |
-| 게이지 범례 (`T.band0/band40/band70`) | `정상 0–39 / 주의 40–69 / 위험 70+` | 3등급 — **버그** |
-| 관리자 배터리 목록 (`scCol` 계산) | `≥70 / ≥40` | 3등급 — **버그** |
+| 대시보드 (`dScoreLabel` 계산) | `≥80 위험 / ≥60 경고 / ≥30 주의` | 4등급 — 수정 완료 |
+| 게이지 범례 | `정상 0–29 / 주의 30–59 / 경고 60–79 / 위험 80+` | 4등급 — 수정 완료 |
+| 관리자 배터리 목록 (`scCol` 계산) | `≥80 / ≥60 / ≥30` | 4등급 — 수정 완료 |
 
-계약은 **4등급(0.3/0.6/0.8)** 하나뿐이다. 백엔드는 v3의 70/40을 참고하지 말 것.
+계약은 **4등급(0.3/0.6/0.8)** 하나뿐이다. 실제 제품에서는 서버가 내려준 `grade`만 판정 정본으로 사용한다.
 
-**브라우저 실측 증거 (2026-07-22)**
+**브라우저 재검증 (2026-08-05)**
 
-- 배터리 관리 화면의 **PACK-003은 이상점수 33인데 배지가 `정상`** 이다. 4등급이면 `주의`여야 한다. (엄밀히는 이 배지 문자열이 mock 하드코딩이고 판정 로직 산출물이 아니지만, **목업 데이터조차 4등급과 어긋나 있다**는 점에서 같은 혼선의 산물이다.)
-- 반대로 관리자 배터리 운영 로그에는 **`이상점수 위험 구간 진입 — 82 (위험 임계 80)`** 이라고 적혀 있다. **v3 자신도 일부 화면에서는 80을 정답으로 쓰고 있다.**
-- 대시보드 게이지 범례 `정상 0–39 / 주의 40–69 / 위험 70+` 는 화면에 실재하며, 4등급으로 교체해야 한다.
+- 대시보드·게이지 범례·관리자 배터리 목록이 모두 `정상 0–29 / 주의 30–59 / 경고 60–79 / 위험 80+`를 사용한다.
+- 위험 점수만으로 자동 차단 통보가 열리지 않고, 서버 `relay.autoCut` 이벤트가 있어야만 열리는 것을 확인했다.
 
-> 위 표의 `관리자 배터리 목록 (scCol)` 행은 **등급 라벨이 아니라 점수 글자 색상**을 정하는 로직이다. 그래도 70/40 경계를 쓰는 건 같다.
+> 위 표는 회귀 방지 기록이다. 구현은 서버 `grade`를 정본으로 사용하고 프론트 임계 비교는 목업 표시 외에는 사용하지 않는다.
 
 ### 1.7 상태·등급 enum 일람
 
@@ -212,8 +211,17 @@ v3에는 판정 로직이 **세 벌** 존재하고 서로 어긋난다.
 | `powerW` | W |
 | `socPct` | % (0–100 정수) |
 | `tempContact`, `tempIrSurface` | °C |
+| `representativeTempC` | °C — 유효한 `tempContact.value`, `tempIrSurface.value` 중 큰 값 |
 | `gasRaw`, `pressureRaw`, `acousticRaw` | ADC raw (무차원 정수) |
 | `dTdt` | °C/min `[v3: '+2.8 °C/min']` |
+
+**측정 필드 정본 규칙** `[확정 2026-08-05]`
+
+- `currentA`와 `powerW`는 **양수=충전, 음수=방전, 0=대기**인 signed 값이다. 저장·AI·API는 부호를 보존하고, 화면만 절댓값과 `CHARGING`/`DISCHARGING`/`IDLE` 방향 라벨을 함께 표시한다.
+- 대표 온도는 서버가 유효한 non-null 접촉/IR 값 중 큰 값으로 계산한다. 둘 다 null이면 `representativeTempC.value=null`; 선택 소스는 `representativeTempSource=CONTACT|IR_SURFACE|null`이다. 에지 Raw에는 합성 `temp_c`를 추가하지 않는다.
+- 모드 1은 두 온도 소스를 사용할 수 있고, 모드 2는 `tempContact=null`, IR 표면 온도만 사용한다.
+- 모드 2 SOC는 `socBasis=RELATIVE_SESSION_START`, 세션 시작을 100%로 잡은 상대 SOC다. 모드 1은 `socBasis=ABSOLUTE_GAUGE`. 기준을 만들 수 없으면 `socPct=null`이며 다른 세션·모드의 값을 재사용하지 않는다.
+- 각 지표는 `ageMs`와 `freshness=FRESH|STALE`를 가진다. stale 값은 마지막 수치를 표시할 수 있으나 AI 입력과 실시간 임계 판정에서 제외한다. `ageMs`는 발행 시각과 실제 측정 시각의 차이며 필드·하드웨어 프로필별 `maxAgeMs`를 적용한다.
 
 ---
 
@@ -342,19 +350,25 @@ const locked = gated && r !== 'battery';
 
 *"Fail-Safe 인터락은 사용자 조작보다 우선합니다."* `[v3: T.failsafeNote]`
 
-- 가스·압력·음향 임계 초과 또는 온도 상한 초과 시, **AI 판정과 무관하게** 즉시 릴레이 차단. `[PLAN]`
+- **자동 차단은 서버가 확정한 Fail-Safe 이벤트만** 발생시킨다. AI 점수·등급, 카드 색상, 프론트 온도 비교는 자동 차단·자동 차단 모달을 열 수 없다.
+- 현재 지원 trigger code는 `FAILSAFE_TEMP_CONTACT_OVER_CAP`, `FAILSAFE_TEMP_IR_OVER_CAP`, `FAILSAFE_TEMP_RISE_RATE`, `FAILSAFE_GAS_OVER_THRESHOLD`, `FAILSAFE_PRESSURE_RISE`, `FAILSAFE_ACOUSTIC_OVER_THRESHOLD`다. 해당 센서가 없는 하드웨어 프로필의 코드는 발생시키지 않는다.
+- 가스·압력·음향 임계 초과 또는 온도 상한/상승률 초과 시, **AI 판정과 무관하게** 즉시 릴레이 차단한다. `[PLAN]`
 - 인터락이 걸린 상태에서 사용자의 릴레이 복구 요청은 `409 INTERLOCK_LOCKED`.
-- 자동 차단이 발생하면 **WebSocket으로 즉시 푸시**해야 한다. 프론트는 이때 자동 차단 모달을 띄운다. `[v3: autoCutOpen]` `[REQ-WEB-064]`
+- 자동 차단이 발생하면 `relay.autoCut`을 즉시 푸시한다. 프론트는 **이 타입을 수신했을 때만** trigger code와 대표 온도를 포함한 자동 차단 모달을 띄운다.
 
 ### 3.4 위험 제어 승인 절차 `[v3]` `[REQ-WEB-062/063]`
 
 *"이 조작은 사유 입력과 재인증을 요구하며, 승인자·시간·IP가 감사 추적에 기록됩니다."* `[v3: T.rmNote]`
 
-릴레이 차단/복구 요청은 **한 번의 호출에 사유와 비밀번호를 함께** 받는다.
+여기서 승인은 관리자 사람의 수동 승인이 아니라 **서버 자동 승인**이다. 소유자 `USER` 또는 `ADMIN`이 사유와 본인 비밀번호를 한 번의 요청으로 제출하면 서버가 즉시 승인/거부한다.
 
 - `reason` 누락 → `422 REASON_REQUIRED`
 - `password` 불일치 → `401 REAUTH_REQUIRED`
-- 성공 시 감사 로그에 `{ actorId, action, targetId, reason, ip, userAgent, at }` 기록
+- 서버는 인증·소유권·권한·활성 세션·디바이스 온라인·현재 릴레이 상태·복구 인터락을 모두 검증한 뒤에만 하드웨어 명령을 실행한다.
+- 승인 전에는 릴레이 상태, interlock, 감사 로그를 변경하지 않는다. 승인 후 명령 실행과 감사 기록을 원자적으로 처리하고 실패 시 성공 응답이나 성공 이벤트를 내보내지 않는다.
+- 모든 요청은 `Idempotency-Key` 헤더가 필수다. 같은 키·같은 본문은 같은 결과를 반환하고, 같은 키·다른 본문은 `409 IDEMPOTENCY_CONFLICT`다.
+- 성공 응답은 `decision: "APPROVED"`, `requestId`, 갱신 릴레이 객체를 포함한다. 정책 거부 응답은 에러 code와 `decision: "REJECTED"`를 포함한다.
+- 성공 시 감사 로그에 `{ actorId, action, targetId, reason, requestId, ip, userAgent, at }`를 기록한다.
 
 ### 3.5 감사 로그 불변성 `[v3]` `[REQ-WEB-136]`
 
@@ -444,6 +458,18 @@ const locked = gated && r !== 'battery';
 - 관리자 목록의 `items[].name`과 관리자 상세의 사용자 `name`은 같은 `user.name`을 내려주는 조회용 투영이다. `loginId`는 로그인 식별자이고 표시 이름의 대체값이 아니다.
 - 별도의 `displayName`, `profileLabel`, `adminName` 같은 중복 필드를 만들지 않는다. 화면의 한국어 레이블(예: `이름`, `사용자명`)은 API 필드 `name` 하나에 매핑한다.
 
+#### 인증·가입·계정 찾기 입력 계약 `[v3 확정 2026-08-05]`
+
+| 화면 입력/선택 | 요청 |
+|---|---|
+| 로그인 이메일·비밀번호 | Better Auth `POST /api/auth/sign-in/email` |
+| 가입 이름·전화·이메일·비밀번호·필수약관 동의 | Better Auth 가입 요청 + `termsVersion`, `privacyVersion`, `acceptedAt` 서버 기록 |
+| 이메일 중복확인 | `POST /api/account/email-availability` `{ "email": "..." }` → `{ "available": true }` |
+| 비밀번호 재설정 이메일 | Better Auth forgot-password. 존재 여부를 노출하지 않는 동일 성공 문구 사용 |
+| 이메일 찾기 이름·전화 | `POST /api/account/email-lookup` → 일치해도 마스킹 이메일만 반환 |
+
+두 계정 확인 엔드포인트는 Origin 검증·rate limit·감사 보안 이벤트를 적용한다. 이메일 찾기는 불일치와 존재 계정을 구별 가능한 상태코드/응답시간으로 노출하지 않는다.
+
 #### `POST /api/auth/sign-out` — Better Auth 위임 `[REQ-WEB-014]`
 
 ### 4.2 배터리 자산관리 (F6)
@@ -474,7 +500,8 @@ const locked = gated && r !== 'battery';
     "latest": {
       "voltageV": 11.9,
       "currentA": 2.4,
-      "tempC": 58.0,
+      "representativeTempC": 58.0,
+      "representativeTempSource": "CONTACT",
       "socPct": 78,
       "score": 0.82,
       "grade": "DANGER",
@@ -499,7 +526,7 @@ const locked = gated && r !== 'battery';
   "targetMode": 2,
   "maker": "Samsung SDI",
   "model": "18650",
-  "capacityMah": 3000,
+  "capacityWh": 37.0,
   "memo": "측정 대상 특이사항…"
 }
 ```
@@ -507,7 +534,8 @@ const locked = gated && r !== 'battery';
 - `label` **필수**, 중복 허용 `[PLAN]`
 - `chemistry` **필수** `[PLAN]`
 - `targetMode` **필수** — 재연결 시 모드 재선택을 없애기 위해 배터리에 고정된다 `[PLAN]`
-- `seriesCount` / `maker` / `model` / `capacityMah` / `memo` **선택** `[PLAN.md:131-136]`
+- `seriesCount` / `maker` / `model` / `memo`는 선택이다. 용량은 `capacityWh`를 우선하고, `capacityMah`를 받을 때는 공칭전압도 함께 저장해 Wh로 환산한다.
+- **`targetMode=2`이면 `capacityWh` 또는 환산 가능한 `capacityMah`가 필수**다. 둘 다 없으면 `422 CAPACITY_REQUIRED`. v3의 `정격 용량(Wh)` 입력은 `capacityWh`에 매핑한다.
 - 201 응답 본문은 생성된 배터리 객체 전체 (프론트가 목록에 즉시 삽입)
 
 > **`memo`는 사용자 메모다.** v3 **배터리 수정** 모달에 `메모`(placeholder `측정 대상 특이사항…`) 입력이 있고 `PLAN.md:136`에도 선택 필드로 정의돼 있다 `[v3]` `[PLAN]`.
@@ -520,8 +548,7 @@ const locked = gated && r !== 'battery';
 
 - `maker` / `model` **선택** — 카드·상세의 `18650 Li-ion · 3S` 표시에 쓴다.
 
-> **v3 등록 폼에는 `maker`/`model` 입력이 없다** `[v3 실측]`. 입력은 `배터리 이름 / 종류(리튬이온·리튬폴리머) / 측정 모드(1·2) / 직렬 셀 수(S)` 4개뿐이고, 안내 문구는 `등록 시 battery_id(UUID)가 발급되고 측정 모드가 자산에 고정됩니다`이다.
-> **결정: 등록 폼에 입력을 추가한다.** 백엔드 스키마는 위 요청 본문 그대로 가고, **프론트가 등록·수정 모달에 `제조사`·`모델` 입력 2개를 추가한다**(§12-11). 둘 다 선택 입력이므로 미입력 시 카드 표시는 `리튬이온 · 3S`로 축약한다.
+> **v3 동기화 상태(2026-08-05):** 등록·수정 화면에 `제조사`·`모델` 실제 입력을 추가했다. 둘 다 선택 입력이므로 미입력 시 카드 표시는 `리튬이온 · 3S`로 축약한다. 모드 2 등록에는 상대 SOC 기준을 위한 정격 용량 입력도 제공한다.
 
 #### `GET /api/batteries/{id}` — 배터리 상세/이력 (F7) `[REQ-WEB-040/044]`
 
@@ -538,7 +565,9 @@ const locked = gated && r !== 'battery';
   "memo": null,
   "owner": { "id": "u_01H...", "name": "홍길동" },
   "current": {
-    "voltageV": 11.9, "currentA": 2.4, "tempC": 58.0, "socPct": 78,
+    "voltageV": 11.9, "currentA": -2.4,
+    "representativeTempC": 58.0, "representativeTempSource": "CONTACT",
+    "socPct": 78, "socBasis": "ABSOLUTE_GAUGE",
     "score": 0.82, "grade": "DANGER", "measuredAt": "..."
   },
   "health": {
@@ -684,7 +713,9 @@ WebSocket 연결 **전에** 화면을 채우기 위한 1회 조회. 이후 갱�
     "powerW":       { "value": 28.5, "status": "OK" },
     "tempContact":  { "value": 58.0, "status": "WARN" },
     "tempIrSurface":{ "value": 59.2, "status": "WARN" },
+    "representativeTempC": { "value": 59.2, "source": "IR_SURFACE", "status": "WARN" },
     "socPct":       { "value": 78,   "status": "OK" },
+    "socBasis": "ABSOLUTE_GAUGE",
     "measuredAt": "2026-07-22T14:32:10.000Z"
   },
   "anomaly": {
@@ -692,7 +723,7 @@ WebSocket 연결 **전에** 화면을 채우기 위한 1회 조회. 이후 갱�
     "aeScore": 0.79, "informerScore": 0.86,
     "evaluatedAt": "..."
   },
-  "relay": { "state": "OPEN", "reasonCode": "FAILSAFE_TEMP_OVER_CAP", "changedAt": "..." },
+  "relay": { "state": "OPEN", "reasonCode": "FAILSAFE_TEMP_IR_OVER_CAP", "changedAt": "..." },
   "notices": [ /* NoticeSummary × 3 */ ],
   "quickTrend": {
     "metric": "temp",
@@ -710,7 +741,7 @@ WebSocket 연결 **전에** 화면을 채우기 위한 1회 조회. 이후 갱�
 
 | 지표 | WARN | CRIT | 근거 |
 |---|---|---|---|
-| `tempContact`, `tempIrSurface` | ≥ 55°C | ≥ 60°C | v3 `dTempWarn = dTemp >= 55` `[v3]` / CRIT은 Fail-Safe 온도 상한과 정렬 `[제안]` |
+| `tempContact`, `tempIrSurface`, `representativeTempC` | ≥ 55°C | ≥ 60°C | 서버 표시 상태 정책. 프론트는 비교하지 않으며 이 상태로 자동 차단하지 않는다 |
 | `voltageV`, `currentA`, `socPct`, `powerW` | — | — | **미정 → `status: null`** |
 
 - **`status`는 `null`을 허용한다.** 임계값이 정해지지 않은 지표는 서버가 `null`을 내려보내고, 프론트는 그 카드에 배지를 렌더링하지 않는다. 온도 카드만 배지가 붙는다.
@@ -796,8 +827,8 @@ v3가 표시하는 4개 특징: `dT/dt(온도 상승률)`, `I_smooth(전류 변�
     "grade": null,
     "severity": "CUT",
     "source": "SYSTEM",
-    "causeCode": "FAILSAFE_TEMP_OVER_CAP",
-    "causeParams": { "tempC": 61.4, "capC": 60 },
+    "causeCode": "FAILSAFE_TEMP_IR_OVER_CAP",
+    "causeParams": { "representativeTempC": 61.4, "representativeTempSource": "IR_SURFACE", "capC": 60 },
     "actionCode": "AUTO_CUT_AND_NOTIFY",
     "actionParams": {}
   }],
@@ -860,15 +891,18 @@ v3가 표시하는 4개 특징: `dT/dt(온도 상승률)`, `I_smooth(전류 변�
 | `temp`, 이상점수 | `max` | 피크를 평균으로 뭉개면 열폭주 전조가 사라진다 |
 | `volt`, `curr`, `soc` | `avg` | 추세 파악이 목적이고 순간 스파이크는 노이즈다 |
 
-#### `GET /api/trends/export` `[REQ-WEB-054/055]`
+#### Raw CSV / 추세 PDF 내보내기 `[REQ-WEB-054/055]` `[확정 2026-08-05]`
 
 CSV·PDF 버튼은 **추세 화면 상단, 기간 탭 옆**에 있다 `[v3 실측]`.
 
-쿼리: `GET /api/trends`의 파라미터 전부 + `format=csv|pdf`
+CSV는 집계 추세가 아니라 **100ms 센서 Raw 행**만 내보낸다. PDF는 기존 집계 추세 보고서다.
 
-- 응답: `200` + `Content-Disposition: attachment`
-- **동기 다운로드로 처리한다** `[확정]`. 내보내는 것은 원시 시계열이 아니라 **이미 집계된 버킷**이므로(위 표: 최대 30포인트 × 4지표 × 비교 배터리 수), 응답이 커질 일이 없다. 비동기 작업 큐·완료 알림은 만들지 않는다.
-- 기간 상한 = `period`가 곧 상한이라 별도 제한이 필요 없다. 비교 배터리는 최대 5개로 제한한다 `[v3: compareItems 5개]`.
+- `GET /api/metrics/export.csv?sessionId=&from=&to=`: 범위가 1시간 이하이면 `200 text/csv` 스트리밍 + `Content-Disposition: attachment`.
+- CSV 열은 최소 `measured_at,device_id,battery_id,session_id,mode,voltage_v,current_a,power_w,temp_contact,temp_ir_surface,soc_pct,soc_basis,gas_raw,pressure_raw,acoustic_raw,age_ms`다. 합성 대표 온도는 원본 두 온도와 혼동하지 않도록 원본 열에 포함하지 않는다.
+- 1시간 초과는 `POST /api/exports` `{ "kind":"RAW_METRICS_CSV", "sessionId":"...", "from":"...", "to":"..." }`로 작업을 만들고 `202 { id,status:"QUEUED" }`를 반환한다.
+- `GET /api/exports/{id}`는 `QUEUED|RUNNING|READY|FAILED|EXPIRED`와, `READY`일 때 단기 서명 `downloadUrl`, `expiresAt`, `sha256`, `rowCount`를 반환한다. `export.ready` WS 이벤트로 완료를 알린다.
+- 같은 사용자·같은 범위·같은 종류는 `Idempotency-Key`로 중복 작업을 방지한다. 사용자는 본인 소유 세션만 내보낼 수 있다.
+- `GET /api/trends/export.pdf`만 집계 버킷 PDF를 동기 다운로드한다. `format=csv|pdf` 혼합 엔드포인트는 폐기한다.
 
 ### 4.8 알림 센터 (F11)
 
@@ -989,8 +1023,8 @@ v3 알림 센터 상단에 **"오늘의 알림 요약 — 확인이 필요한 �
   "state": "OPEN",
   "changedAt": "...",
   "changedBy": { "type": "SYSTEM", "systemCode": "FAILSAFE" },
-  "reasonCode": "FAILSAFE_TEMP_OVER_CAP",
-  "reasonParams": { "tempC": 61.4, "capC": 60 },
+  "reasonCode": "FAILSAFE_TEMP_IR_OVER_CAP",
+  "reasonParams": { "representativeTempC": 61.4, "representativeTempSource": "IR_SURFACE", "capC": 60 },
   "interlock": { "engaged": true, "condition": "TEMP_OVER_CAP", "canRestore": false }
 }
 ```
@@ -1008,7 +1042,7 @@ v3 알림 센터 상단에 **"오늘의 알림 요약 — 확인이 필요한 �
 { "reason": "셀 3번 온도 임계값 초과로 긴급 차단", "password": "••••••••" }
 ```
 
-§3.4 승인 절차 적용. 성공 시 갱신된 릴레이 상태 객체 반환 + WebSocket 브로드캐스트.
+`Idempotency-Key` 헤더와 §3.4 서버 자동 승인 절차를 적용한다. 승인 전에는 아무 상태도 바꾸지 않는다. 성공 시 `200 { "decision":"APPROVED", "requestId":"...", "relay": { ... } }`를 반환한 다음 같은 `requestId`를 가진 WebSocket 이벤트를 브로드캐스트한다. 관리자 수동 승인 대기 상태는 없다.
 
 > **기존 `POST /api/relay/kill-switch/confirm`(`backend/src/server.ts:44`)을 `POST /api/relay/cut`으로 교체한다** `[확정]`. 현재 구현은 `202 accepted`만 반환하는 스텁이라 실제 제어가 없으므로 교체 비용이 없다.
 > 함께 맞출 것: 기존 감사 로그 action 이름이 `KILL_SWITCH_CONFIRM`·`ADMIN_ACCESS`로 §3.6 표(`RELAY_CUT`·`ADMIN_ACCESS_DENIED`)와 다르다.
@@ -1026,8 +1060,8 @@ v3 알림 센터 상단에 **"오늘의 알림 요약 — 확인이 필요한 �
     {
       "id": "rl_01G...", "action": "RELAY_AUTO_CUT", "at": "...",
       "actor": { "type": "SYSTEM", "systemCode": "FAILSAFE" },
-      "reasonCode": "FAILSAFE_TEMP_OVER_CAP",
-      "reasonParams": { "tempC": 61.4, "capC": 60 }
+      "reasonCode": "FAILSAFE_TEMP_IR_OVER_CAP",
+      "reasonParams": { "representativeTempC": 61.4, "representativeTempSource": "IR_SURFACE", "capC": 60 }
     }
   ]
 }
@@ -1544,14 +1578,24 @@ v3 테이블 컬럼: `시간 · 관리자 · 행위 · 대상 · 변경 내용` 
 **모든** 메시지는 아래 형태를 따른다. `[제안]`
 
 ```json
-{ "type": "metrics.tick", "at": "2026-07-22T14:32:10.000Z", "payload": { } }
+{
+  "v": 1, "type": "metrics.tick", "topic": "metrics",
+  "eventId": "evt_01J...", "streamId": "st_u_01J...",
+  "sequence": "1043", "cursor": "1043",
+  "at": "2026-08-05T14:32:10.000Z", "sessionId": "s_01J...",
+  "requestId": null, "payload": { }
+}
 ```
+
+- `eventId`는 이벤트 멱등 식별자, `sequence`는 사용자 stream 안에서 단조 증가하는 64비트 정수의 문자열, `cursor`는 재개용 불투명 문자열이다.
+- 클라이언트는 `eventId` 중복을 버리고 마지막 적용 sequence 이하의 역순 이벤트도 적용하지 않는다. `requestId`는 릴레이 등 쓰기 요청과 결과 이벤트를 결합한다.
 
 ### 5.3 클라이언트 → 서버
 
 | type | payload | 용도 |
 |---|---|---|
-| `subscribe` | `{ "topics": ["metrics", "anomaly", "relay", "alerts"] }` | 구독 시작 |
+| `subscribe` | `{ "requestId":"...", "topics":[...], "afterCursor":"1042" }` | 스냅샷 다음 cursor부터 구독·재생 |
+| `resume` | `{ "requestId":"...", "topics":[...], "afterCursor":"1042", "lastEventId":"evt_..." }` | 재연결 재개 |
 | `unsubscribe` | `{ "topics": [...] }` | 구독 해제 |
 | `ping` | `{}` | 하트비트 (30초 주기) |
 
@@ -1566,7 +1610,7 @@ v3 테이블 컬럼: `시간 · 관리자 · 행위 · 대상 · 변경 내용` 
 | `anomaly.score` | 추론 결과 도착 시 | `{ score, grade, aeScore, informerScore, evaluatedAt }` |
 | `anomaly.gradeChanged` | 등급 전이 시에만 | `{ from, to, score, batteryId, batteryLabel }` |
 | `relay.changed` | 상태 변경 시 | `{ state, reason, changedBy, interlock, changedAt }` |
-| `relay.autoCut` | Fail-Safe 발동 시 | `{ batteryId, batteryLabel, tempC, trigger, cutAt }` |
+| `relay.autoCut` | Fail-Safe 발동 시 | `{ batteryId, batteryLabel, representativeTempC, representativeTempSource, triggerCode, cutAt }` |
 | `alert.created` | 새 알림 | `Alert` 객체 (§4.8) |
 | `event.created` | 새 이벤트 | `Event` 객체 (§4.6) |
 | `session.ended` | 세션 종료 | `{ sessionId, endReason }` — `TIMEOUT`\|`SUPERSEDED`\|`BLOCKED` (§4.3) |
@@ -1575,6 +1619,9 @@ v3 테이블 컬럼: `시간 · 관리자 · 행위 · 대상 · 변경 내용` 
 | `diagnosis.done` | 진단 완료 | `Diagnosis` 객체 (§4.13) |
 | `diagnosis.aborted` | 진단 중단 | `{ id, kind, abortReason }` — 사유 code만, 문구는 프론트 사전 |
 | `pong` | `ping` 응답 | `{}` |
+| `subscribed` / `resumed` | 구독 ACK | `{ requestId, streamId, replayFrom, currentCursor }` |
+| `resync.required` | cursor 만료/stream 교체 | `{ requestId, reason, latestCursor }` |
+| `export.ready` | 비동기 Raw CSV 완료 | `{ exportId, status, expiresAt }` |
 
 **중요한 설계 지점**
 
@@ -1588,8 +1635,11 @@ v3 테이블 컬럼: `시간 · 관리자 · 행위 · 대상 · 변경 내용` 
 ### 5.5 재연결 규약 `[제안]`
 
 - 클라이언트는 지수 백오프로 재연결한다 (1s → 2s → 4s → … 최대 30s).
-- **재연결 직후 프론트는 `GET /api/dashboard`를 다시 호출해 스냅샷을 맞춘다.** WebSocket은 누락된 메시지를 재전송하지 않는다.
-- 서버는 순단 중 발생한 이벤트를 큐에 쌓아두지 않아도 된다. 상태 동기화는 스냅샷 재조회로 해결한다.
+- 최초 진입은 `GET /api/dashboard`의 `sync { streamId,snapshotCursor,asOf }`를 원자적 스냅샷으로 받은 뒤 `subscribe.afterCursor=snapshotCursor`를 보낸다.
+- 서버는 cursor 이후 이벤트를 순서대로 재생한 후 `subscribed`/`resumed` ACK를 보낸다. replay 보존은 최소 5분 또는 최근 10,000개 중 더 큰 범위다.
+- 재연결은 마지막 적용 cursor로 `resume`한다. cursor 만료·권한/세션 stream 교체 시 `resync.required`를 받고 `/api/me`, `/api/dashboard`, `/api/alerts/summary`, `/api/relay`, 활성 진단을 다시 조회한 다음 새 snapshot cursor로 재구독한다.
+- `ping` 30초, `pong` 제한 10초다. close code는 `4401` 인증 만료, `4403` 정지/권한 변경, `4408` heartbeat timeout, `4410` resync required다.
+- REST 쓰기는 `Idempotency-Key`, WS 이벤트는 `eventId`로 exactly-once 효과를 만든다. 전송 자체는 at-least-once이며 중복 가능하다.
 
 > v3 공지 본문에 *"WebSocket 순단이 발생할 수 있으나 자동 재연결되며, 측정 데이터는 버퍼링 후 복원됩니다"* 라는 문장이 있다 `[v3]`. **데이터 버퍼링은 에지→Kafka 구간의 이야기이며, WebSocket 재전송 보장을 뜻하지 않는다.** 혼동 주의.
 
@@ -1673,7 +1723,7 @@ v3 테이블 컬럼: `시간 · 관리자 · 행위 · 대상 · 변경 내용` 
 | Q5 | 감사 로그 보존 | **무기한.** 삭제·아카이브 배치 없음 |
 | Q7 | 진단기 대수 | **계정당 1대.** `deviceId` 파라미터 없음, 서버 자동 선택 |
 | Q8 | 온도 상한 설정 | 임계치 설정 기능 제거로 소멸 |
-| Q9 | CSV/PDF | **동기 다운로드.** 집계 버킷만 내보내므로 비동기 불필요 |
+| Q9 | CSV/PDF | **CSV=100ms Raw.** 1시간 이하는 동기 스트리밍, 초과는 비동기 export job. PDF만 집계 추세 동기 다운로드 |
 | Q10 | 추세 집계 | 24h=1시간/7d=1일/30d=1일. 온도·점수 `max`, 전압·전류·SOC `avg` |
 | Q11 | 공지 `body` | 목록은 `summary`(120자), 상세는 `GET /{id}` |
 | Q12 | 릴레이 자동 복구 | **없음. 수동 복구만** (재인증·사유 필수) |
@@ -1716,6 +1766,26 @@ v3 테이블 컬럼: `시간 · 관리자 · 행위 · 대상 · 변경 내용` 
 
 ## 11. 기능정의서와 v3의 불일치 — 실측 기록
 
+### v3 비-native 선택 컨트롤 매핑 `[브라우저 실측 2026-08-05]`
+
+아래는 `<select>`·checkbox가 아니라 클릭형 칩·토글·메뉴로 구현된 선택 컨트롤이다. **입력 데이터가 없는 장식이 아니며**, 실제 구현은 아래 요청 필드에 반드시 연결한다. 키보드 접근성은 `button`/ARIA 역할과 선택 상태를 제공해야 한다.
+
+| 화면의 클릭형 선택 | 백엔드 계약 |
+|---|---|
+| 배터리 등록 종류 `LI_ION`/`LI_PO`, 모드 `1`/`2` | `POST /api/batteries`의 `chemistry`, `targetMode` |
+| 배터리 목록 모드 필터·최근/점수/SOC 정렬 | `GET /api/batteries?mode=&sort=` |
+| 배터리 선택·연결 확인 | `POST /api/sessions`의 `batteryId` |
+| 대시보드 지표 선택, 추세 기간·지표·비교 배터리 | 조회 로컬 상태 + `GET /api/trends?period=&metrics=&batteryIds=` |
+| 이벤트 심각도 필터·페이지 이동 | `GET /api/events?severity=&page=&size=` |
+| 알림 확인, 전체 확인 | `POST /api/alerts/{id}/ack`, `/api/alerts/ack-all` |
+| 알림 채널 토글 | `PATCH /api/me/notification-preferences`의 `KAKAO|EMAIL|SMS|WEBPUSH` boolean |
+| 테마 `light`/`dark`/`system` | `PATCH /api/me/preferences`의 `theme` |
+| 관리자 유저 상태·역할 필터 | `GET /api/admin/users?status=&role=&q=`; 역할 자체는 변경 불가 |
+| 관리자 배터리 운영상태 필터 | `GET /api/admin/batteries?opsStatus=&q=` |
+| 공지 카테고리 필터·게시/임시저장/보관 | `GET /api/admin/notices?category=&status=`, 쓰기는 §4.12 |
+
+실제 텍스트 입력처럼 보였던 로그인·가입·계정 찾기·배터리 등록/수정·이벤트 검색·릴레이 사유/비밀번호·공지 제목/본문은 native `input`/`textarea`로, 감사 기간·행위·대상과 공지 카테고리·노출 대상은 native `select`로, 약관·공지 동시 알림은 native checkbox로 교체했다.
+
 기능정의서 2종은 2026-07-22 커밋 `9bb6d8e`로 v3 기준에 맞춰졌고, 이상점수 스케일·4등급·게이지 범례 버그는 **이미 반영돼 있다**(계약서 §1.6과 일치). 다만 개별 기능의 **화면 위치**는 아직 어긋난 것이 있다. 브라우저로 확인한 차이는 아래와 같으며, **이 계약서는 전부 v3를 따랐다.**
 
 ### 위치가 다른 것
@@ -1740,11 +1810,11 @@ v3 테이블 컬럼: `시간 · 관리자 · 행위 · 대상 · 변경 내용` 
 | 임계치 설정 | 라벨만 있고 미렌더링 | **제외** (기능 자체가 제거됨) |
 | 셀 온도 히트맵 | 렌더링됨 | **제외** (쓰지 않기로 결정) |
 
-### 입력 항목이 다른 것
+### 입력 항목 동기화 상태
 
-| 요구사항 | 문서 | 실제 v3 폼 |
+| 요구사항 | 문서 | 현재 v3 폼 |
 |---|---|---|
-| REQ-WEB-037 배터리 등록 | 이름·종류·모드·직렬 셀 수·**제조사/모델** | 이름·종류·모드·직렬 셀 수 **4개뿐** |
+| REQ-WEB-037 배터리 등록 | 이름·종류·모드·직렬 셀 수·제조사·모델·모드 2 정격 용량 | 동일하게 동기화 완료 |
 
 ### 입력 항목이 누락된 것 (계약서 쪽 오류였음)
 
@@ -1761,34 +1831,26 @@ v3 테이블 컬럼: `시간 · 관리자 · 행위 · 대상 · 변경 내용` 
 
 ---
 
-## 12. 프론트엔드 작업 목록 — 계약과 v3를 맞추려면
+## 12. 2026-08-05 동기화 감사 결과
 
-백엔드와 무관하게 **프론트가 고쳐야 하는 것들**이다. 실측 중 발견했다.
+### 이번에 닫힌 불일치
 
-| # | 항목 | 이유 |
-|---|---|---|
-| 1 | 등급 판정 로직 3곳을 4등급으로 통일 | 대시보드 `dScoreLabel`, 게이지 범례, 관리자 목록 `scCol`이 전부 3등급(70/40) |
-| 2 | 게이지 범례 문구 교체 | `정상 0–39 / 주의 40–69 / 위험 70+` → `정상 0–29 / 주의 30–59 / 경고 60–79 / 위험 80+` (4칸) |
-| 3 | Raw 모달 `anomaly_score`를 `0.82`로 | "원본 데이터" 화면이 가공값(82)을 보여주고 있음 |
-| 4 | `사진 변경` 버튼 제거 | REQ-WEB-069 범위 제외인데 버튼이 남아 있음 |
-| 5 | 셀 온도 히트맵 섹션 제거 | 범위 제외 결정 |
-| 6 | 관리자 배터리 상세에 운영상태·메모 입력 UI 추가 | 계약에 포함했으나 v3는 조회 전용 |
-| 7 | 설정에 음성 안내 섹션 추가 | 계약에 포함했으나 v3에 없음 |
-| 8 | 운영 상태 한국어 라벨 통일 | 관리자 대시보드는 `정상/주시/제한`, 목록 필터는 `NORMAL/WATCH/BLOCKED` — 두 벌 공존 |
-| 9 | 상대시간 표시를 클라이언트 계산으로 | 서버는 절대 시각만 준다(§1.1). v3는 `"3시간 전"`이 하드코딩 |
-| 10 | 이벤트 목록 페이지네이션 정합 | `전체 116건 중 1–5`인데 행이 6개 렌더링됨 |
-| 11 | 배터리 등록·수정 모달에 `제조사`·`모델` 입력 추가 | Q23 결정. 둘 다 선택 입력 |
-| 12 | 이름 아래 `측정 담당자` / `시스템 관리자` 라인 제거 | Q26 결정. 사이드바 하단 + 계정 정보 탭 2곳 |
-| 13 | 이벤트·알림 문구에서 `· 셀 3` 제거 | Q22 결정. 셀 단위 측정 안 함 |
-| 14 | 지표 카드 배지를 서버 `status`로 교체 | Q24 결정. `dTempWarn = temp >= 55` 같은 클라이언트 판정 제거 |
-| 15 | 유저 수정 모달의 `등록 배터리 수`를 읽기 전용으로 | 파생값인데 v3가 편집 가능한 입력으로 그림. 서버는 이 필드를 받지 않는다 |
-| 16 | 유저 수정 모달에서 `권한` 셀렉트 **제거**, `상태` 편집 분리 | Q28. 권한은 웹에서 변경 불가(DB로만). 상태는 정지/해제 버튼(사유 필수)으로만 |
-| 17 | 배터리 수정 모달의 `메모`를 계약 `memo`에 연결 | 관리자 메모와 다른 필드임에 주의 |
-| 18 | ~~측정 종료 버튼 추가~~ **불필요** | Q33. 종료는 서버가 타임아웃으로 처리. 대신 `session.ended` WS 수신 시 게이트 화면으로 복귀하는 처리 필요 |
-| 19 | `릴레이 자동 복구` 이벤트·알림·제어 이력 삭제 | Q12. 자동 복구를 하지 않기로 함 |
-| 20 | 유저 수정 모달의 `새 비밀번호` 입력 → `재설정 메일 보내기` 버튼 | Q29. 관리자가 평문을 지정하지 않음 |
-| 21 | 설정에서 `센서 캘리브레이션 이력` 섹션 제거 + 탭 이름을 `테마 · 캘리브레이션` → `테마`로 | Q14. 범위 제외 |
-| 22 | 배터리 수정 모달에서 `측정 모드` 선택 비활성화 | Q30. 자산 고정값이라 변경 불가 |
-| 23 | 지표 배지를 온도 카드에만 표시 | Q27. 전압·전류·SOC는 `status: null` |
-| 24 | 한/영 사전 구축 (code → 문구, ko/en 2벌) | Q2. 서버가 문구를 만들지 않음 (§1.10) |
-| 25 | 공지 목록 클릭 시 `GET /api/notices/{id}` 호출 추가 | Q11. 목록은 `summary`만 |
+- 모드 3 제거, 모드 1 외부 셀·모드 2 보조배터리로 통일
+- 4등급 30/60/80 판정, Raw `anomaly_score` 0.0–1.0 통일
+- 접촉/IR 대표 온도 최댓값, signed 전류, 모드 2 상대 SOC 표시
+- 클라이언트 온도/AI 판정에 의한 자동 차단 제거; 서버 `relay.autoCut` 전용
+- 릴레이 사유·본인 재인증·interlock·감사 기록의 서버 자동 승인 게이트
+- CSV를 100ms Raw로 확정하고 1시간 초과 비동기 export로 분리
+- WS cursor/sequence/eventId/idempotency/replay/reconnect 규약 추가
+- 가입·계정 찾기·배터리 폼·이벤트 검색·릴레이·감사 필터·공지 알림처럼 입력처럼 보이던 요소를 실제 입력/선택 요소로 교체하고 API 매핑 명시
+- 관리자 유저의 ID·등록 배터리 수·권한·상태는 읽기 전용으로 바꾸고 비밀번호 직접 지정은 재설정 링크 발송으로 교체
+
+### 남은 의도적 범위/미구현
+
+| 항목 | 상태 |
+|---|---|
+| F21 모드 2 진단 화면 | API 계약은 유지하되 v3 화면에는 미구현 |
+| 관리자 배터리 운영상태·관리자 메모 입력 | 계약은 유지하되 v3 상세는 조회 중심 |
+| 음성 안내 설정 | 요구사항에는 있으나 v3 미구현 |
+| 감사 로그 상세 모달 | v3에서 행 클릭 동작이 없어 제외 유지 |
+| 상대시간·mock 수치 | 프로토타입 표현이며 실제 구현은 서버 UTC와 실데이터 사용 |
