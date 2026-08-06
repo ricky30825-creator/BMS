@@ -5,10 +5,12 @@
 
 ## 설계 원칙 — 원본 hex를 반드시 함께 남긴다
 
-BLE 프레임의 필드 오프셋이 아직 다 안 밝혀졌다(§9 B16). `[7:10]`=전류만 확정이고
-`[4:7]`은 전압·전력·저항 중 무엇인지 미결이다. 그래서 **모든 행에 원본 프레임 hex를
-그대로 남긴다** — 나중에 필드가 밝혀지면 과거 데이터를 다시 해석할 수 있다.
-파서를 확정하지 못했다는 이유로 수집을 미루지 않기 위한 장치다.
+**모든 행에 원본 프레임 hex를 그대로 남긴다.** 아직 정체를 모르는 바이트가 남아 있어
+(§9), 나중에 밝혀지면 과거 데이터를 재해석할 수 있어야 한다.
+
+확정된 필드(2026-08-06, 전류 1.0A↔0.5A 전환으로 검증):
+- `[4:7]` = **전압** ×0.1 → V   (기본값 `--assume v`가 이것이다)
+- `[7:10]` = **전류** ×0.001 → A
 
 ## 누적값은 우리가 직접 적산한다
 
@@ -80,11 +82,13 @@ def voltage_from(field47_raw: int, current_a: float, assume: str) -> float | Non
 
 
 class Session:
-    def __init__(self, out: Path, note: str, assume: str, phase: str):
+    def __init__(self, out: Path, note: str, assume: str, phase: str,
+                 mode: str = "CC"):
         self.out = out
         self.note = note
         self.assume = assume
         self.phase = phase
+        self.mode = mode
         self.session_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
         self.started = time.time()
         self.rows = 0
@@ -104,6 +108,7 @@ class Session:
             "note": note,
             "voltage_assumed_from": assume,
             "test_phase": phase,
+            "bw_mode": mode,
             "started_utc": datetime.now(timezone.utc).isoformat(),
             "source": "BW150 BLE ffe1",
             "warning": "[4:7] 필드 정체 미확정 — raw_hex로 재해석 가능",
@@ -152,7 +157,7 @@ class Session:
             "bw_capacity_mah": round(self.cap_mah, 3),
             "bw_resistance_ohm": round(v / i_a, 3) if v and i_a > 0.001 else "",
             "bw_elapsed_s": round(now - self.started, 1),
-            "bw_mode": "CC",
+            "bw_mode": self.mode,
             "bw_load_on": i_a > 0.005,
             "bw_field47_raw": d["field47_raw"],
             "bw_voltage_assumed_from": self.assume,
@@ -235,6 +240,8 @@ def main() -> int:
                     help="[4:7]을 전압(v)/전력(p)/저항(r) 중 무엇으로 볼지 (§9 B16 미결)")
     ap.add_argument("--phase", default="NORMAL",
                     help="test_phase 라벨 — NORMAL / ABNORMAL_* / BRT 등")
+    ap.add_argument("--mode", default="CC",
+                    help="BW150 동작 모드 라벨 — CC / CR / BRT / PT / CT")
     args = ap.parse_args()
 
     try:
@@ -245,7 +252,7 @@ def main() -> int:
     if not args.note:
         print("⚠️ --note 없이 수집하면 나중에 이 데이터가 무슨 조건인지 알 수 없다.\n")
 
-    sess = Session(args.out, args.note, args.assume, args.phase)
+    sess = Session(args.out, args.note, args.assume, args.phase, args.mode)
     try:
         return asyncio.run(run(sess, args.hours))
     except KeyboardInterrupt:
