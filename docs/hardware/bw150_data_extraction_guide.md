@@ -285,7 +285,10 @@ def verify(frame: bytes) -> bool:
 | Service | `0000ffe0-0000-1000-8000-00805f9b34fb` ✅ |
 | **Notify(수신)** | `0000ffe1-…` — `notify` + `write` + `write-without-response` |
 | Write(명령) | `0000ffe2-…` — `write` + `write-without-response` |
-| 그 밖의 서비스 | `0000ae30`(ae01/ae03 write, ae02/ae04 notify, ae05 indicate, ae10 read/write), `0000ae3a` — 범용 BLE 모듈 계열로 보이며 데이터는 안 나온다 |
+| 그 밖의 서비스 | `0000ae30`(ae01/ae03 write, ae02/ae04 notify, ae05 indicate, ae10 read/write), `0000ae3a`(ae3b write, ae3c notify) |
+
+> **⚠️ `ae30` 서비스는 죽어 있지 않다.** `ae01`·`ae03`·`ae3b`에 쓰면 **`ae02`·`ae05`가 `00`으로 응답한다**(2026-08-06). 명령 규약을 모를 뿐 채널은 살아 있다. `ae10`을 읽으면 `00 00 00 00`.
+> **E-test 앱이 전체 데이터를 받아온다면 이 채널을 쓸 가능성이 높다** — 앱을 붙여 동작을 확인하는 것이 역공학보다 빠른 길이다.
 | 프레임 | **36바이트 `FF 55 01 02 …`, 약 1초에 1개** |
 
 ```bash
