@@ -1,6 +1,6 @@
 # 구현 상태 및 문서 지도
 
-> 기준일: 2026-08-05
+> 기준일: 2026-08-06
 
 이 문서는 설계 문서의 요구사항과 현재 저장소에 실제로 존재하는 구현을 구분하기 위한 실행용 지도다. 요구사항의 정본이 아니며, 상세 계약은 아래 링크의 원본 문서를 따른다.
 
@@ -17,8 +17,8 @@
 |---|---|---|
 | 요구사항·제품 계약 | [`PLAN.md`](../PLAN.md), [`docs/product_contract.md`](product_contract.md), 기능정의서·유저플로우 | 구현 기준 문서 있음 |
 | 백엔드 인증 골격 | `backend/src/auth.ts`, 세션 미들웨어, 감사 로그, DB 연결, Better Auth `/api/auth/*` | 부분 구현 |
-| 백엔드 현재 라우트 | `/health`, `/api/me`, `/api/admin/health`, 릴레이 확인 스텁 | 부분 구현 |
-| 백엔드 전체 API·Consumer·TimescaleDB | 계약서는 있으나 배터리 자산, 측정 세션, Kafka Consumer, 시계열 적재 구현은 없음 | 미착수 |
+| 백엔드 데모 도메인 API | `backend/src/server.ts`, `backend/src/store.ts`: 로그인, 자산/세션, 대시보드, F21 fail-closed, 릴레이 승인·멱등성, 관리자 상태·메모·계정 사유 게이트, Raw CSV, WS sync | **데모 런타임 구현·브라우저 검증 완료** |
+| 백엔드 DB 도메인 provider·Consumer·TimescaleDB | `backend/migrations/001_app_auth.sql`에 자산/세션/릴레이/텔레메트리/진단/멱등성 스키마가 있으나 production repository·Kafka Consumer·시계열 적재는 없음. `DEMO_MODE=false`에서는 `RUNTIME_NOT_READY`로 fail-closed | 부분 구현 / production 미착수 |
 | 에지 소프트웨어 | 하드웨어 계약서는 있으나 `edge/` 디렉터리와 센서·릴레이·Kafka 프로듀서 구현은 없음 | 미착수 |
 | AI 소프트웨어 | 모델 설계는 있으나 `ai/` 디렉터리, Colab 노트북, 학습·추론·Kafka 연동 구현은 없음 | 미착수 |
 | 프론트엔드 | [`frontend/dashboard/RealtimeDashboard.jsx`](../frontend/dashboard/RealtimeDashboard.jsx) 단일 대시보드 컴포넌트 | 부분 구현 |
@@ -28,9 +28,9 @@
 | 디자인·목업 | [`design-system/cellguard/MASTER.md`](../design-system/cellguard/MASTER.md), [`web/cellguard_mockup_v4.html`](../web/cellguard_mockup_v4.html) | 참고 산출물 있음 |
 | 자동 검증 도구 | `tools/contract_lint.py`, `landing_lint.py`, `bundle_io.py` 및 단위 테스트 | 부분 구현 |
 
-### 2026-08-05 계약 동기화 주의
+### 2026-08-06 계약 동기화 주의
 
-v3 프로토타입과 정본 문서에는 모드 1/2, 대표 온도 최댓값, signed 전류, 모드 2 상대 SOC, 서버 Fail-Safe 자동 차단, 서버 자동 승인 릴레이, 100ms Raw CSV, WS 재연결·중복 방지 규약이 반영됐다. 이는 **화면·계약 동기화 결과이지 백엔드 구현 완료를 뜻하지 않는다.** 해당 REST/WS, export job, Fail-Safe 판정·승인·감사 원자 처리는 현재 구현 상태상 미착수 또는 스텁이다.
+v3 프로토타입과 정본 문서에는 모드 1/2, 대표 온도 최댓값, signed 전류, 모드 2 상대 SOC, F21 `0=미설정` fail-closed, 서버 승인 릴레이, Raw CSV, WS envelope, 관리자 상태·메모·계정 사유 게이트가 반영됐다. 데모 provider의 REST/WS와 브라우저 클릭 검증은 완료했지만, 실제 PostgreSQL transaction provider·Kafka/Timescale 적재·물리 Fail-Safe 판정·하드웨어 릴레이는 아직 구현/실측 전이다.
 
 `backend/dist/`는 TypeScript 빌드 산출물이며 소스 구현의 근거로 세지 않는다. `PLAN.md`의 예정 폴더 구조도 실제 디렉터리 존재를 의미하지 않는다.
 

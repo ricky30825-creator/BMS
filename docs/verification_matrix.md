@@ -30,7 +30,7 @@
 | 인증·권한 | Better Auth 마이그레이션/세션으로 `/api/auth/*`, `/api/me`, `/api/admin/*` 확인 | 세션 검증과 `ADMIN` 재검증이 서버에서 동작 |
 | API 계약 변경 | [`docs/backend_contract.md`](backend_contract.md) 해당 절과 요청/응답·에러 코드 비교 | 계약서의 도메인 불변식·소유권·감사 로그를 만족 |
 
-현재 백엔드에 실제로 존재하는 범위는 인증 골격, `/health`, `/api/me`, 관리자 헬스, 릴레이 확인 스텁이다. Consumer·TimescaleDB·배터리 자산/세션 API는 이 매트릭스의 런타임 검증 대상이지만 아직 실행할 구현이 없다.
+현재 데모 런타임에는 인증 데모, 자산/세션/대시보드, 관리자 상태·메모·계정 사유 게이트, F21 fail-closed, 릴레이 승인·멱등성, Raw CSV, WS sync가 있다. `DEMO_MODE=false`의 PostgreSQL domain provider·Consumer·TimescaleDB·물리 Fail-Safe는 아직 구현/실측 전이며 `RUNTIME_NOT_READY`로 닫힌다.
 
 ## Python 도구
 
@@ -38,7 +38,7 @@
 python3 -m unittest discover -s tools -p 'test_*.py'
 ```
 
-기준선(2026-08-02) 결과는 **48개 중 1개 실패**다. `tools/test_contract_lint.py:151`이 `EXPECTED_REQS`를 103개로 기대하지만 현재 실제 집합은 110개다. 이 불일치는 기존 테스트 기준선 드리프트로 기록하며, 새 변경의 통과로 간주하지 않는다.
+2026-08-06 현재 `tools/test_contract_lint.py:151`의 기준 기대치도 실제 요구사항 집합 110개에 맞췄다. 전체 도구 테스트는 **48개 중 48개 통과**를 목표 기준으로 한다.
 
 ## 하드웨어·회로
 
@@ -65,7 +65,7 @@ python3 -m unittest discover -s tools -p 'test_*.py'
 |---|---|
 | 미연결 / 모드 1 | F21은 실행 경로를 열지 않고 각각 연결 필요 / 모드 2 전용을 안내한다 |
 | 모드 2 + 기본 `COMBINED_EXISTING_PARTS_V1` | 안전 준비 전·실행 잠금, 빠른/정밀 버튼 우회 불가, `soc_pct`·가스·접촉온도·진단 단계 등 미지원값을 `—`로 표시한다 |
-| 숨은 프로토타입 속성 `MODE2_FULL` | 최종 사용자 화면에 프로필 전환기가 없고, PACK-003의 정본 목업값·빠른 확인·정밀 완충/소요시간 확인·진행/즉시 중단·이력이 동작한다. 실제 구현에서는 이 속성이 서버 capability를 우회하지 않는다 |
+| 숨은 프로토타입 속성 `MODE2_FULL` | 최종 사용자 화면에 프로필 전환기가 없고, 서버 capability가 준비되지 않은 현재 상태에서는 속성을 켜도 `SAFETY_PROFILE_NOT_READY`로 잠긴다. 문턱 실측 후에만 진행/중단/이력을 검증한다 |
 | 관리자 운영 상태 | NORMAL/WATCH/BLOCKED의 모든 실제 전환에서 사유와 확인을 요구하고, 성공 전에는 목록/상세를 바꾸지 않는다. BLOCKED 해제도 세션/릴레이를 자동 복구하지 않는다 |
 | 관리자 메모 | 상태와 별도 native 입력·별도 저장이며, 상태 사유 없이 저장할 수 있고 상세 재진입 후 유지된다 |
 
