@@ -97,6 +97,9 @@ export function useRealtime({ enabled, sessionKey, onAutoCut, onSessionEnded, on
       ]);
       const snapshot = normalizeDashboard(rawDashboard);
       cursorRef.current = snapshot.snapshotCursor;
+      sequenceRef.current = null;
+      lastEventIdRef.current = null;
+      eventIdsRef.current.clear();
       setDashboard(snapshot);
       queryClient.setQueryData(["me"], me satisfies MeResponse);
       queryClient.setQueryData(["dashboard"], snapshot);
