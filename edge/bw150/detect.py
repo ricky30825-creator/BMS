@@ -21,6 +21,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 import time
 
@@ -108,6 +109,58 @@ class FrameSync:
 
 # ── HID 경로 ───────────────────────────────────────────────────────────────
 
+def hid_access() -> int | None:
+    """macOS Input Monitoring 권한 상태. 0=허용 1=거부 2=미결정, None=확인 불가.
+
+    ⚠️ 거부 상태면 open()과 write()는 멀쩡히 되는데 **입력 리포트만 조용히 안 온다.**
+    증상이 "기기가 데이터를 안 보낸다"와 똑같아서 몇 시간을 날리기 쉽다.
+    """
+    if sys.platform != "darwin":
+        return None
+    try:
+        import ctypes
+        import ctypes.util
+        iokit = ctypes.CDLL(ctypes.util.find_library("IOKit"))
+        iokit.IOHIDCheckAccess.argtypes = [ctypes.c_uint32]
+        iokit.IOHIDCheckAccess.restype = ctypes.c_uint32
+        return int(iokit.IOHIDCheckAccess(1))  # 1 = kIOHIDRequestTypeListenEvent
+    except Exception:
+        return None
+
+
+def host_app() -> str:
+    """이 프로세스를 띄운 GUI 앱 이름 — 권한을 줘야 할 대상이다."""
+    try:
+        import subprocess
+        pid = os.getppid()
+        for _ in range(8):
+            out = subprocess.run(["ps", "-o", "ppid=,comm=", "-p", str(pid)],
+                                 capture_output=True, text=True).stdout.strip()
+            if not out:
+                break
+            ppid, _, comm = out.partition(" ")
+            comm = comm.strip()
+            if ".app/" in comm:
+                return comm.split(".app/")[0].split("/")[-1] + ".app"
+            pid = int(ppid)
+            if pid <= 1:
+                break
+    except Exception:
+        pass
+    return "이 명령을 실행한 터미널 앱"
+
+
+def warn_if_denied() -> None:
+    a = hid_access()
+    if a != 1:
+        return
+    print("🚨 macOS Input Monitoring 권한이 **거부** 상태다.")
+    print("   이 상태에서는 장치가 열리고 write도 되지만 **입력 리포트가 전혀 안 온다.**")
+    print("   기기 고장이 아니라 OS가 막는 것이다.\n")
+    print(f"   시스템 설정 → 개인정보 보호 및 보안 → 입력 모니터링 에서")
+    print(f"   **{host_app()}** 을 켜고, 그 앱을 완전히 종료 후 다시 실행할 것.\n")
+
+
 def open_hid():
     try:
         import hid
@@ -149,11 +202,20 @@ def cmd_info() -> int:
     print(f"   제조사 : {d['manufacturer_string']}")
     print(f"   VID/PID: 0x{d['vendor_id']:04x} / 0x{d['product_id']:04x}")
     print(f"   usage  : page 0x{d['usage_page']:04x} / 0x{d['usage']:02x} (벤더 정의)")
+
+    a = hid_access()
+    label = {0: "✅ 허용", 1: "🚨 거부", 2: "⚠️ 미결정", None: "확인 불가"}[a]
+    print(f"\n   Input Monitoring 권한: {label}")
+    if a == 1:
+        print()
+        warn_if_denied()
+        return 1
     print("\n다음: python3 detect.py --read")
     return 0
 
 
 def cmd_read(seconds: float, raw: bool) -> int:
+    warn_if_denied()
     h = open_hid()
     print(f"열림: {h.get_manufacturer_string()} | {h.get_product_string()}")
     print(f"{seconds:.0f}초 동안 입력 리포트를 읽는다. Ctrl-C로 중단.\n")
@@ -211,9 +273,13 @@ def cmd_read(seconds: float, raw: bool) -> int:
 
     if reports == 0:
         print("\n❌ 입력 리포트가 하나도 안 왔다. 장치는 열리는데 데이터를 안 보낸다.")
-        print("   가장 흔한 원인: **BW150이 측정 화면에 있지 않다.**")
-        print("   본체에서 측정 모드(CC 등)로 들어가 Start를 누른 뒤 다시 시도할 것.")
-        print("   그래도 안 오면 --probe 로 깨우기 명령을 시험한다.")
+        if hid_access() == 1:
+            print("   → 원인은 위에 나온 **Input Monitoring 권한 거부**다. 기기 문제가 아니다.")
+        else:
+            print("   확인 순서:")
+            print("   1. 본체가 측정 화면인가 (메인 메뉴면 스트림을 안 열 수 있다)")
+            print("   2. --probe 로 깨우기 명령 시험")
+            print("   3. 그래도 안 되면 BLE 경로로 우회 (가이드 §3-2)")
         return 1
     if frames == 0:
         print("\n⚠️ 리포트는 오는데 FF 55 프레임이 없다.")
@@ -235,6 +301,7 @@ def cmd_probe() -> int:
         ("Atorch FF5511 ADU=02",   atorch_cmd(0x00, adu=0x02)),
         ("Atorch FF5511 ADU=03",   atorch_cmd(0x00, adu=0x03)),
     ]
+    warn_if_denied()
     print("⚠️ 리셋·버튼 명령은 제외했다 (데이터가 지워지거나 화면이 바뀐다).\n")
     hit = False
     for label, payload in candidates:
