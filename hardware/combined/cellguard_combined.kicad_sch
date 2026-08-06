@@ -2889,419 +2889,467 @@
 		(effects (font (face "Apple SD Gothic Neo") (size 2.0 2.0)) (justify left bottom))
 		(uuid "21e5474b-de98-50f6-a731-7d9ad660f220")
 	)
-	(text "부팅 초기 보호 2중화: IN1~IN4 에 10k 풀업(R3~R6) + config.txt 의 gpio=5,6,13,19=op,dh."
+	(text "[주의] CH3 을 열면 두 모드 다 측정 대상이 완전히 분리된다 — 아래는 고장이 아니라 정상 동작이다."
 		(exclude_from_sim no)
-		(at 300.00 358.60 0)
+		(at 300.00 361.60 0)
 		(effects (font (face "Apple SD Gothic Neo") (size 2.0 2.0)) (justify left bottom))
 		(uuid "0b87a960-33de-5921-b654-83a5fc130e5e")
 	)
-	(text "  ※ config.txt 는 Pi 5 에서 안 먹을 수 있다. R3~R6 을 절대 생략하지 마라."
+	(text "  모드 1: BQ27441 이 꺼져 I2C 0x55 가 버스에서 사라진다. 릴레이 상태를 조건으로 걸지 않으면 센서 오류 알림이 폭주한다."
 		(exclude_from_sim no)
-		(at 300.00 363.80 0)
+		(at 300.00 366.80 0)
 		(effects (font (face "Apple SD Gothic Neo") (size 2.0 2.0)) (justify left bottom))
 		(uuid "f478d8cb-2173-5d1a-8d89-c39f35f830af")
 	)
-	(text "허용 상태 (이 다섯 가지 외에는 만들지 않는다)"
+	(text "  모드 2: 팩이 무부하가 되어 스스로 꺼지므로 INA226 이 0V 를 읽는다. 배터리 사망으로 오독하지 마라."
 		(exclude_from_sim no)
 		(at 300.00 372.00 0)
-		(effects (font (face "Apple SD Gothic Neo") (size 2.5 2.5)) (justify left bottom))
+		(effects (font (face "Apple SD Gothic Neo") (size 2.0 2.0)) (justify left bottom))
 		(uuid "96f9622a-3009-56c1-845f-a3dd278f4eda")
 	)
-	(text "                              CH1 CH2 CH3 CH4   연결 대상"
+	(text "  INA226 은 Pi 3.3V 로 동작하므로 모드 1 에서는 마스터 차단 후에도 셀 전압 감시가 계속된다."
 		(exclude_from_sim no)
-		(at 300.00 380.00 0)
+		(at 300.00 377.20 0)
 		(effects (font (face "Apple SD Gothic Neo") (size 2.0 2.0)) (justify left bottom))
 		(uuid "3b9952c4-dc2f-5be7-9a1b-ccb701c2c772")
 	)
-	(text "정지                            1   1   1   1    없음"
+	(text "부팅 초기 보호 2중화: IN1~IN4 에 10k 풀업(R3~R6) + config.txt 의 gpio=5,6,13,19=op,dh."
 		(exclude_from_sim no)
-		(at 300.00 385.20 0)
+		(at 300.00 382.40 0)
 		(effects (font (face "Apple SD Gothic Neo") (size 2.0 2.0)) (justify left bottom))
 		(uuid "cdb9f65e-8476-5f4c-abf8-c9e688a1f36a")
 	)
-	(text "모드 1 충전                     0   1   0   1    외부 셀만"
+	(text "  ※ config.txt 는 Pi 5 에서 안 먹을 수 있다. R3~R6 을 절대 생략하지 마라."
 		(exclude_from_sim no)
-		(at 300.00 390.40 0)
+		(at 300.00 387.60 0)
 		(effects (font (face "Apple SD Gothic Neo") (size 2.0 2.0)) (justify left bottom))
 		(uuid "63b56154-4df5-5ff3-92e4-e9dd23956021")
 	)
-	(text "모드 1 방전                     1   0   0   1    외부 셀만"
+	(text "허용 상태 (이 다섯 가지 외에는 만들지 않는다)"
 		(exclude_from_sim no)
-		(at 300.00 395.60 0)
-		(effects (font (face "Apple SD Gothic Neo") (size 2.0 2.0)) (justify left bottom))
+		(at 300.00 395.80 0)
+		(effects (font (face "Apple SD Gothic Neo") (size 2.5 2.5)) (justify left bottom))
 		(uuid "464d032c-1b48-52da-baac-a06dbb57dfa1")
 	)
-	(text "모드 2 선택 · 마스터 OFF        1   1   1   0    보조배터리 연결 전/후"
+	(text "                              CH1 CH2 CH3 CH4   연결 대상"
 		(exclude_from_sim no)
-		(at 300.00 400.80 0)
+		(at 300.00 403.80 0)
 		(effects (font (face "Apple SD Gothic Neo") (size 2.0 2.0)) (justify left bottom))
 		(uuid "c73f759a-a463-50b3-ab32-6dc42aaba846")
 	)
-	(text "모드 2 0.1A · 0.5A 시운전       1   1   0   0    보조배터리만"
+	(text "정지                            1   1   1   1    없음"
 		(exclude_from_sim no)
-		(at 300.00 406.00 0)
+		(at 300.00 409.00 0)
 		(effects (font (face "Apple SD Gothic Neo") (size 2.0 2.0)) (justify left bottom))
 		(uuid "28d38cea-d421-5bb1-8c8c-8046ef29990a")
 	)
-	(text "[!] 금지 — 하나라도 하면 부품이 타거나 판정이 오염된다"
+	(text "모드 1 충전                     0   1   0   1    외부 셀만"
 		(exclude_from_sim no)
 		(at 300.00 414.20 0)
-		(effects (font (face "Apple SD Gothic Neo") (size 2.5 2.5)) (justify left bottom))
+		(effects (font (face "Apple SD Gothic Neo") (size 2.0 2.0)) (justify left bottom))
 		(uuid "0341c01e-9705-582a-8df4-3701631f4260")
 	)
-	(text "- SOURCE_P 에 셀 홀더 + 와 USB-A VBUS 동시 체결"
+	(text "모드 1 방전                     1   0   0   1    외부 셀만"
 		(exclude_from_sim no)
-		(at 300.00 422.20 0)
+		(at 300.00 419.40 0)
 		(effects (font (face "Apple SD Gothic Neo") (size 2.0 2.0)) (justify left bottom))
 		(uuid "2a8e5644-7f5d-56dd-b101-3af418b0ee1a")
 	)
-	(text "- CH1 과 CH2 동시 도통 / 모드 2 에서 CH1 또는 CH2 도통"
+	(text "모드 2 선택 · 마스터 OFF        1   1   1   0    보조배터리 연결 전/후"
 		(exclude_from_sim no)
-		(at 300.00 427.40 0)
+		(at 300.00 424.60 0)
 		(effects (font (face "Apple SD Gothic Neo") (size 2.0 2.0)) (justify left bottom))
 		(uuid "f4b7e5a4-8b27-531b-8ef9-36d00aff7092")
 	)
-	(text "- CH3 도통 중 CH4 전환.  BW150 전류가 흐르는 중 CH3·CH4 접점 전환"
+	(text "모드 2 0.1A · 0.5A 시운전       1   1   0   0    보조배터리만"
 		(exclude_from_sim no)
-		(at 300.00 432.60 0)
+		(at 300.00 429.80 0)
 		(effects (font (face "Apple SD Gothic Neo") (size 2.0 2.0)) (justify left bottom))
 		(uuid "753cec5f-6758-52f4-bdbd-097296d422f4")
 	)
-	(text "  -> 전환 순서: CH1·CH2 차단 -> CH3 차단 -> 50ms 이상 대기 -> CH4 전환."
+	(text "[!] 금지 — 하나라도 하면 부품이 타거나 판정이 오염된다"
 		(exclude_from_sim no)
-		(at 300.00 437.80 0)
-		(effects (font (face "Apple SD Gothic Neo") (size 2.0 2.0)) (justify left bottom))
+		(at 300.00 438.00 0)
+		(effects (font (face "Apple SD Gothic Neo") (size 2.5 2.5)) (justify left bottom))
 		(uuid "48d42e93-d141-5bf4-85e3-2550a95d0e60")
 	)
-	(text "     전류 중 전환하면 아크로 접점이 타서 접점 저항이 판정 문턱을 먹기 시작한다."
+	(text "- SOURCE_P 에 셀 홀더 + 와 USB-A VBUS 동시 체결"
 		(exclude_from_sim no)
-		(at 300.00 443.00 0)
+		(at 300.00 446.00 0)
 		(effects (font (face "Apple SD Gothic Neo") (size 2.0 2.0)) (justify left bottom))
 		(uuid "13e8db9c-5560-5beb-a434-f28b2d6a6ab5")
 	)
-	(text "- R100 INA226 으로 0.82A 초과 / 규격을 모르는 USB 케이블로 2A 판정"
+	(text "- CH1 과 CH2 동시 도통 / 모드 2 에서 CH1 또는 CH2 도통"
 		(exclude_from_sim no)
-		(at 300.00 448.20 0)
+		(at 300.00 451.20 0)
 		(effects (font (face "Apple SD Gothic Neo") (size 2.0 2.0)) (justify left bottom))
 		(uuid "42acc97e-9eb0-5436-975c-77c5970856e3")
 	)
-	(text "- 이 프로필에서 P0~P6 빠른 진단 · 2A · 정밀 용량시험 실행"
+	(text "- CH3 도통 중 CH4 전환.  BW150 전류가 흐르는 중 CH3·CH4 접점 전환"
 		(exclude_from_sim no)
-		(at 300.00 453.40 0)
+		(at 300.00 456.40 0)
 		(effects (font (face "Apple SD Gothic Neo") (size 2.0 2.0)) (justify left bottom))
 		(uuid "c20f2d09-79d0-50f9-bfe8-bd9ed12db698")
 	)
-	(text "[!] 이 회로가 못 하는 것 — 제품 F21 진단으로 승격하지 않는다"
+	(text "  -> 전환 순서: CH1·CH2 차단 -> CH3 차단 -> 50ms 이상 대기 -> CH4 전환."
 		(exclude_from_sim no)
 		(at 300.00 461.60 0)
-		(effects (font (face "Apple SD Gothic Neo") (size 2.5 2.5)) (justify left bottom))
+		(effects (font (face "Apple SD Gothic Neo") (size 2.0 2.0)) (justify left bottom))
 		(uuid "81b03004-e73d-5f25-b7a5-e12e897633e7")
 	)
-	(text "모드 2 자동 충전 경로 없음      -> CH4 를 모드 선택에 썼다. 완충은 외부 충전기로 한다."
+	(text "     전류 중 전환하면 아크로 접점이 타서 접점 저항이 판정 문턱을 먹기 시작한다."
 		(exclude_from_sim no)
-		(at 300.00 469.60 0)
+		(at 300.00 466.80 0)
 		(effects (font (face "Apple SD Gothic Neo") (size 2.0 2.0)) (justify left bottom))
 		(uuid "b955d596-3285-5be7-8fa1-2f0b0b4fd2bf")
 	)
-	(text "모드 2 충전 전류 측정 없음      -> 충전 테이퍼로 완충을 판정하지 못한다."
+	(text "- R100 INA226 으로 0.82A 초과 / 규격을 모르는 USB 케이블로 2A 판정"
 		(exclude_from_sim no)
-		(at 300.00 474.80 0)
+		(at 300.00 472.00 0)
 		(effects (font (face "Apple SD Gothic Neo") (size 2.0 2.0)) (justify left bottom))
 		(uuid "0c9ea3de-d443-506e-b46e-3c519b0a7530")
 	)
-	(text "MQ-2 가스 안전계층 없음         -> ADS1115 A0 는 FSR 이 쓰고, 5V AOUT 용 분압 부품이 없다."
+	(text "- 이 프로필에서 P0~P6 빠른 진단 · 2A · 정밀 용량시험 실행"
 		(exclude_from_sim no)
-		(at 300.00 480.00 0)
+		(at 300.00 477.20 0)
 		(effects (font (face "Apple SD Gothic Neo") (size 2.0 2.0)) (justify left bottom))
 		(uuid "7d9ac255-3dbe-50c0-8042-20d8626a13ca")
 	)
-	(text "확정된 안전 문턱 · 연속 감시 없음 -> API 는 409 SAFETY_PROFILE_NOT_READY."
+	(text "[!] 이 회로가 못 하는 것 — 제품 F21 진단으로 승격하지 않는다"
 		(exclude_from_sim no)
-		(at 300.00 485.20 0)
-		(effects (font (face "Apple SD Gothic Neo") (size 2.0 2.0)) (justify left bottom))
+		(at 300.00 485.40 0)
+		(effects (font (face "Apple SD Gothic Neo") (size 2.5 2.5)) (justify left bottom))
 		(uuid "47fa2db2-a1cd-54cf-967a-ea5d53a1c38f")
 	)
-	(text "  => 모드 1 의 사후 안전계층은 압력(FSR) 하나뿐이고, 모드 2 에는 그것마저 없다."
+	(text "모드 2 자동 충전 경로 없음      -> CH4 를 모드 선택에 썼다. 완충은 외부 충전기로 한다."
 		(exclude_from_sim no)
-		(at 300.00 490.40 0)
+		(at 300.00 493.40 0)
 		(effects (font (face "Apple SD Gothic Neo") (size 2.0 2.0)) (justify left bottom))
 		(uuid "d397e48e-8229-5521-a5b6-5ea7392a4785")
 	)
-	(text "     사람이 지켜보는 것이 그만큼 더 중요하다."
+	(text "모드 2 충전 전류 측정 없음      -> 충전 테이퍼로 완충을 판정하지 못한다."
 		(exclude_from_sim no)
-		(at 300.00 495.60 0)
+		(at 300.00 498.60 0)
 		(effects (font (face "Apple SD Gothic Neo") (size 2.0 2.0)) (justify left bottom))
 		(uuid "ecb46daf-f4e1-5146-a3f8-4dc31308bf9b")
 	)
-	(text "I2C 주소 맵 (버스 1, 3.3V)"
+	(text "MQ-2 가스 안전계층 없음         -> ADS1115 A0 는 FSR 이 쓰고, 5V AOUT 용 분압 부품이 없다."
 		(exclude_from_sim no)
 		(at 300.00 503.80 0)
-		(effects (font (face "Apple SD Gothic Neo") (size 3.0 3.0)) (justify left bottom))
+		(effects (font (face "Apple SD Gothic Neo") (size 2.0 2.0)) (justify left bottom))
 		(uuid "99cb49a1-ab79-552d-b87d-b0e11aa5efd3")
 	)
-	(text "0x40  INA226    전압 · 전류 · 전력      (두 모드 공유)"
+	(text "확정된 안전 문턱 · 연속 감시 없음 -> API 는 409 SAFETY_PROFILE_NOT_READY."
 		(exclude_from_sim no)
-		(at 300.00 512.80 0)
+		(at 300.00 509.00 0)
 		(effects (font (face "Apple SD Gothic Neo") (size 2.0 2.0)) (justify left bottom))
 		(uuid "3d5c7c4b-dc83-56dd-a630-76f2dfc524d4")
 	)
-	(text "0x48  ADS1115   A0=FSR 압력 (ADDR->GND)  모드 1 전용"
+	(text "  => 모드 1 의 사후 안전계층은 압력(FSR) 하나뿐이고, 모드 2 에는 그것마저 없다."
 		(exclude_from_sim no)
-		(at 300.00 518.00 0)
+		(at 300.00 514.20 0)
 		(effects (font (face "Apple SD Gothic Neo") (size 2.0 2.0)) (justify left bottom))
 		(uuid "d5bfe705-0ef9-56ab-ac00-2ef4cebcfc9f")
 	)
-	(text "0x55  BQ27441   SOC (Babysitter 탑재)    모드 1 전용 — 보조배터리 셀에는 접근할 수 없다"
+	(text "     사람이 지켜보는 것이 그만큼 더 중요하다."
 		(exclude_from_sim no)
-		(at 300.00 523.20 0)
+		(at 300.00 519.40 0)
 		(effects (font (face "Apple SD Gothic Neo") (size 2.0 2.0)) (justify left bottom))
 		(uuid "8b355b47-8dcc-5d7e-ae67-ed2afc460f16")
 	)
-	(text "0x5A  MLX90614 #1  IR 표면온도          (두 모드 공유)"
+	(text "I2C 주소 맵 (버스 1, 3.3V)"
 		(exclude_from_sim no)
-		(at 300.00 528.40 0)
-		(effects (font (face "Apple SD Gothic Neo") (size 2.0 2.0)) (justify left bottom))
+		(at 300.00 527.60 0)
+		(effects (font (face "Apple SD Gothic Neo") (size 3.0 3.0)) (justify left bottom))
 		(uuid "cff19fbd-e1ce-58b5-bd4c-4b8e4b357f43")
 	)
-	(text "0x5B  MLX90614 #2  IR 표면온도          (EEPROM 0x0E 로 주소 변경한 개체)"
+	(text "0x40  INA226    전압 · 전류 · 전력      (두 모드 공유)"
 		(exclude_from_sim no)
-		(at 300.00 533.60 0)
+		(at 300.00 536.60 0)
 		(effects (font (face "Apple SD Gothic Neo") (size 2.0 2.0)) (justify left bottom))
 		(uuid "7be38b57-11d4-5cdf-95e0-14d48e809873")
 	)
-	(text "무배터리 검사 기대값:  i2cdetect -y 1  ->  40  48  5a  5b   (셀이 없으니 55 없음이 정상)"
+	(text "0x48  ADS1115   A0=FSR 압력 (ADDR->GND)  모드 1 전용"
 		(exclude_from_sim no)
-		(at 300.00 538.80 0)
+		(at 300.00 541.80 0)
 		(effects (font (face "Apple SD Gothic Neo") (size 2.0 2.0)) (justify left bottom))
 		(uuid "15d53042-8eed-53f2-8b08-9221e833206d")
+	)
+	(text "0x55  BQ27441   SOC (Babysitter 탑재)    모드 1 전용 — 보조배터리 셀에는 접근할 수 없다"
+		(exclude_from_sim no)
+		(at 300.00 547.00 0)
+		(effects (font (face "Apple SD Gothic Neo") (size 2.0 2.0)) (justify left bottom))
+		(uuid "fabcd645-920c-517f-b579-1996000bc0d6")
+	)
+	(text "0x5A  MLX90614 #1  IR 표면온도          (두 모드 공유)"
+		(exclude_from_sim no)
+		(at 300.00 552.20 0)
+		(effects (font (face "Apple SD Gothic Neo") (size 2.0 2.0)) (justify left bottom))
+		(uuid "ceb020f0-9763-5359-9e29-b7f2d37be89d")
+	)
+	(text "0x5B  MLX90614 #2  IR 표면온도          (EEPROM 0x0E 로 주소 변경한 개체)"
+		(exclude_from_sim no)
+		(at 300.00 557.40 0)
+		(effects (font (face "Apple SD Gothic Neo") (size 2.0 2.0)) (justify left bottom))
+		(uuid "b3c9dcc8-948d-57b9-a6e8-09bff60c6614")
+	)
+	(text "무배터리 검사 기대값:  i2cdetect -y 1  ->  40  48  5a  5b   (셀이 없으니 55 없음이 정상)"
+		(exclude_from_sim no)
+		(at 300.00 562.60 0)
+		(effects (font (face "Apple SD Gothic Neo") (size 2.0 2.0)) (justify left bottom))
+		(uuid "d730650e-062e-58f2-b82b-d1c73ba581a4")
 	)
 	(text "Raspberry Pi 5 헤더 배선 — 모드 1 회로와 완전히 같다"
 		(exclude_from_sim no)
 		(at 580.00 305.00 0)
 		(effects (font (face "Apple SD Gothic Neo") (size 3.0 3.0)) (justify left bottom))
-		(uuid "fabcd645-920c-517f-b579-1996000bc0d6")
+		(uuid "aeb0f946-7396-5e74-8a6a-bcb0a8052fd7")
 	)
 	(text "물리핀 1, 17   3.3V        센서 · TFT(VCC+LED) · 릴레이 VCC(옵토측)"
 		(exclude_from_sim no)
 		(at 580.00 314.00 0)
 		(effects (font (face "Apple SD Gothic Neo") (size 2.0 2.0)) (justify left bottom))
-		(uuid "ceb020f0-9763-5359-9e29-b7f2d37be89d")
+		(uuid "bb476996-f14d-5a8f-ba00-c4653f5aae3b")
 	)
 	(text "물리핀 2       5V          릴레이 JD_VCC(코일측)"
 		(exclude_from_sim no)
 		(at 580.00 319.20 0)
 		(effects (font (face "Apple SD Gothic Neo") (size 2.0 2.0)) (justify left bottom))
-		(uuid "b3c9dcc8-948d-57b9-a6e8-09bff60c6614")
+		(uuid "2586b51b-bbcf-5f4a-aea4-b9c4dc4dee3c")
 	)
 	(text "물리핀 3 / 5   GPIO2 / 3   I2C SDA / SCL"
 		(exclude_from_sim no)
 		(at 580.00 324.40 0)
 		(effects (font (face "Apple SD Gothic Neo") (size 2.0 2.0)) (justify left bottom))
-		(uuid "d730650e-062e-58f2-b82b-d1c73ba581a4")
+		(uuid "f5cd46c1-7908-5e10-8de5-55010fa29aa0")
 	)
 	(text "물리핀 7       GPIO4       1-Wire (+ 4.7k 풀업 -> 3.3V) -> DS18B20 x3 (병렬)"
 		(exclude_from_sim no)
 		(at 580.00 329.60 0)
 		(effects (font (face "Apple SD Gothic Neo") (size 2.0 2.0)) (justify left bottom))
-		(uuid "aeb0f946-7396-5e74-8a6a-bcb0a8052fd7")
+		(uuid "8a793cab-57cc-5b29-8f0d-5fdd74a07223")
 	)
 	(text "물리핀 18/19/22/23/24      TFT RESET / SDI / DC / SCK / CS"
 		(exclude_from_sim no)
 		(at 580.00 334.80 0)
 		(effects (font (face "Apple SD Gothic Neo") (size 2.0 2.0)) (justify left bottom))
-		(uuid "bb476996-f14d-5a8f-ba00-c4653f5aae3b")
+		(uuid "909390b0-5d24-5955-bc12-06fc393e43d5")
 	)
 	(text "물리핀 29/31/33/35         릴레이 IN1 / IN2 / IN3 / IN4"
 		(exclude_from_sim no)
 		(at 580.00 340.00 0)
 		(effects (font (face "Apple SD Gothic Neo") (size 2.0 2.0)) (justify left bottom))
-		(uuid "2586b51b-bbcf-5f4a-aea4-b9c4dc4dee3c")
+		(uuid "e3d44891-f632-54d6-85fe-45d4c72aec18")
 	)
 	(text "물리핀 6,9,14,20,25,30,34,39   GND (신호 GND 레일 — 전력 GND 스플라이스와 나눈다)"
 		(exclude_from_sim no)
 		(at 580.00 345.20 0)
 		(effects (font (face "Apple SD Gothic Neo") (size 2.0 2.0)) (justify left bottom))
-		(uuid "f5cd46c1-7908-5e10-8de5-55010fa29aa0")
+		(uuid "2a91072f-3c7c-5de6-9ece-0c1f6d51250c")
 	)
 	(text "[!] 모드에 따라 살아있는 센서가 다르다 — Raw 필드가 달라진다"
 		(exclude_from_sim no)
 		(at 580.00 353.40 0)
 		(effects (font (face "Apple SD Gothic Neo") (size 2.5 2.5)) (justify left bottom))
-		(uuid "8a793cab-57cc-5b29-8f0d-5fdd74a07223")
+		(uuid "7b832605-36e9-5950-bd0b-b7a9eb5dfcc9")
 	)
 	(text "                        모드 1        모드 2"
 		(exclude_from_sim no)
 		(at 580.00 361.40 0)
 		(effects (font (face "Apple SD Gothic Neo") (size 2.0 2.0)) (justify left bottom))
-		(uuid "909390b0-5d24-5955-bc12-06fc393e43d5")
+		(uuid "a0ba1a65-9fdc-5c59-b3e3-a75af3c4762a")
 	)
 	(text "voltage_v / current_a   INA226        INA226        (같은 소자, 같은 션트)"
 		(exclude_from_sim no)
 		(at 580.00 366.60 0)
 		(effects (font (face "Apple SD Gothic Neo") (size 2.0 2.0)) (justify left bottom))
-		(uuid "e3d44891-f632-54d6-85fe-45d4c72aec18")
+		(uuid "a18afcb2-93e3-5e7e-81cc-94e2c4961953")
 	)
 	(text "temp_ir_surface         MLX x2        MLX x2        브래킷째 옮겨 겨눈다"
 		(exclude_from_sim no)
 		(at 580.00 371.80 0)
 		(effects (font (face "Apple SD Gothic Neo") (size 2.0 2.0)) (justify left bottom))
-		(uuid "2a91072f-3c7c-5de6-9ece-0c1f6d51250c")
+		(uuid "b69da97b-14da-5bfa-81b8-e22b8cd7bf49")
 	)
 	(text "temp_contact            DS18B20 x3    null          보조배터리에 옮겨 붙이지 않는다"
 		(exclude_from_sim no)
 		(at 580.00 377.00 0)
 		(effects (font (face "Apple SD Gothic Neo") (size 2.0 2.0)) (justify left bottom))
-		(uuid "7b832605-36e9-5950-bd0b-b7a9eb5dfcc9")
+		(uuid "1a8f36e5-c4fc-5a80-b4a1-072cc2e36b1c")
 	)
 	(text "pressure_raw            FSR 406       null          외장 케이스에 가려 부착 불가"
 		(exclude_from_sim no)
 		(at 580.00 382.20 0)
 		(effects (font (face "Apple SD Gothic Neo") (size 2.0 2.0)) (justify left bottom))
-		(uuid "a0ba1a65-9fdc-5c59-b3e3-a75af3c4762a")
+		(uuid "7a9ef62d-b98a-5f68-8b86-4b223360fbde")
 	)
 	(text "soc_pct                 BQ27441       null          완제품이라 셀에 접근 불가"
 		(exclude_from_sim no)
 		(at 580.00 387.40 0)
 		(effects (font (face "Apple SD Gothic Neo") (size 2.0 2.0)) (justify left bottom))
-		(uuid "a18afcb2-93e3-5e7e-81cc-94e2c4961953")
+		(uuid "9609f0ce-cfa7-54da-a582-887dcb2ca77f")
 	)
 	(text "gas_raw / acoustic_raw  null          null          이 회로에 센서 자체가 없다"
 		(exclude_from_sim no)
 		(at 580.00 392.60 0)
 		(effects (font (face "Apple SD Gothic Neo") (size 2.0 2.0)) (justify left bottom))
-		(uuid "b69da97b-14da-5bfa-81b8-e22b8cd7bf49")
+		(uuid "092f82a2-aede-59c0-8225-0fea9465dc85")
 	)
 	(text "diag_phase / load_target_a  null      null          P0~P6 을 실행하지 않는 프로필이다"
 		(exclude_from_sim no)
 		(at 580.00 397.80 0)
 		(effects (font (face "Apple SD Gothic Neo") (size 2.0 2.0)) (justify left bottom))
-		(uuid "1a8f36e5-c4fc-5a80-b4a1-072cc2e36b1c")
+		(uuid "03257431-640d-51aa-8561-021c6b7d5571")
 	)
-	(text "모드 2 IR 배치: 0x5A=케이스 중앙 / 0x5B=USB-A 출력 포트쪽. 표면에서 최대 5cm, 스팟 중심 4cm 이상 분리."
+	(text "온도는 다점 측정이고 쓰는 값은 최댓값이다 — 열폭주는 국부에서 시작하므로 평균을 쓰면 초기 신호가 희석된다."
 		(exclude_from_sim no)
 		(at 580.00 403.00 0)
 		(effects (font (face "Apple SD Gothic Neo") (size 2.0 2.0)) (justify left bottom))
-		(uuid "7a9ef62d-b98a-5f68-8b86-4b223360fbde")
+		(uuid "0dae7b18-39d0-58fa-bf6b-630b68f17ca1")
 	)
-	(text "[주의] 케이스 표면온도는 셀 온도가 아니다. 모드 1 의 55/60도 문턱을 모드 2 에 그대로 쓰지 마라."
+	(text "  temp_ir_surface = max(#1, #2)      temp_contact = max(DS18B20 #1, #2, #3)"
 		(exclude_from_sim no)
 		(at 580.00 408.20 0)
 		(effects (font (face "Apple SD Gothic Neo") (size 2.0 2.0)) (justify left bottom))
-		(uuid "9609f0ce-cfa7-54da-a582-887dcb2ca77f")
-	)
-	(text "[!] MLX90614 는 두 모드가 공유하므로 마운트를 떼었다 붙일 수 있게 만든다"
-		(exclude_from_sim no)
-		(at 580.00 416.40 0)
-		(effects (font (face "Apple SD Gothic Neo") (size 2.5 2.5)) (justify left bottom))
-		(uuid "092f82a2-aede-59c0-8225-0fea9465dc85")
-	)
-	(text "접착 고정이 아니라 나사 1개 또는 클램프로 각도·거리를 바꿀 수 있게 하고, 케이블에 여유를 준다."
-		(exclude_from_sim no)
-		(at 580.00 424.40 0)
-		(effects (font (face "Apple SD Gothic Neo") (size 2.0 2.0)) (justify left bottom))
-		(uuid "03257431-640d-51aa-8561-021c6b7d5571")
-	)
-	(text "모드 1 부착 거리는 2cm 이내 — FOV 35도라 스팟 지름 = 0.63 x 거리, 18650(지름 1.8cm) 안에 들어와야 한다."
-		(exclude_from_sim no)
-		(at 580.00 429.60 0)
-		(effects (font (face "Apple SD Gothic Neo") (size 2.0 2.0)) (justify left bottom))
-		(uuid "0dae7b18-39d0-58fa-bf6b-630b68f17ca1")
-	)
-	(text "둘 다 출고 시 0x5A 이므로 한 개씩 따로 연결해 U9 를 0x5B 로 바꾼다. EEPROM 쓰기에는 PEC 바이트가 필수다."
-		(exclude_from_sim no)
-		(at 580.00 434.80 0)
-		(effects (font (face "Apple SD Gothic Neo") (size 2.0 2.0)) (justify left bottom))
 		(uuid "f8b8b491-d3e3-5eb2-92f6-d00c198b176a")
 	)
-	(text "출고 상태는 갱신 865ms + 스파이크 50% 감쇠다. EEPROM 0x25 를 IIR=100 / FIR=111 로 재설정 -> 95.2ms."
+	(text "  DS18B20 3개는 같은 3선에 병렬로 문다. 1-Wire 고유 64비트 ROM 코드라 주소 설정이 필요 없고,"
 		(exclude_from_sim no)
-		(at 580.00 440.00 0)
+		(at 580.00 413.40 0)
 		(effects (font (face "Apple SD Gothic Neo") (size 2.0 2.0)) (justify left bottom))
 		(uuid "5e846029-c0be-50aa-ba65-3126e6fb7bc2")
 	)
-	(text "[!] TFT 3.5in — 표시 전용 9핀만 쓴다"
+	(text "  Skip ROM + Convert T 로 셋을 동시에 변환해 개수가 늘어도 750ms 그대로다(순차로 하면 2250ms)."
 		(exclude_from_sim no)
-		(at 580.00 448.20 0)
-		(effects (font (face "Apple SD Gothic Neo") (size 2.5 2.5)) (justify left bottom))
+		(at 580.00 418.60 0)
+		(effects (font (face "Apple SD Gothic Neo") (size 2.0 2.0)) (justify left bottom))
 		(uuid "d408f562-2f28-5149-b433-200ad2540e5f")
 	)
-	(text "T_CLK / T_CS / T_DIN / T_DO / T_IRQ 5핀은 터치용, SDO(MISO)도 미결선."
+	(text "모드 2 IR 배치: 0x5A=케이스 중앙 / 0x5B=USB-A 출력 포트쪽. 표면에서 최대 5cm, 스팟 중심 4cm 이상 분리."
 		(exclude_from_sim no)
-		(at 580.00 456.20 0)
+		(at 580.00 423.80 0)
 		(effects (font (face "Apple SD Gothic Neo") (size 2.0 2.0)) (justify left bottom))
 		(uuid "860935ad-f20d-53b6-af23-de27baebe644")
 	)
-	(text "LED(백라이트)는 3.3V 직결 = 상시 점등.  VCC 는 3.3V — 안 켜지면 그때만 5V(물리핀 2·4)로 옮긴다."
+	(text "[주의] 케이스 표면온도는 셀 온도가 아니다. 모드 1 의 55/60도 문턱을 모드 2 에 그대로 쓰지 마라."
 		(exclude_from_sim no)
-		(at 580.00 461.40 0)
+		(at 580.00 429.00 0)
 		(effects (font (face "Apple SD Gothic Neo") (size 2.0 2.0)) (justify left bottom))
 		(uuid "dbfd0393-bffd-56e7-abbb-2b59bcecf1a0")
 	)
-	(text "ILI9488 은 SPI 에서 RGB565 를 못 쓴다. 480x320 전체 갱신 약 460KB 이므로"
+	(text "[!] MLX90614 는 두 모드가 공유하므로 마운트를 떼었다 붙일 수 있게 만든다"
 		(exclude_from_sim no)
-		(at 580.00 466.60 0)
-		(effects (font (face "Apple SD Gothic Neo") (size 2.0 2.0)) (justify left bottom))
+		(at 580.00 437.20 0)
+		(effects (font (face "Apple SD Gothic Neo") (size 2.5 2.5)) (justify left bottom))
 		(uuid "0e80ccd8-ebda-5c8a-8c04-8882e1b905e8")
 	)
-	(text "100ms 계측 루프에 전체 화면 갱신을 올리지 마라 -> 부분 갱신 + 별도 스레드."
+	(text "접착 고정이 아니라 나사 1개 또는 클램프로 각도·거리를 바꿀 수 있게 하고, 케이블에 여유를 준다."
 		(exclude_from_sim no)
-		(at 580.00 471.80 0)
+		(at 580.00 445.20 0)
 		(effects (font (face "Apple SD Gothic Neo") (size 2.0 2.0)) (justify left bottom))
 		(uuid "9115efc1-fae4-572e-a4af-85677b247e9a")
 	)
-	(text "모드 전환 절차 요약 (자세한 것은 통합 조립 가이드 8·9절)"
+	(text "모드 1 부착 거리는 2cm 이내 — FOV 35도라 스팟 지름 = 0.63 x 거리, 18650(지름 1.8cm) 안에 들어와야 한다."
 		(exclude_from_sim no)
-		(at 580.00 480.00 0)
-		(effects (font (face "Apple SD Gothic Neo") (size 2.5 2.5)) (justify left bottom))
+		(at 580.00 450.40 0)
+		(effects (font (face "Apple SD Gothic Neo") (size 2.0 2.0)) (justify left bottom))
 		(uuid "195c3ede-7ffc-58d8-9778-576c43ceb338")
 	)
-	(text "모드 2 -> 모드 1:  BW150 0A/OFF -> pinctrl set 5,6,13,19 op dh -> USB-A 플러그를 보조배터리에서 뽑기"
+	(text "둘 다 출고 시 0x5A 이므로 한 개씩 따로 연결해 U9 를 0x5B 로 바꾼다. EEPROM 쓰기에는 PEC 바이트가 필수다."
 		(exclude_from_sim no)
-		(at 580.00 488.00 0)
+		(at 580.00 455.60 0)
 		(effects (font (face "Apple SD Gothic Neo") (size 2.0 2.0)) (justify left bottom))
 		(uuid "b00bcdd5-01cc-52e2-a554-84f47804228a")
 	)
-	(text "                   -> Pi·ZY12PDN 전원 분리 -> VBUS 를 SOURCE_P 에서 분리·절연 -> 셀 홀더 + 체결."
+	(text "출고 상태는 갱신 865ms + 스파이크 50% 감쇠다. EEPROM 0x25 를 IIR=100 / FIR=111 로 재설정 -> 95.2ms."
 		(exclude_from_sim no)
-		(at 580.00 493.20 0)
+		(at 580.00 460.80 0)
 		(effects (font (face "Apple SD Gothic Neo") (size 2.0 2.0)) (justify left bottom))
 		(uuid "fb33eb67-a1ef-5c9f-aaf8-6284e4e14776")
 	)
-	(text "모드 1 -> 모드 2:  BW150 0A/OFF -> CH1·CH2·CH3 OFF -> Pi·ZY12PDN 전원 분리 -> 셀을 홀더에서 빼기"
+	(text "[!] TFT 3.5in — 표시 전용 9핀만 쓴다"
 		(exclude_from_sim no)
-		(at 580.00 498.40 0)
-		(effects (font (face "Apple SD Gothic Neo") (size 2.0 2.0)) (justify left bottom))
+		(at 580.00 469.00 0)
+		(effects (font (face "Apple SD Gothic Neo") (size 2.5 2.5)) (justify left bottom))
 		(uuid "0f8c0c7b-aaff-5608-a8d7-09b4fb7ee0cf")
 	)
-	(text "                   -> 홀더 + 분리·절연 -> VBUS 체결 -> Pi 만 부팅 -> CH3 OFF 에서 CH4 ON -> 50ms 대기"
+	(text "T_CLK / T_CS / T_DIN / T_DO / T_IRQ 5핀은 터치용, SDO(MISO)도 미결선."
 		(exclude_from_sim no)
-		(at 580.00 503.60 0)
+		(at 580.00 477.00 0)
 		(effects (font (face "Apple SD Gothic Neo") (size 2.0 2.0)) (justify left bottom))
 		(uuid "cc98e8ea-3b4a-5438-a118-43008f317012")
 	)
-	(text "                   -> 보조배터리 연결 -> 무부하 검산 -> BW150 0.1A 설정 -> CH3 ON -> BW150 출력 ON."
+	(text "LED(백라이트)는 3.3V 직결 = 상시 점등.  VCC 는 3.3V — 안 켜지면 그때만 5V(물리핀 2·4)로 옮긴다."
 		(exclude_from_sim no)
-		(at 580.00 508.80 0)
+		(at 580.00 482.20 0)
 		(effects (font (face "Apple SD Gothic Neo") (size 2.0 2.0)) (justify left bottom))
 		(uuid "4788d9d6-5328-520f-9f24-e2f1e5729aa3")
 	)
-	(text "무부하 통과 기준:  CAL=0x0A00, MFG=0x5449, DIE=0x2260, OVF=0, |current_a| <= 0.02A."
+	(text "ILI9488 은 SPI 에서 RGB565 를 못 쓴다. 480x320 전체 갱신 약 460KB 이므로"
 		(exclude_from_sim no)
-		(at 580.00 514.00 0)
+		(at 580.00 487.40 0)
 		(effects (font (face "Apple SD Gothic Neo") (size 2.0 2.0)) (justify left bottom))
 		(uuid "f79dd016-324a-5b4f-84c4-211e1c631a0a")
 	)
-	(text "PCB 없음 — 기성 모듈 + 배선 하네스다.  전력 경로는 0.75SQ 실리콘 배선, JD_VCC 만 점퍼선."
+	(text "100ms 계측 루프에 전체 화면 갱신을 올리지 마라 -> 부분 갱신 + 별도 스레드."
 		(exclude_from_sim no)
-		(at 580.00 522.20 0)
+		(at 580.00 492.60 0)
 		(effects (font (face "Apple SD Gothic Neo") (size 2.0 2.0)) (justify left bottom))
 		(uuid "d118c2d0-fffd-52dc-b95b-81a2282e4712")
 	)
+	(text "모드 전환 절차 요약 (자세한 것은 통합 조립 가이드 8·9절)"
+		(exclude_from_sim no)
+		(at 580.00 500.80 0)
+		(effects (font (face "Apple SD Gothic Neo") (size 2.5 2.5)) (justify left bottom))
+		(uuid "b04747e7-be3b-5f36-bf8e-608376912bc8")
+	)
+	(text "모드 2 -> 모드 1:  BW150 0A/OFF -> pinctrl set 5,6,13,19 op dh -> USB-A 플러그를 보조배터리에서 뽑기"
+		(exclude_from_sim no)
+		(at 580.00 508.80 0)
+		(effects (font (face "Apple SD Gothic Neo") (size 2.0 2.0)) (justify left bottom))
+		(uuid "3376dd7a-aba7-549a-85a4-b5c9825a89c4")
+	)
+	(text "                   -> Pi·ZY12PDN 전원 분리 -> VBUS 를 SOURCE_P 에서 분리·절연 -> 셀 홀더 + 체결."
+		(exclude_from_sim no)
+		(at 580.00 514.00 0)
+		(effects (font (face "Apple SD Gothic Neo") (size 2.0 2.0)) (justify left bottom))
+		(uuid "c37976a1-fc2f-56eb-84b0-4fae208839bf")
+	)
+	(text "모드 1 -> 모드 2:  BW150 0A/OFF -> CH1·CH2·CH3 OFF -> Pi·ZY12PDN 전원 분리 -> 셀을 홀더에서 빼기"
+		(exclude_from_sim no)
+		(at 580.00 519.20 0)
+		(effects (font (face "Apple SD Gothic Neo") (size 2.0 2.0)) (justify left bottom))
+		(uuid "69adac9c-3001-5d6c-a0bd-8d2286305b51")
+	)
+	(text "                   -> 홀더 + 분리·절연 -> VBUS 체결 -> Pi 만 부팅 -> CH3 OFF 에서 CH4 ON -> 50ms 대기"
+		(exclude_from_sim no)
+		(at 580.00 524.40 0)
+		(effects (font (face "Apple SD Gothic Neo") (size 2.0 2.0)) (justify left bottom))
+		(uuid "7203a29d-ece7-5622-bb71-3e6edf84db67")
+	)
+	(text "                   -> 보조배터리 연결 -> 무부하 검산 -> BW150 0.1A 설정 -> CH3 ON -> BW150 출력 ON."
+		(exclude_from_sim no)
+		(at 580.00 529.60 0)
+		(effects (font (face "Apple SD Gothic Neo") (size 2.0 2.0)) (justify left bottom))
+		(uuid "243dc89a-2d82-58b4-be74-10316b25b342")
+	)
+	(text "무부하 통과 기준:  CAL=0x0A00, MFG=0x5449, DIE=0x2260, OVF=0, |current_a| <= 0.02A."
+		(exclude_from_sim no)
+		(at 580.00 534.80 0)
+		(effects (font (face "Apple SD Gothic Neo") (size 2.0 2.0)) (justify left bottom))
+		(uuid "e908d20a-6a12-5a59-9dae-1e85946069a7")
+	)
+	(text "PCB 없음 — 기성 모듈 + 배선 하네스다.  전력 경로는 0.75SQ 실리콘 배선, JD_VCC 만 점퍼선."
+		(exclude_from_sim no)
+		(at 580.00 543.00 0)
+		(effects (font (face "Apple SD Gothic Neo") (size 2.0 2.0)) (justify left bottom))
+		(uuid "d6a0672a-8c20-5416-a47e-450c2f1d1bb1")
+	)
 	(text "예비품 없음: DS18B20 3개와 MLX90614 2개를 전부 투입했다. 고장 시 교체품이 없다."
 		(exclude_from_sim no)
-		(at 580.00 527.40 0)
+		(at 580.00 548.20 0)
 		(effects (font (face "Apple SD Gothic Neo") (size 2.0 2.0)) (justify left bottom))
-		(uuid "b04747e7-be3b-5f36-bf8e-608376912bc8")
+		(uuid "18e74a37-8170-5502-96a3-95438c8e92d3")
 	)
 	(sheet_instances
 		(path "/" (page "1"))
