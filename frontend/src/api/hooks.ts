@@ -1,0 +1,56 @@
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { api, idempotencyKey } from "./client";
+import { normalizeBattery, normalizeDashboard } from "./normalize";
+import type { Alert, AnomalySummary, ApiUser, AuditEntry, Battery, BatteryEvent, Dashboard, Diagnosis, Evidence, MeResponse, NoticeSummary, Relay, RelayHistory, TrendResponse } from "../types";
+
+const keys = {
+  me: ["me"] as const,
+  batteries: ["batteries"] as const,
+  battery: (id: string) => ["battery", id] as const,
+  dashboard: ["dashboard"] as const,
+  relay: ["relay"] as const,
+  anomalySummary: ["anomaly-summary"] as const,
+  evidence: ["evidence"] as const,
+  events: (query: string) => ["events", query] as const,
+  trends: (query: string) => ["trends", query] as const,
+  alerts: (query: string) => ["alerts", query] as const,
+  notices: ["notices"] as const,
+  adminOverview: ["admin-overview"] as const,
+  adminUsers: (query: string) => ["admin-users", query] as const,
+  adminBatteries: (query: string) => ["admin-batteries", query] as const,
+  audits: ["audits"] as const,
+  diagnosis: ["diagnosis"] as const,
+};
+
+export { keys as queryKeys };
+
+export function useMe(enabled = true) { return useQuery({ queryKey: keys.me, queryFn: () => api.me(), enabled, retry: false }); }
+export function useBatteries(enabled = true) { return useQuery({ queryKey: keys.batteries, queryFn: async () => { const result = await api.get<{ items: Battery[]; page: { number: number; size: number; total: number; totalPages: number } }>("/api/batteries", { size: 100 }); return { ...result, items: result.items.map(normalizeBattery) }; }, enabled }); }
+export function useBattery(id: string | undefined, enabled = true) { return useQuery({ queryKey: id ? keys.battery(id) : ["battery", "none"], queryFn: async () => normalizeBattery(await api.get<Battery>(`/api/batteries/${id}`)), enabled: Boolean(id) && enabled }); }
+export function useDashboard(enabled = true) { return useQuery({ queryKey: keys.dashboard, queryFn: async () => normalizeDashboard(await api.get<Record<string, unknown>>("/api/dashboard")), enabled, retry: false }); }
+export function useRelay(enabled = true) { return useQuery({ queryKey: keys.relay, queryFn: () => api.get<Relay>("/api/relay"), enabled, retry: false }); }
+export function useRelayHistory(enabled = true) { return useQuery({ queryKey: ["relay-history"], queryFn: () => api.get<{ items: RelayHistory[] }>("/api/relay/history"), enabled }); }
+export function useAnomalySummary(enabled = true) { return useQuery({ queryKey: keys.anomalySummary, queryFn: () => api.get<AnomalySummary>("/api/anomaly/summary"), enabled }); }
+export function useEvidence(enabled = true) { return useQuery({ queryKey: keys.evidence, queryFn: () => api.get<Evidence>("/api/anomaly/evidence"), enabled }); }
+export function useEvents(query: URLSearchParams, enabled = true) { const stringQuery = query.toString(); return useQuery({ queryKey: keys.events(stringQuery), queryFn: () => api.get<{ items: BatteryEvent[]; page: { number: number; size: number; total: number; totalPages: number } }>("/api/events", query), enabled }); }
+export function useTrends(query: URLSearchParams, enabled = true) { const stringQuery = query.toString(); return useQuery({ queryKey: keys.trends(stringQuery), queryFn: () => api.get<TrendResponse>("/api/trends", query), enabled }); }
+export function useAlerts(query: URLSearchParams, enabled = true) { const stringQuery = query.toString(); return useQuery({ queryKey: keys.alerts(stringQuery), queryFn: () => api.get<{ items: Alert[]; page: { number: number; size: number; total: number; totalPages: number } }>("/api/alerts", query), enabled }); }
+export function useAlertSummary(enabled = true) { return useQuery({ queryKey: ["alert-summary"], queryFn: () => api.get<{ unacknowledgedCount: number; today: { DANGER: number; WARNING: number; NORMAL_OR_CHECK: number } }>("/api/alerts/summary"), enabled }); }
+export function useNotices(enabled = true) { return useQuery({ queryKey: keys.notices, queryFn: () => api.get<{ items: NoticeSummary[]; page: { number: number; size: number; total: number; totalPages: number } }>("/api/notices"), enabled }); }
+export function useAdminOverview(enabled = true) { return useQuery({ queryKey: keys.adminOverview, queryFn: () => api.get<import("../types").AdminOverview>("/api/admin/overview"), enabled, refetchInterval: 60_000 }); }
+export function useAdminUsers(query: URLSearchParams, enabled = true) { return useQuery({ queryKey: keys.adminUsers(query.toString()), queryFn: () => api.get<{ items: ApiUser[]; page: { number: number; size: number; total: number; totalPages: number } }>("/api/admin/users", query), enabled }); }
+export function useAdminBatteries(query: URLSearchParams, enabled = true) { return useQuery({ queryKey: keys.adminBatteries(query.toString()), queryFn: () => api.get<{ items: Battery[]; page: { number: number; size: number; total: number; totalPages: number } }>("/api/admin/batteries", query), enabled }); }
+export function useAudits(enabled = true) { return useQuery({ queryKey: keys.audits, queryFn: () => api.get<{ items: AuditEntry[]; page: { number: number; size: number; total: number; totalPages: number } }>("/api/admin/audit-logs"), enabled }); }
+export function useActiveDiagnosis(enabled = true) { return useQuery({ queryKey: keys.diagnosis, queryFn: () => api.get<Diagnosis | null>("/api/diagnosis/active"), enabled }); }
+
+export function useCreateBattery() { const qc = useQueryClient(); return useMutation({ mutationFn: (body: Record<string, unknown>) => api.post<Battery>("/api/batteries", body), onSuccess: () => { void qc.invalidateQueries({ queryKey: keys.batteries }); } }); }
+export function useUpdateBattery(id: string) { const qc = useQueryClient(); return useMutation({ mutationFn: (body: Record<string, unknown>) => api.patch<Battery>(`/api/batteries/${id}`, body), onSuccess: () => { void qc.invalidateQueries({ queryKey: keys.batteries }); void qc.invalidateQueries({ queryKey: keys.battery(id) }); } }); }
+export function useStartSession() { const qc = useQueryClient(); return useMutation({ mutationFn: (batteryId: string) => api.post<import("../types").ActiveSession>("/api/sessions", { batteryId }), onSuccess: () => { void qc.invalidateQueries({ queryKey: keys.me }); void qc.invalidateQueries({ queryKey: keys.dashboard }); } }); }
+export function useRelayMutation(action: "cut" | "restore") { const qc = useQueryClient(); return useMutation({ mutationFn: (body: { reason: string; password: string }) => api.post<{ decision: "APPROVED"; requestId: string; relay: Relay }>(`/api/relay/${action}`, body, { "Idempotency-Key": idempotencyKey(`relay-${action}`) }), onSuccess: () => { void qc.invalidateQueries({ queryKey: keys.relay }); void qc.invalidateQueries({ queryKey: ["relay-history"] }); } }); }
+export function useAckAlert() { const qc = useQueryClient(); return useMutation({ mutationFn: (id: string) => api.post<Alert>(`/api/alerts/${id}/ack`), onSuccess: () => { void qc.invalidateQueries({ queryKey: ["alerts"] }); void qc.invalidateQueries({ queryKey: ["alert-summary"] }); void qc.invalidateQueries({ queryKey: keys.me }); } }); }
+export function useAckAll() { const qc = useQueryClient(); return useMutation({ mutationFn: () => api.post<{ acknowledgedCount: number }>("/api/alerts/ack-all"), onSuccess: () => { void qc.invalidateQueries({ queryKey: ["alerts"] }); void qc.invalidateQueries({ queryKey: ["alert-summary"] }); void qc.invalidateQueries({ queryKey: keys.me }); } }); }
+export function useDiagnosisStart(kind: "quick" | "capacity") { const qc = useQueryClient(); return useMutation({ mutationFn: (body: Record<string, unknown>) => api.post<Diagnosis>(`/api/diagnosis/${kind}`, body), onSuccess: () => { void qc.invalidateQueries({ queryKey: keys.diagnosis }); } }); }
+export function useDiagnosisStop() { const qc = useQueryClient(); return useMutation({ mutationFn: () => api.delete<Diagnosis>("/api/diagnosis/active"), onSuccess: () => { void qc.invalidateQueries({ queryKey: keys.diagnosis }); } }); }
+export function useUpdateAdminStatus(id: string) { const qc = useQueryClient(); return useMutation({ mutationFn: (body: { opsStatus: string; reason: string; version?: number }) => api.patch(`/api/admin/batteries/${id}/ops-status`, body), onSuccess: () => { void qc.invalidateQueries({ queryKey: ["admin-batteries"] }); } }); }
+export function useSaveAdminMemo(id: string) { const qc = useQueryClient(); return useMutation({ mutationFn: (body: { memo: string; version?: number }) => api.patch(`/api/admin/batteries/${id}/memo`, body), onSuccess: () => { void qc.invalidateQueries({ queryKey: ["admin-batteries"] }); } }); }
+export function useUpdateUserStatus(id: string) { const qc = useQueryClient(); return useMutation({ mutationFn: (body: { status: "ACTIVE" | "SUSPENDED"; reason: string }) => api.patch(`/api/admin/users/${id}`, body), onSuccess: () => { void qc.invalidateQueries({ queryKey: ["admin-users"] }); } }); }
