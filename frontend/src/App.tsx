@@ -15,6 +15,7 @@ import { queryClient } from "./queryClient";
 function ProtectedRoutes({ me, realtime }: { me: MeResponse; realtime: ReturnType<typeof useRealtime> }) {
   const isAdmin = me.user?.role === "ADMIN";
   return <Routes>
+    <Route path="/login" element={<Navigate to="/battery" replace />} />
     <Route path="/dashboard" element={<DashboardPage realtime={realtime} me={me} />} />
     <Route path="/battery" element={<BatteryPage />} />
     <Route path="/battery/:id" element={<RouteWithBatteryId me={me} />} />
