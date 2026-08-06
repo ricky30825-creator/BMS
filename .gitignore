@@ -25,3 +25,5 @@ scripts/
 fp-info-cache
 edge/bw150/__pycache__/
 data/
+frontend/test-results/
+frontend/*.tsbuildinfo
