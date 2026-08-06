@@ -1,13 +1,12 @@
 #!/usr/bin/env python3
 """셀가드 모드 1(외부 셀) 계측 회로도 KiCad 파일 생성기.
 
-기성 모듈을 배선으로 잇는 하네스라 PCB는 없다. 심볼도 KiCad 기본
-라이브러리에 없는 브레이크아웃뿐이라 프로젝트 자체 라이브러리를 함께 만든다.
-심볼 핀 이름은 실물 모듈의 실크스크린 글자를 그대로 쓴다 — 회로도와 실물을
-1:1로 대조해야 하는 초보자가 볼 문서이기 때문이다.
+심볼 정의는 tools/cellguard_symbols.py, s-expression 직렬화는
+tools/kicad_sch.py 에 있다. 이 파일에는 무엇을 어디에 잇는가(배치·결선)와
+회로도 주석만 둔다.
 
-배선은 전부 글로벌 라벨로 잇는다. 긴 배선이 교차하지 않아 좌표가 단순하고,
-"같은 이름끼리 연결"로 읽을 수 있다.
+모드 1·2 통합 회로는 tools/gen_combined_sch.py 다. 두 회로는 CH4 역할과
+INA226 입력단(CELL_P vs SOURCE_P)이 다르므로 파일이 갈린다.
 
 사용법:
     python3 tools/gen_mode1_sch.py
@@ -21,208 +20,19 @@
 
 from __future__ import annotations
 
-import uuid
-from dataclasses import dataclass, field
+import sys
 from pathlib import Path
 
-REPO = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from cellguard_symbols import RPI_ALL, SYMBOLS          # noqa: E402
+from kicad_sch import REPO, Inst, Schematic, build_notes  # noqa: E402
+
 OUT = REPO / "hardware" / "mode1"
 PROJECT = "cellguard_mode1"
-LIB = "cellguard"
-
-NS = uuid.UUID("6f1b6a1e-0000-4000-8000-000000000000")
-_ROOT = str(uuid.uuid5(NS, "root-sheet"))
-
-GRID = 1.27      # KiCad 연결 격자
-PITCH = 5.08     # 핀 세로 간격. 2.54로 하면 글로벌 라벨끼리 세로로 붙어 안 읽힌다
-PIN_LEN = 5.08
-STUB = 5.08      # 핀 끝에서 글로벌 라벨까지의 짧은 배선
-
-
-def uid(*parts: object) -> str:
-    return str(uuid.uuid5(NS, "|".join(str(p) for p in parts)))
-
-
-def snap(v: float) -> float:
-    """KiCad 연결 격자(1.27mm)에 맞춘다. 안 맞으면 ERC가 endpoint_off_grid로 잡는다."""
-    return round(v / 1.27) * 1.27
-
-
-# ---------------------------------------------------------------- 심볼 정의
-
-@dataclass
-class Pin:
-    name: str
-    number: str
-    etype: str = "passive"
-
-
-@dataclass
-class Sym:
-    name: str
-    ref: str
-    value: str
-    desc: str
-    left: list[Pin] = field(default_factory=list)
-    right: list[Pin] = field(default_factory=list)
-    width: float = 33.02
-
-    @property
-    def rows(self) -> int:
-        return max(len(self.left), len(self.right))
-
-    @property
-    def height(self) -> float:
-        return self.rows * PITCH + PITCH
-
-    def local_pins(self) -> dict[str, tuple[float, float, int]]:
-        """핀 이름 -> (심볼 로컬 x, y, 각도). 로컬 좌표는 Y가 위로 증가한다."""
-        w, h = self.width, self.height
-        out: dict[str, tuple[float, float, int]] = {}
-        for i, p in enumerate(self.left):
-            out[p.name] = (-w / 2 - PIN_LEN, h / 2 - PITCH * (i + 1), 0)
-        for i, p in enumerate(self.right):
-            out[p.name] = (w / 2 + PIN_LEN, h / 2 - PITCH * (i + 1), 180)
-        return out
-
-
-def P(spec: str, etype: str = "passive") -> list[Pin]:
-    """'1:VCC 2:GND' 형태를 Pin 리스트로."""
-    pins = []
-    for tok in spec.split():
-        num, _, name = tok.partition(":")
-        pins.append(Pin(name=name, number=num, etype=etype))
-    return pins
-
-
-# 라즈베리파이 5 40핀 헤더 — 홀수 핀 좌측, 짝수 핀 우측(실물 배치와 동일)
-RPI_PINS = [
-    "3V3", "5V",
-    "GPIO2/SDA1", "5V",
-    "GPIO3/SCL1", "GND",
-    "GPIO4", "GPIO14/TXD",
-    "GND", "GPIO15/RXD",
-    "GPIO17", "GPIO18",
-    "GPIO27", "GND",
-    "GPIO22", "GPIO23",
-    "3V3", "GPIO24",
-    "GPIO10/MOSI", "GND",
-    "GPIO9/MISO", "GPIO25",
-    "GPIO11/SCLK", "GPIO8/CE0",
-    "GND", "GPIO7/CE1",
-    "ID_SD", "ID_SC",
-    "GPIO5", "GND",
-    "GPIO6", "GPIO12",
-    "GPIO13", "GND",
-    "GPIO19", "GPIO16",
-    "GPIO26", "GPIO20",
-    "GND", "GPIO21",
-]
-
-_rpi_left = [Pin(f"{RPI_PINS[i]} ({i + 1})", str(i + 1)) for i in range(0, 40, 2)]
-_rpi_right = [Pin(f"({i + 1}) {RPI_PINS[i]}", str(i + 1)) for i in range(1, 40, 2)]
-
-SYMBOLS: dict[str, Sym] = {
-    "CELL": Sym(
-        "CELL", "BT", "Li-ion Cell",
-        "측정 대상 셀 — 18650 3.7V 2550mAh 또는 리튬폴리머 3.7V 1000mAh",
-        right=P("1:+ 2:-"), width=25.4,
-    ),
-    "INA226": Sym(
-        "INA226", "U", "INA226 [VLT-VCM029]",
-        "전압·전류·전력 측정, I2C 0x40. Pi 3.3V로 동작하므로 마스터 차단 후에도 셀 전압 감시가 살아있다",
-        left=P("1:IN+ 2:IN- 3:VBUS"),
-        right=P("4:VCC 5:GND 6:SCL 7:SDA 8:ALE"),
-        width=33.02,
-    ),
-    "BABYSITTER": Sym(
-        "BABYSITTER", "U", "Battery Babysitter [PRT-13777]",
-        "BQ24075 충전기 + BQ27441 퓨얼게이지(SOC), I2C 0x55. "
-        "핀 이름은 회로도 규약이며 보드 실크스크린과 다르다 -- "
-        "VIN/GND_IN=VIN +/-, SYS+/SYS-=VOUT +/-, BAT+/BAT-=JST +/-. "
-        "GND/GND_IN/SYS-는 보드 안에서 같은 GND 네트",
-        left=P("1:VIN 2:GND_IN"),
-        right=P("3:BAT+ 4:BAT- 5:SYS+ 6:SYS- 7:SDA 8:SCL 9:GPOUT 10:GND"),
-        width=45.72,
-    ),
-    "MLX90614": Sym(
-        "MLX90614", "U", "MLX90614 [SEN0206]",
-        "비접촉 IR 표면온도(MLX90614-DCC, FOV 35°). 주소는 EEPROM 0x0E로 변경 가능. Gravity 4핀 — 검정 GND / 빨강 VCC / 파랑 SDA / 초록 SCL",
-        left=P("1:VCC 2:GND"), right=P("3:SDA 4:SCL"), width=33.02,
-    ),
-    "ADS1115": Sym(
-        "ADS1115", "U", "ADS1115 [VLT-AD004]",
-        "16비트 4채널 ADC, I2C 0x48. VDD=3.3V 구동이라 I2C 라인이 3.3V로 유지된다",
-        left=P("1:A0 2:A1 3:A2 4:A3"),
-        right=P("5:VDD 6:GND 7:SCL 8:SDA 9:ADDR 10:ALRT"),
-        width=33.02,
-    ),
-    "DS18B20": Sym(
-        "DS18B20", "U", "DS18B20 방수형 [SEN050007]",
-        "셀 표면 접촉온도, 1-Wire 멀티드롭(고유 64비트 ROM 코드라 주소 설정 불필요). 빨강 VDD / 노랑 DQ / 검정 GND",
-        right=P("1:VDD 2:DQ 3:GND"), width=38.1,
-    ),
-    "TFT35": Sym(
-        "TFT35", "U", "TFT 3.5in SPI 480x320 V1.0",
-        "ILI9488 + 저항막 터치 14핀. 표시 전용 9핀만 쓰고 T_* 5핀과 SDO는 미결선. "
-        "로직은 3.3V(TTL)",
-        right=P("1:VCC 2:GND 3:CS 4:RESET 5:DC/RS 6:SDI 7:SCK 8:LED 9:SDO "
-                "10:T_CLK 11:T_CS 12:T_DIN 13:T_DO 14:T_IRQ"),
-        width=45.72,
-    ),
-    "RELAY4": Sym(
-        "RELAY4", "K", "4CH Relay [SZH-RLBG-012]",
-        "4채널 5V 릴레이. active-LOW. VCC-JD_VCC 점퍼 제거 후 VCC=3.3V / JD_VCC=5V",
-        left=P("1:VCC 2:IN1 3:IN2 4:IN3 5:IN4 6:GND 7:JD_VCC"),
-        right=P("8:CH1_COM 9:CH1_NO 10:CH1_NC "
-                "11:CH2_COM 12:CH2_NO 13:CH2_NC "
-                "14:CH3_COM 15:CH3_NO 16:CH3_NC "
-                "17:CH4_COM 18:CH4_NO 19:CH4_NC"),
-        width=45.72,
-    ),
-    "RPI5_HDR": Sym(
-        "RPI5_HDR", "J", "Raspberry Pi 5 GPIO Header",
-        "40핀 헤더. 좌측=홀수 핀, 우측=짝수 핀 (실물 배치와 동일)",
-        left=_rpi_left, right=_rpi_right, width=53.34,
-    ),
-    "ZY12PDN": Sym(
-        "ZY12PDN", "J", "ZY12PDN PD Trigger (5V)",
-        "USB-C PD 트리거. 반드시 5V로 설정할 것 — 9V/12V면 Babysitter가 파손된다",
-        right=P("1:VOUT+ 2:VOUT-"), width=40.64,
-    ),
-    "BW150": Sym(
-        "BW150", "J", "ATORCH BW150 부하 입력",
-        "전자부하. 데이터 경로가 아니라 방전 부하 + INA226 검증 기준기다",
-        left=P("1:LOAD+ 2:LOAD-"), width=40.64,
-    ),
-    "FSR406": Sym(
-        "FSR406", "RV", "FSR 406 [30-73258]",
-        "스웰링 압력. 힘이 커지면 저항이 낮아진다 — 분압 고정저항 없이는 읽히지 않는다",
-        left=P("1:1"), right=P("2:2"), width=30.48,
-    ),
-    "R": Sym(
-        "R", "R", "R",
-        "저항",
-        left=P("1:1"), right=P("2:2"), width=17.78,
-    ),
-}
 
 
 # ---------------------------------------------------------------- 배치·결선
-
-@dataclass
-class Inst:
-    key: str          # 심볼 이름
-    ref: str          # U1, K1 ...
-    x: float
-    y: float
-    value: str | None = None
-    nets: dict[str, str] = field(default_factory=dict)   # 핀 이름 -> 네트 이름
-    nc: list[str] = field(default_factory=list)          # 미연결 표시할 핀 이름
-
-    def __post_init__(self) -> None:
-        self.x, self.y = snap(self.x), snap(self.y)
-
 
 I2C = {"SDA": "I2C_SDA", "SCL": "I2C_SCL"}
 
@@ -326,12 +136,11 @@ INSTANCES: list[Inst] = [
 
 # 라즈베리파이 헤더에서 쓰지 않는 핀은 전부 미연결 표시
 _rpi = next(i for i in INSTANCES if i.key == "RPI5_HDR")
-_all_rpi = [p.name for p in _rpi_left] + [p.name for p in _rpi_right]
-_rpi.nc = [n for n in _all_rpi if n not in _rpi.nets]
+_rpi.nc = [n for n in RPI_ALL if n not in _rpi.nets]
 
 
 # 주석은 3단 컬럼으로. (제목, [줄...]) 를 순서대로 쌓고 y는 자동으로 내린다.
-_COLUMNS: list[tuple[float, list[tuple[str, str]]]] = [
+COLUMNS: list[tuple[float, list[tuple[str, str]]]] = [
     (20, [
         ("h1", "셀가드 — 모드 1 (외부 셀) 충·방전 계측 회로"),
         ("", "충전:  ZY12PDN 5V -[CH1]- Babysitter VIN -> (BQ24075) -> BAT+ -[CH3]- INA226 션트 - 셀 +"),
@@ -437,241 +246,24 @@ _COLUMNS: list[tuple[float, list[tuple[str, str]]]] = [
     ]),
 ]
 
-_SIZES = {"h1": (3.0, 9.0), "h2": (2.5, 8.0), "": (2.0, 5.2)}
-
-NOTES: list[tuple[float, float, float, str]] = []
-for _x, _lines in _COLUMNS:
-    _y = 305.0
-    for _kind, _s in _lines:
-        _size, _step = _SIZES[_kind]
-        if _s:
-            NOTES.append((_x, _y, _size, _s))
-        _y += _step if _s else 3.0
-
-
-# ---------------------------------------------------------------- 직렬화
-
-def sexp_sym_def(s: Sym) -> str:
-    w, h = s.width, s.height
-    loc = s.local_pins()
-    lines = [
-        f'\t\t(symbol "{LIB}:{s.name}"',
-        '\t\t\t(pin_names (offset 0.508))',
-        '\t\t\t(exclude_from_sim no)',
-        '\t\t\t(in_bom yes)',
-        '\t\t\t(on_board yes)',
-        f'\t\t\t(property "Reference" "{s.ref}" (at {-w/2:.2f} {h/2 + 3.81:.2f} 0)'
-        ' (effects (font (face \"Apple SD Gothic Neo\") (size 1.27 1.27)) (justify left bottom)))',
-        f'\t\t\t(property "Value" "{s.value}" (at {-w/2:.2f} {h/2 + 1.27:.2f} 0)'
-        ' (effects (font (face \"Apple SD Gothic Neo\") (size 1.27 1.27)) (justify left bottom)))',
-        '\t\t\t(property "Footprint" "" (at 0 0 0) (effects (font (face \"Apple SD Gothic Neo\") (size 1.27 1.27)) (hide yes)))',
-        '\t\t\t(property "Datasheet" "" (at 0 0 0) (effects (font (face \"Apple SD Gothic Neo\") (size 1.27 1.27)) (hide yes)))',
-        f'\t\t\t(property "Description" "{s.desc}" (at 0 0 0)'
-        ' (effects (font (face \"Apple SD Gothic Neo\") (size 1.27 1.27)) (hide yes)))',
-        f'\t\t\t(symbol "{s.name}_0_1"',
-        f'\t\t\t\t(rectangle (start {-w/2:.2f} {h/2:.2f}) (end {w/2:.2f} {-h/2:.2f})',
-        '\t\t\t\t\t(stroke (width 0.254) (type default))',
-        '\t\t\t\t\t(fill (type background))',
-        '\t\t\t\t)',
-        '\t\t\t)',
-        f'\t\t\t(symbol "{s.name}_1_1"',
-    ]
-    for p in s.left + s.right:
-        x, y, ang = loc[p.name]
-        lines += [
-            f'\t\t\t\t(pin {p.etype} line (at {x:.2f} {y:.2f} {ang}) (length {PIN_LEN})',
-            f'\t\t\t\t\t(name "{p.name}" (effects (font (face \"Apple SD Gothic Neo\") (size 1.27 1.27))))',
-            f'\t\t\t\t\t(number "{p.number}" (effects (font (face \"Apple SD Gothic Neo\") (size 1.016 1.016))))',
-            '\t\t\t\t)',
-        ]
-    lines += ['\t\t\t)', '\t\t)']
-    return "\n".join(lines)
-
-
-def write_symbol_library() -> None:
-    body = "\n".join(sexp_sym_def(s) for s in SYMBOLS.values())
-    # 라이브러리 파일은 들여쓰기 한 단계가 적다
-    body = "\n".join(line[1:] if line.startswith("\t") else line
-                     for line in body.split("\n"))
-    text = (
-        "(kicad_symbol_lib\n"
-        "\t(version 20241209)\n"
-        '\t(generator "gen_mode1_sch.py")\n'
-        '\t(generator_version "9.0")\n'
-        f"{body}\n"
-        ")\n"
-    )
-    (OUT / f"{LIB}.kicad_sym").write_text(text, encoding="utf-8")
-
-
-def sexp_instance(inst: Inst) -> str:
-    s = SYMBOLS[inst.key]
-    h = s.height
-    val = inst.value or s.value
-    return "\n".join([
-        '\t(symbol',
-        f'\t\t(lib_id "{LIB}:{s.name}")',
-        f'\t\t(at {inst.x:.2f} {inst.y:.2f} 0)',
-        '\t\t(unit 1)',
-        '\t\t(exclude_from_sim no)',
-        '\t\t(in_bom yes)',
-        '\t\t(on_board yes)',
-        '\t\t(dnp no)',
-        f'\t\t(uuid "{uid("inst", inst.ref)}")',
-        f'\t\t(property "Reference" "{inst.ref}"'
-        f' (at {inst.x - s.width/2:.2f} {inst.y - h/2 - 3.81:.2f} 0)'
-        ' (effects (font (face \"Apple SD Gothic Neo\") (size 1.27 1.27)) (justify left bottom)))',
-        f'\t\t(property "Value" "{val}"'
-        f' (at {inst.x - s.width/2:.2f} {inst.y - h/2 - 1.27:.2f} 0)'
-        ' (effects (font (face \"Apple SD Gothic Neo\") (size 1.27 1.27)) (justify left bottom)))',
-        f'\t\t(property "Footprint" "" (at {inst.x:.2f} {inst.y:.2f} 0)'
-        ' (effects (font (face \"Apple SD Gothic Neo\") (size 1.27 1.27)) (hide yes)))',
-        f'\t\t(property "Datasheet" "" (at {inst.x:.2f} {inst.y:.2f} 0)'
-        ' (effects (font (face \"Apple SD Gothic Neo\") (size 1.27 1.27)) (hide yes)))',
-        f'\t\t(property "Description" "{s.desc}" (at {inst.x:.2f} {inst.y:.2f} 0)'
-        ' (effects (font (face \"Apple SD Gothic Neo\") (size 1.27 1.27)) (hide yes)))',
-        '\t\t(instances',
-        f'\t\t\t(project "{PROJECT}"',
-        f'\t\t\t\t(path "/{_ROOT}" (reference "{inst.ref}") (unit 1))',
-        '\t\t\t)',
-        '\t\t)',
-        '\t)',
-    ])
-
-
-def sexp_wire(x1: float, y1: float, x2: float, y2: float, key: str) -> str:
-    return "\n".join([
-        '\t(wire',
-        f'\t\t(pts (xy {x1:.2f} {y1:.2f}) (xy {x2:.2f} {y2:.2f}))',
-        '\t\t(stroke (width 0) (type default))',
-        f'\t\t(uuid "{uid("wire", key)}")',
-        '\t)',
-    ])
-
-
-def sexp_glabel(name: str, x: float, y: float, ang: int, key: str) -> str:
-    just = "left" if ang == 0 else "right"
-    return "\n".join([
-        f'\t(global_label "{name}"',
-        '\t\t(shape bidirectional)',
-        f'\t\t(at {x:.2f} {y:.2f} {ang})',
-        f'\t\t(effects (font (face \"Apple SD Gothic Neo\") (size 1.27 1.27)) (justify {just}))',
-        f'\t\t(uuid "{uid("gl", key)}")',
-        '\t\t(property "Intersheetrefs" "${INTERSHEET_REFS}" (at 0 0 0)'
-        ' (effects (font (face \"Apple SD Gothic Neo\") (size 1.27 1.27)) (hide yes)))',
-        '\t)',
-    ])
-
-
-def sexp_nc(x: float, y: float, key: str) -> str:
-    return f'\t(no_connect (at {x:.2f} {y:.2f}) (uuid "{uid("nc", key)}"))'
-
-
-def sexp_text(x: float, y: float, size: float, s: str, key: str) -> str:
-    return "\n".join([
-        f'\t(text "{s}"',
-        '\t\t(exclude_from_sim no)',
-        f'\t\t(at {x:.2f} {y:.2f} 0)',
-        f'\t\t(effects (font (face \"Apple SD Gothic Neo\") (size {size} {size})) (justify left bottom))',
-        f'\t\t(uuid "{uid("txt", key)}")',
-        '\t)',
-    ])
-
-
-def write_schematic() -> None:
-    parts: list[str] = []
-    used_syms = {i.key for i in INSTANCES}
-    lib_defs = "\n".join(sexp_sym_def(SYMBOLS[k])
-                         for k in SYMBOLS if k in used_syms)
-
-    for inst in INSTANCES:
-        sym = SYMBOLS[inst.key]
-        loc = sym.local_pins()
-        parts.append(sexp_instance(inst))
-
-        for pin_name, net in inst.nets.items():
-            if pin_name not in loc:
-                raise KeyError(f"{inst.ref}: 심볼 {inst.key}에 핀 '{pin_name}' 없음")
-            lx, ly, ang = loc[pin_name]
-            # 심볼 로컬은 Y가 위로, 회로도는 Y가 아래로 증가한다
-            px, py = inst.x + lx, inst.y - ly
-            dx = -STUB if ang == 0 else STUB
-            ex = px + dx
-            key = f"{inst.ref}.{pin_name}"
-            parts.append(sexp_wire(px, py, ex, py, key))
-            # 라벨은 핀 각도의 반대로 눕혀야 심볼 바깥으로 뻗는다.
-            # 같은 각도를 쓰면 라벨이 심볼 위를 덮어 핀 번호가 가려진다.
-            parts.append(sexp_glabel(net, ex, py, 180 if ang == 0 else 0, key))
-
-        for pin_name in inst.nc:
-            lx, ly, ang = loc[pin_name]
-            parts.append(sexp_nc(inst.x + lx, inst.y - ly, f"{inst.ref}.{pin_name}"))
-
-    for idx, (x, y, size, s) in enumerate(NOTES):
-        parts.append(sexp_text(x, y, size, s, idx))
-
-    text = "\n".join([
-        "(kicad_sch",
-        "\t(version 20250114)",
-        '\t(generator "gen_mode1_sch.py")',
-        '\t(generator_version "9.0")',
-        f'\t(uuid "{_ROOT}")',
-        '\t(paper "A1")',   # 주석량 때문에 A2로는 모자란다
-        # 제목란은 KiCad가 자체 폰트로 그려서 face 지정이 먹지 않는다.
-        # 한글을 넣으면 글자가 통째로 사라지므로 ASCII로만 쓴다.
-        '\t(title_block',
-        '\t\t(title "CellGuard Mode 1 - External Cell Charge/Discharge Measurement")',
-        '\t\t(company "Battery Thermal Runaway Task Force")',
-        '\t\t(comment 1 "Generated by tools/gen_mode1_sch.py - edit the script, not this file")',
-        '\t\t(comment 2 "Beginner guide: docs/hardware/mode1_beginner_guide.md")',
-        '\t\t(comment 3 "Backend spec:   docs/hardware/mode1_backend_spec.md")',
-        '\t\t(comment 4 "No PCB - off-the-shelf modules + wiring harness")',
-        '\t)',
-        '\t(lib_symbols',
-        lib_defs,
-        '\t)',
-        "\n".join(parts),
-        '\t(sheet_instances',
-        '\t\t(path "/" (page "1"))',
-        '\t)',
-        '\t(embedded_fonts no)',
-        ")",
-        "",
-    ])
-    (OUT / f"{PROJECT}.kicad_sch").write_text(text, encoding="utf-8")
-
-
-def write_project_files() -> None:
-    (OUT / "sym-lib-table").write_text(
-        "(sym_lib_table\n"
-        "  (version 7)\n"
-        f'  (lib (name "{LIB}")(type "KiCad")(uri "${{KIPRJMOD}}/{LIB}.kicad_sym")'
-        '(options "")(descr "셀가드 모드 1 전용 모듈 심볼"))\n'
-        ")\n",
-        encoding="utf-8",
-    )
-    (OUT / f"{PROJECT}.kicad_pro").write_text(
-        '{\n'
-        '  "board": {},\n'
-        '  "libraries": {"pinned_footprint_libs": [], "pinned_symbol_libs": []},\n'
-        '  "meta": {"filename": "' + PROJECT + '.kicad_pro", "version": 3},\n'
-        '  "schematic": {"legacy_lib_dir": "", "legacy_lib_list": []},\n'
-        '  "sheets": [["' + _ROOT + '", "Root"]],\n'
-        '  "text_variables": {}\n'
-        '}\n',
-        encoding="utf-8",
-    )
-
 
 def main() -> None:
-    OUT.mkdir(parents=True, exist_ok=True)
-    write_symbol_library()
-    write_schematic()
-    write_project_files()
-    nets = sorted({n for i in INSTANCES for n in i.nets.values()})
-    print(f"생성 완료: {OUT}")
-    print(f"  심볼 {len(SYMBOLS)}종 / 인스턴스 {len(INSTANCES)}개 / 네트 {len(nets)}개")
-    print("  네트: " + ", ".join(nets))
+    Schematic(
+        out=OUT,
+        project=PROJECT,
+        generator="gen_mode1_sch.py",
+        title="CellGuard Mode 1 - External Cell Charge/Discharge Measurement",
+        comments=[
+            "Generated by tools/gen_mode1_sch.py - edit the script, not this file",
+            "Beginner guide: docs/hardware/mode1_beginner_guide.md",
+            "Backend spec:   docs/hardware/mode1_backend_spec.md",
+            "No PCB - off-the-shelf modules + wiring harness",
+        ],
+        symbols=SYMBOLS,
+        instances=INSTANCES,
+        notes=build_notes(COLUMNS),
+        lib_descr="셀가드 모드 1 전용 모듈 심볼",
+    ).write()
 
 
 if __name__ == "__main__":

@@ -9,7 +9,7 @@
 
 모드 2의 판정 계약은 [`mode2_powerbank_diagnosis_spec.md`](mode2_powerbank_diagnosis_spec.md)를 따르되, 이 보유부품형 회로에는 **모드 2 자동 충전 경로·충전전류 측정·MQ-2 가스 안전계층이 없다.** 따라서 현재 프로필 이름은 `COMBINED_EXISTING_PARTS_V1`이며, **빠른 진단과 정밀 용량시험을 아직 실행하지 않는다.** 이 문서는 배선과 0.1A→0.5A·10초 전기 시운전까지만 허용한다.
 
-- 회로도(모드 1 기준): `hardware/mode1/cellguard_mode1.kicad_pro` 또는 `hardware/mode1/cellguard_mode1.svg`
+- **회로도(이 문서 기준): `hardware/combined/cellguard_combined.kicad_pro` 또는 `hardware/combined/cellguard_combined.svg`** — CH4·`SOURCE_P`·6가닥 GND 스플라이스가 그려져 있다. 모드 1 전용 회로도(`hardware/mode1/`)에는 CH4가 미배선 예비 채널로 남아 있으니 이 문서와 같이 보지 않는다.
 - 백엔드 개발자용 문서: [`mode1_backend_spec.md`](mode1_backend_spec.md) — 통합형 릴레이 프로필은 §8-4-1
 - 모드 1 전용 회로만 만들 거라면: [`mode1_beginner_guide.md`](mode1_beginner_guide.md)
 

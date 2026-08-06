@@ -184,7 +184,7 @@ LSTM-AutoEncoder(재구성 오차 = 현재 이상)와 Informer(예측 오차 = �
 
 **모드 2 부하 수단과 릴레이 매핑은 2026-07-28에 확정됐다.** 보유 BW150을 사용하며 상세 회로·실물 게이트는 `docs/hardware/mode2_powerbank_diagnosis_spec.md`와 통합 조립 가이드를 따른다. 안전 문턱과 연속 감시가 검증되기 전 `COMBINED_EXISTING_PARTS_V1`을 제품 F21 진단으로 승격하지 않는다.
 
-- **회로도는 생성물이다.** KiCad에서 손으로 고치지 말고 `tools/gen_mode1_sch.py`를 고친 뒤 다시 돌린다. 검증은 `kicad-cli sch erc`(위반 0건) + `sch export netlist`로 네트 연결 확인. `kicad-cli`는 `/Applications/KiCad/KiCad.app/Contents/MacOS/kicad-cli`에 있다(PATH에 없음).
+- **회로도는 생성물이다.** KiCad에서 손으로 고치지 말고 생성기를 고친 뒤 다시 돌린다 — 모드 1 전용은 `tools/gen_mode1_sch.py` → `hardware/mode1/`, 모드 1·2 통합(`COMBINED_EXISTING_PARTS_V1`)은 `tools/gen_combined_sch.py` → `hardware/combined/`. **심볼 정의(`tools/cellguard_symbols.py`)와 직렬화(`tools/kicad_sch.py`)는 두 회로가 공유하므로, 그쪽을 고쳤으면 반드시 두 생성기를 다 돌려 `hardware/mode1/`에 의도치 않은 변화가 없는지 `git diff`로 확인한다.** 검증은 `kicad-cli sch erc`(위반 0건) + `sch export netlist`로 네트 연결 확인. `kicad-cli`는 `/Applications/KiCad/KiCad.app/Contents/MacOS/kicad-cli`에 있다(PATH에 없음).
 - **회로도 텍스트에 한글을 넣으려면 `(font (face "Apple SD Gothic Neo") …)`를 명시해야 한다.** 안 붙이면 `kicad-cli` 내보내기에서 한글이 통째로 사라진다. 제목란(`title_block`)은 폰트 지정이 안 먹으므로 ASCII만 쓴다.
 - **릴레이는 active-LOW**(`0`=도통, `1`=차단)이고 모든 배터리 경로가 NO 접점을 지나 정전·부팅 중·크래시 시 자동 차단된다. 모드 1 매핑: CH1 충전(GPIO5), CH2 방전(GPIO6), CH3 마스터(GPIO13), CH4 예비(GPIO19). CH1·CH2 동시 도통 금지, 전환 시 50ms 이상 대기.
 - **CH3(마스터)을 열면 BQ27441이 꺼져 I2C `0x55`가 버스에서 사라진다.** 정상 동작이므로 릴레이 상태를 조건으로 걸지 않으면 센서 오류 알림이 폭주한다. INA226은 Pi 3.3V로 동작해 셀 전압 감시는 계속된다.

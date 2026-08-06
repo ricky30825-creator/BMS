@@ -1,0 +1,4 @@
+(sym_lib_table
+  (version 7)
+  (lib (name "cellguard")(type "KiCad")(uri "${KIPRJMOD}/cellguard.kicad_sym")(options "")(descr "셀가드 모드 1·2 통합 회로 모듈 심볼"))
+)
