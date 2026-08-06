@@ -23,3 +23,4 @@ scripts/
 # KiCad 로컬 사용자 설정 (프로젝트 상태가 아님)
 *.kicad_prl
 fp-info-cache
+edge/bw150/__pycache__/
