@@ -9,12 +9,12 @@
 | 작성일 / 최종 검증일 | 2026-08-06 |
 | 근거 기준 | `설계 산출물/셀가드 프로토타입_v3.html`, `docs/feature_definition.md`(REQ-WEB-001~073, 069 결번), `docs/admin_feature_definition.md`(REQ-WEB-101~136), `PLAN.md` |
 | 검증 방법 | v3 번들 소스 복원·정적 대조 + 로컬 HTTP 실행 + **Codex 인앱 브라우저 직접 입력·선택·모달·화면 전환 검증**(2026-08-06) |
-| 검증 대상 SHA-256 | `a6cdf48f58beb809b7e099ba7d93e225b6acbf6b2598bf9d4540455b0e697c43` (`설계 산출물/셀가드 프로토타입_v3.html`) |
+| 검증 대상 SHA-256 | `f5ad727ea1e023601b89f7620f2ae50bc4445ab829807f727cbc94b49468da20` (`설계 산출물/셀가드 프로토타입_v3.html`) |
 | 대상 화면 | 20개 영역 (공개 3 · 일반 사용자 11 · 관리자 6) |
 
 > **관련 문서**: `docs/product_contract.md`(디자인 무관 제품 계약서)가 같은 v3를 근거로 **과업 플로우 T0~T16**을 기술한다. 이 문서는 그 플로우를 지탱하는 **API 인터페이스**를 정의한다. 둘이 충돌하면 화면·플로우는 `product_contract.md`, 요청/응답 스키마는 이 문서가 우선한다.
 
-> **기능정의서와의 관계**: 2026-08-05 검증에서 모드·필드·동기화·Raw CSV·릴레이 승인 규칙을 연관 정본과 함께 갱신했다. 남은 의도적 제외·미구현은 §11~12에만 기록한다.
+> **기능정의서와의 관계**: 2026-08-06 검증에서 모드·필드·동기화·Raw CSV·릴레이 승인 규칙을 연관 정본과 함께 갱신했다. 남은 의도적 제외·미구현은 §11~12에만 기록한다.
 
 ## 0. 표기 규칙
 
@@ -170,7 +170,7 @@ v3에 흩어져 있던 표시 로직은 아래처럼 하나의 4등급 규칙으
 
 계약은 **4등급(0.3/0.6/0.8)** 하나뿐이다. 실제 제품에서는 서버가 내려준 `grade`만 판정 정본으로 사용한다.
 
-**브라우저 재검증 (2026-08-05)**
+**브라우저 재검증 (2026-08-06)**
 
 - 대시보드·게이지 범례·관리자 배터리 목록이 모두 `정상 0–29 / 주의 30–59 / 경고 60–79 / 위험 80+`를 사용한다.
 - 위험 점수만으로 자동 차단 통보가 열리지 않고, 서버 `relay.autoCut` 이벤트가 있어야만 열리는 것을 확인했다.
@@ -286,7 +286,7 @@ v3에 한/영 토글이 있으므로 `[REQ-WEB-015]`, **서버는 코드와 값�
 
 **예외 — 서버가 문자열을 그대로 내려도 되는 것:** 사용자·관리자가 **입력한** 자유 텍스트. `notice.title`/`body`, `battery.memo`, `admin_memo`, 제어 `reason`이 여기 해당한다. 번역 대상이 아니다.
 
-> 프론트는 `code → 문구 템플릿` 사전을 ko/en 두 벌 관리한다. **서버가 새 `code`를 추가하면 프론트 사전에도 추가해야 하므로, 코드 목록은 이 문서에 유지한다** `[정의 필요 — Q34]` (전체 code 목록 확정).
+> 프론트는 `code → 문구 템플릿` 사전을 ko/en 두 벌 관리한다. 현재 HTTP 구현이 사용하는 공통 code는 `UNAUTHENTICATED`, `FORBIDDEN`, `ACCOUNT_SUSPENDED`, `VALIDATION_FAILED`, `NOT_FOUND`, `BATTERY_BLOCKED`, `NO_ACTIVE_SESSION`, `NO_STATUS_CHANGE`, `REASON_REQUIRED`, `INPUT_TOO_LONG`, `VERSION_CONFLICT`, `SELF_SUSPEND_FORBIDDEN`, `REAUTH_REQUIRED`, `INTERLOCK_LOCKED`, `MODE_NOT_SUPPORTED`, `SAFETY_PROFILE_NOT_READY`, `DIAGNOSIS_IN_PROGRESS`, `NO_DIAGNOSIS_IN_PROGRESS`, `ACK_REQUIRED`, `FULL_CHARGE_REQUIRED`, `IDEMPOTENCY_CONFLICT`, `BATTERY_NAME_REQUIRED`, `CAPACITY_REQUIRED`, `RATED_CURRENT_REQUIRED`, `RUNTIME_NOT_READY`다. 새 code는 이 목록과 프론트 사전에 함께 추가한다 `[Q34 확정]`.
 
 
 ## 2. 리소스 식별자 규약 `[제안]`
@@ -521,12 +521,13 @@ const locked = gated && r !== 'battery';
 ```json
 {
   "label": "PACK-006",
-  "chemistry": "LI_ION",
-  "seriesCount": 3,
+  "chemistry": "LI_PO",
+  "seriesCount": null,
   "targetMode": 2,
   "maker": "Samsung SDI",
   "model": "18650",
   "capacityWh": 37.0,
+  "ratedOutputCurrentA": 2.0,
   "memo": "측정 대상 특이사항…"
 }
 ```
@@ -536,6 +537,7 @@ const locked = gated && r !== 'battery';
 - `targetMode` **필수** — 재연결 시 모드 재선택을 없애기 위해 배터리에 고정된다 `[PLAN]`
 - `seriesCount` / `maker` / `model` / `memo`는 선택이다. 용량은 `capacityWh`를 우선하고, `capacityMah`를 받을 때는 공칭전압도 함께 저장해 Wh로 환산한다.
 - **`targetMode=2`이면 `capacityWh` 또는 환산 가능한 `capacityMah`가 필수**다. 둘 다 없으면 `422 CAPACITY_REQUIRED`. v3의 `정격 용량(Wh)` 입력은 `capacityWh`에 매핑한다.
+- **`targetMode=2`이면 `ratedOutputCurrentA`도 필수**다. 0 이하·누락이면 `422 RATED_CURRENT_REQUIRED`; v3 등록 폼의 광고 정격 출력 전류 입력에 매핑한다 `[Q37 확정]`.
 - 201 응답 본문은 생성된 배터리 객체 전체 (프론트가 목록에 즉시 삽입)
 
 > **`memo`는 사용자 메모다.** v3 **배터리 수정** 모달에 `메모`(placeholder `측정 대상 특이사항…`) 입력이 있고 `PLAN.md:136`에도 선택 필드로 정의돼 있다 `[v3]` `[PLAN]`.
@@ -584,7 +586,7 @@ const locked = gated && r !== 'battery';
 ```
 
 - `health` 4개 필드는 v3 화면에 실측 확인했다 — `SOH 92% · RUL ~480 사이클 · 누적 사이클 312 · 내부 저항 18.4 mΩ` `[v3]` `[REQ-WEB-044]`.
-  **모드 1은 여전히 보류다** `[Q6 보류]` — BQ27441이 사이클과 내부저항을 아는 경로가 있으나, AI 파이프라인 산출물인지 백엔드 집계인지 정하지 않았다. 값이 없으면 `health: null`을 내려주고 프론트는 그 사실을 드러낸다.
+  **모드 1도 백엔드가 산출한다** `[Q6 확정]` — BQ27441 원시/집계값을 백엔드가 계산해 `sohPct`, `rulCycles`, `cycleCount`, `internalResistanceMohm`을 내려준다. 입력이 없거나 stale이면 `health: null`이다.
   **모드 2는 2026-07-28에 확정됐다** `[Q6 모드 2 확정]` — 아래 §모드 2 `health` 참조. 산출 주체는 **백엔드**다(§4.13의 진단 결과를 집계한다).
 
 ##### 모드 2 `health` — `targetMode: 2`일 때 `[확정 2026-07-28]` `[REQ-WEB-137]`
@@ -688,7 +690,7 @@ v3 테이블 컬럼: `세션 ID · 기간 · 최고 이상점수 · 상태 · �
 | 다른 배터리 연결 | `POST /api/sessions`가 기존 세션을 원자적으로 종료 (§3.2) | `SUPERSEDED` |
 | 배터리 `BLOCKED` 전환 | 관리자가 운영 상태를 BLOCKED로 바꾸면 진행 중 세션 종료 (§4.12) | `BLOCKED` |
 
-- 타임아웃 임계 N은 `[정의 필요 — Q35]`. **5분을 제안한다** — 에지 발행 주기가 100ms이므로 5분 무수신이면 전원이 나갔거나 배터리를 분리한 상태다.
+- 타임아웃 임계 N은 **5분으로 확정**한다. 에지 발행 주기가 100ms이므로 5분 무수신이면 전원이 나갔거나 배터리를 분리한 상태다 `[Q35]`.
 - 종료 시 `session.ended` WebSocket 메시지를 푸시하고(§5.4), 프론트는 게이트 화면(§3.1)으로 되돌린다.
 - **계정 정지는 세션을 끝내지 않는다** (Q15 결정, §3.7 참조).
 
@@ -742,10 +744,10 @@ WebSocket 연결 **전에** 화면을 채우기 위한 1회 조회. 이후 갱�
 | 지표 | WARN | CRIT | 근거 |
 |---|---|---|---|
 | `tempContact`, `tempIrSurface`, `representativeTempC` | ≥ 55°C | ≥ 60°C | 서버 표시 상태 정책. 프론트는 비교하지 않으며 이 상태로 자동 차단하지 않는다 |
-| `voltageV`, `currentA`, `socPct`, `powerW` | — | — | **미정 → `status: null`** |
+| `voltageV`, `currentA`, `socPct`, `powerW` | — | — | **임계값 미설정 → `status: null`** `[Q27]` |
 
 - **`status`는 `null`을 허용한다.** 임계값이 정해지지 않은 지표는 서버가 `null`을 내려보내고, 프론트는 그 카드에 배지를 렌더링하지 않는다. 온도 카드만 배지가 붙는다.
-- 전압은 `chemistry`·`seriesCount`로 셀당 상·하한을 환산해야 해서 배터리마다 값이 달라진다 — 나중에 정한다 `[정의 필요 — Q27]`.
+- 전압·전류·SOC 배지는 임계값을 정하지 않으므로 서버가 `null`을 반환한다. 임계값을 추가할 때는 이 계약과 모드별 정상범위를 함께 갱신한다 `[Q27 확정: null 유지]`.
 
 > **Fail-Safe 임계와 구분할 것.** 이 `status`는 **표시용 경고**다. 릴레이를 차단하는 물리 임계(§3.3)와 같은 값을 쓸 필요는 없으며, 오히려 `CRIT`이 Fail-Safe보다 먼저 뜨도록 낮게 잡는 편이 경고 목적에 맞다.
 - `aeScore`/`informerScore`는 이중 모델 개별 점수 `[PLAN: S-FGKMXE]`. v3 화면에는 없다. 없으면 `null`.
@@ -897,7 +899,7 @@ CSV·PDF 버튼은 **추세 화면 상단, 기간 탭 옆**에 있다 `[v3 실�
 
 CSV는 집계 추세가 아니라 **100ms 센서 Raw 행**만 내보낸다. PDF는 기존 집계 추세 보고서다.
 
-- `GET /api/metrics/export.csv?sessionId=&from=&to=`: 범위가 1시간 이하이면 `200 text/csv` 스트리밍 + `Content-Disposition: attachment`.
+- `GET /api/metrics/export.csv?batteryId=&sessionId=&from=&to=`: 범위가 1시간 이하이면 `200 text/csv` 스트리밍 + `Content-Disposition: attachment`. 현재 데모 런타임은 활성 세션 소유권과 `batteryId`를 검증하고 `batteryId-raw.csv`를 반환한다.
 - CSV 열은 최소 `measured_at,device_id,battery_id,session_id,mode,voltage_v,current_a,power_w,temp_contact,temp_ir_surface,soc_pct,soc_basis,gas_raw,pressure_raw,acoustic_raw,age_ms`다. 합성 대표 온도는 원본 두 온도와 혼동하지 않도록 원본 열에 포함하지 않는다.
 - 1시간 초과는 `POST /api/exports` `{ "kind":"RAW_METRICS_CSV", "sessionId":"...", "from":"...", "to":"..." }`로 작업을 만들고 `202 { id,status:"QUEUED" }`를 반환한다.
 - `GET /api/exports/{id}`는 `QUEUED|RUNNING|READY|FAILED|EXPIRED`와, `READY`일 때 단기 서명 `downloadUrl`, `expiresAt`, `sha256`, `rowCount`를 반환한다. `export.ready` WS 이벤트로 완료를 알린다.
@@ -1317,6 +1319,8 @@ v3 실측 구성: KPI 카드 4개 → 이벤트 추이 차트 + 배터리 상태
 **운영 상태 변경** — `{ "opsStatus": "BLOCKED", "reason": "열폭주 징후" }`
 현재 값과 다른 `NORMAL|WATCH|BLOCKED`로 전환할 때는 언제나 trim 후 비어 있지 않은 `reason`이 **필수**다 `[REQ-WEB-125]`. 같은 상태 요청은 변경·감사 없이 `409 NO_STATUS_CHANGE`, 사유 누락은 `422 REASON_REQUIRED`. 서버 성공 전에 화면·목록·로그를 낙관적으로 바꾸지 않는다. 모든 성공 전환은 독립 감사 기록을 남긴다 `[REQ-WEB-126]`.
 
+Q38 기본값은 다음과 같다: `reason` 최대 500자, `memo` 최대 2,000자, 입력은 Unicode NFKC 정규화 후 trim한다. 빈 메모는 메모 삭제로 저장할 수 있고, 상태 사유는 빈 값을 허용하지 않는다. 쓰기 요청에 `version`을 보내면 현재 버전과 원자적으로 비교하며 다르면 `409 VERSION_CONFLICT`; 생략하면 서버가 현재 버전을 사용한다. 민감정보 마스킹은 하지 않으므로 사유·메모에 비밀번호·토큰을 넣지 않는다.
+
 상태 레코드 변경과 감사 기록은 한 트랜잭션으로 성공하거나 함께 실패한다. `BLOCKED` 전환은 상태 변경·활성 세션 종료·감사 이벤트(또는 동일 트랜잭션의 outbox)를 원자적으로 기록하고, 일부만 성공한 응답을 내지 않는다. `BLOCKED`에서 다른 상태로 풀어도 이전 세션이나 릴레이를 자동 복구하지 않는다. 성공 응답은 정본의 `{ "opsStatus", "updatedAt", "updatedBy" }`를 반환한다.
 
 **관리자 메모** — `{ "memo": "열폭주 징후로 차단 유지" }`, 상태와 별도 요청·별도 저장·별도 감사 기록 `[REQ-WEB-124/126]`. 메모 변경에는 상태 변경 사유를 요구하지 않는다. 메모 변경과 감사 기록도 한 트랜잭션으로 처리하며 성공 응답은 `{ "memo", "updatedAt", "updatedBy" }`를 반환한다.
@@ -1408,6 +1412,8 @@ v3 테이블 컬럼: `시간 · 관리자 · 행위 · 대상 · 변경 내용` 
 > 물리 근거·산식·안전 조건의 정본은 `docs/hardware/mode2_powerbank_diagnosis_spec.md`다. 이 절은 그 스펙의 API 표면만 정의한다. **산식을 이 문서에서 다시 정의하지 않는다.**
 
 에지 배포의 `hardware_profile`을 함께 검사한다. 이 값은 Raw 프레임에서 받지 않고 서버가 `device_id`별 배포 메타데이터로 관리한다. 값이 없거나 알 수 없으면 준비되지 않은 것으로 닫는다. `MODE2_FULL`만 F21 진단 실행이 가능하다. `COMBINED_EXISTING_PARTS_V1`은 MQ-2·확정 안전 문턱·연속 감시가 없는 0.5A·10초 시운전 프로필이므로, Raw의 `gas_raw`·`pressure_raw`·`temp_contact`·`temp_points.contact`·`soc_pct`·`diag_phase`·`load_target_a`는 **모두 반드시 `null`**이다. 모드 1 캐시값이나 추정값으로 채우지 않는다. 이 프로필에서 빠른 진단·정밀 용량시험 시작 요청은 `409 SAFETY_PROFILE_NOT_READY`로 거절한다.
+
+F21 문턱값은 `0`을 미설정 sentinel로 둔다. 발열 기울기·표면온도 중단·효율·최소 부하·자동 차단 시간 중 하나라도 0이면 `configured=false`이며, 숨은 HTML `MODE2_FULL` 속성을 켜도 서버는 `409 SAFETY_PROFILE_NOT_READY`를 반환한다 `[Q36 확정]`.
 
 F21 화면이 실행 전에 잠금 사유를 알 수 있도록 `GET /api/batteries/{id}`는 아래 capability를 함께 내려준다. 내부 `hardware_profile` 원문은 노출하지 않아도 된다.
 
@@ -1711,17 +1717,17 @@ F21 화면이 실행 전에 잠금 사유를 알 수 있도록 `GET /api/batteri
 
 ## 9. 미결정 항목
 
-**38건 중 31건 확정, 1건 보류, 6건 열림. 열린 6건 모두 API 골격 착수를 막지는 않지만, 해당 입력 검증·동시성 정책을 배포하기 전 확정해야 한다.**
+**38건 모두 결정됨.** 아래 결정은 현재 API 골격과 v3 화면에 반영했다. 하드웨어 실측으로 문턱값을 얻기 전까지 F21은 fail-closed다.
 
 | # | 항목 | 상태 |
 |---|---|---|
-| **Q27** | 전압·전류·SOC 지표 배지 임계값 | **열림** — 온도(55/60°C)만 확정. 나머지는 `status: null`이라 대시보드 구현은 진행 가능. 전압은 `chemistry`·`seriesCount`로 셀당 환산 필요 |
-| **Q35** | 세션 타임아웃 임계 N분 | **열림** — 5분 제안. 에지 발행이 100ms이므로 5분 무수신이면 전원 이탈로 본다. 현장 테스트로 확정 |
-| **Q34** | 문구 `code` 전체 목록 | **열림** — §1.10 규약은 확정. 개별 코드는 엔드포인트 구현하며 채운다 |
-| **Q36** | F21 진단 문턱값 | **열림** — 발열 기울기 `S1`, 표면온도 중단 문턱, 부스트 효율 η 기본값, 최소 유지 부하 크기. `mode2_powerbank_diagnosis_spec.md` §8 H2~H4·H6~H10. **부하 수단(보유 BW150)과 릴레이 매핑(모드 1과 동일)은 2026-07-28에 닫혔다.** **API 계약(§4.13)은 이와 무관하게 확정**이다. BW150의 5V 부하 가능 여부도 제조사 사양표(`DC1V~200V`)로 통과해 **회로도를 막는 항목은 없다** |
-| **Q37** | F21 광고 정격 출력 전류의 등록·수정 경로 | **열림** — `rated_output_current_a`는 빠른 진단 `specAttainmentPct`의 분모지만 자산 API와 v3 입력에는 없다(H8). 입력 필드로 추가할지, 미등록이면 결과를 항상 `null`로 둘지 확정 필요 |
-| **Q38** | 관리자 사유·메모 입력 및 동시 수정 정책 | **열림** — 최대 길이, 허용/정규화 문자, 빈 메모로 삭제하는 규칙, 민감정보 마스킹, `version`/ETag 또는 idempotency key 기반 충돌 처리 확정 필요. 상태·세션·감사의 원자성 및 상태/메모 분리 저장 자체는 §4.12로 확정 |
-| **Q6** | SOH/RUL 산출 주체 | **모드 2 확정 / 모드 1 보류** — 모드 2는 백엔드가 §4.13 진단 결과를 집계하고 `cycleCount`·`rulCycles`·`internalResistanceMohm`은 `null` 확정(§4.2). 모드 1은 BQ27441 경로가 있으나 산출 주체 미정이라 보류 유지 |
+| **Q27** | 전압·전류·SOC 지표 배지 임계값 | **확정** — 온도 외 지표는 `status: null`로 유지한다. |
+| **Q35** | 세션 타임아웃 임계 N분 | **확정** — 5분 무수신이면 `TIMEOUT`으로 닫는다. |
+| **Q34** | 문구 `code` 전체 목록 | **확정** — §1.10에 현재 code 목록을 고정하고 신규 code는 문서·프론트를 함께 갱신한다. |
+| **Q36** | F21 진단 문턱값 | **확정된 보류 방식** — 모든 문턱값을 0으로 저장해 `configured=false`로 두며, 실측 전에는 `SAFETY_PROFILE_NOT_READY`로 거절한다. |
+| **Q37** | F21 광고 정격 출력 전류의 등록·수정 경로 | **확정** — 모드 2 자산 등록 시 `ratedOutputCurrentA` 필수 입력으로 받고 진단 스펙 도달률의 분모로 사용한다. |
+| **Q38** | 관리자 사유·메모 입력 및 동시 수정 정책 | **확정** — reason 500자·memo 2,000자, NFKC+trim, 빈 메모 삭제 허용, 비밀값 마스킹 금지, `version` 불일치 `409 VERSION_CONFLICT`; 상태·메모·감사는 별도 원자 저장이다. |
+| **Q6** | SOH/RUL 산출 주체 | **확정** — 모드 1은 백엔드가 BQ27441 집계로 계산하고, 모드 2 미지원 건강도는 `null`이다. |
 
 ### 확정된 결정 (31건)
 
@@ -1777,7 +1783,7 @@ F21 화면이 실행 전에 잠금 사유를 알 수 있도록 `GET /api/batteri
 
 ## 11. 기능정의서와 v3의 불일치 — 실측 기록
 
-### v3 비-native 선택 컨트롤 매핑 `[브라우저 실측 2026-08-05]`
+### v3 비-native 선택 컨트롤 매핑 `[브라우저 실측 2026-08-06]`
 
 아래는 `<select>`·checkbox가 아니라 클릭형 칩·토글·메뉴로 구현된 선택 컨트롤이다. **입력 데이터가 없는 장식이 아니며**, 실제 구현은 아래 요청 필드에 반드시 연결한다. 키보드 접근성은 `button`/ARIA 역할과 선택 상태를 제공해야 한다.
 
@@ -1795,7 +1801,7 @@ F21 화면이 실행 전에 잠금 사유를 알 수 있도록 `GET /api/batteri
 | 관리자 배터리 운영상태 필터 | `GET /api/admin/batteries?opsStatus=&q=` |
 | 공지 카테고리 필터·게시/임시저장/보관 | `GET /api/admin/notices?category=&status=`, 쓰기는 §4.12 |
 
-실제 텍스트 입력처럼 보였던 로그인·가입·계정 찾기·배터리 등록/수정·이벤트 검색·릴레이 사유/비밀번호·공지 제목/본문은 native `input`/`textarea`로, 감사 기간·행위·대상과 공지 카테고리·노출 대상은 native `select`로, 약관·공지 동시 알림은 native checkbox로 교체했다.
+실제 텍스트 입력처럼 보였던 로그인·가입·계정 찾기·배터리 등록/수정·이벤트 검색·릴레이 사유/비밀번호·공지 제목/본문은 native `input`/`textarea`로, 감사 기간·행위·대상과 공지 카테고리·노출 대상은 native `select`로, 약관·공지 동시 알림은 native checkbox로 교체했다. 클릭형 상태 칩·메뉴·토글은 키보드 `Enter`/`Space`와 `role=button`을 함께 제공한다. 배터리 연결은 `POST /api/sessions`, 모드 2 등록 입력은 `POST /api/batteries`의 `capacityWh`·`ratedOutputCurrentA`, 릴레이는 `POST /api/relay/{cut|restore}`의 `reason`·재인증·`Idempotency-Key`, CSV는 `GET /api/metrics/export.csv`에 매핑한다.
 
 기능정의서 2종은 2026-07-22 커밋 `9bb6d8e`로 v3 기준에 맞춰졌고, 이상점수 스케일·4등급·게이지 범례 버그는 **이미 반영돼 있다**(계약서 §1.6과 일치). 다만 개별 기능의 **화면 위치**는 아직 어긋난 것이 있다. 브라우저로 확인한 차이는 아래와 같으며, **이 계약서는 전부 v3를 따랐다.**
 
@@ -1842,7 +1848,7 @@ F21 화면이 실행 전에 잠금 사유를 알 수 있도록 `GET /api/batteri
 
 ---
 
-## 12. 2026-08-05 동기화 감사 결과
+## 12. 2026-08-06 동기화 감사 결과
 
 ### 이번에 닫힌 불일치
 
@@ -1857,6 +1863,9 @@ F21 화면이 실행 전에 잠금 사유를 알 수 있도록 `GET /api/batteri
 - 관리자 유저의 ID·등록 배터리 수·권한·상태는 읽기 전용으로 바꾸고 비밀번호 직접 지정은 재설정 링크 발송으로 교체
 - F21 기본 화면은 안전 미준비 profile에서 실행 잠금·미지원값 `—`를 표시하고, 숨은 속성에서만 `MODE2_FULL` 검토 상태를 제공
 - 관리자 배터리 상세에 모든 상태 전환 사유·확인과 상태/메모 분리 저장을 추가
+- 관리자 감사 로그 화면은 `GET /api/admin/audit-logs`를 읽어 실제 상태·메모·릴레이·계정 전환 기록을 표시한다.
+- 현재 worktree의 demo provider가 위 REST/WS 경로와 네이티브 입력 매핑을 제공한다. 다만 DB 트랜잭션·Kafka/Timescale consumer·실물 Fail-Safe는 아직 production provider로 승격되지 않았다.
+- 모드 1은 압력 단독, 모드 2는 가스 단독이며 음향은 `null`이다. F21 문턱 0 sentinel, 5분 세션 타임아웃, 모드 2 광고 정격 출력 전류 필수, 관리자 reason/memo 분리 원자 저장을 확정했다.
 
 ### 남은 의도적 범위/미구현
 

@@ -148,5 +148,5 @@ class TestExcludedReqs(unittest.TestCase):
 
     def test_excluded_reqs_are_not_expected(self):
         from contract_lint import EXCLUDED_REQS, EXPECTED_REQS
-        self.assertEqual(len(EXPECTED_REQS), 103)
+        self.assertEqual(len(EXPECTED_REQS), 110)
         self.assertFalse(EXPECTED_REQS & EXCLUDED_REQS)
