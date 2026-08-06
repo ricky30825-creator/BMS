@@ -60,7 +60,7 @@ function AppContent() {
   const qc = useQueryClient();
   const [autoCut, setAutoCut] = useState<Record<string, unknown> | null>(null);
   const me = meQuery.data;
-  const realtime = useRealtime({ enabled: Boolean(me?.activeSession), onAutoCut: (payload) => setAutoCut((payload ?? {}) as Record<string, unknown>), onSessionEnded: () => { void meQuery.refetch(); navigate("/battery"); }, onAuthFailure: () => { void meQuery.refetch(); navigate("/login"); } });
+  const realtime = useRealtime({ sessionKey: me?.activeSession?.id, enabled: Boolean(me?.activeSession), onAutoCut: (payload) => setAutoCut((payload ?? {}) as Record<string, unknown>), onSessionEnded: () => { void meQuery.refetch(); navigate("/battery"); }, onAuthFailure: () => { void meQuery.refetch(); navigate("/login"); } });
   const theme = me?.preferences?.theme ?? "light";
   useEffect(() => { const root = document.documentElement; const systemDark = window.matchMedia?.("(prefers-color-scheme: dark)").matches; root.dataset.theme = theme === "system" ? (systemDark ? "dark" : "light") : theme; }, [theme]);
   const signInComplete = async () => { await meQuery.refetch(); navigate("/battery"); };

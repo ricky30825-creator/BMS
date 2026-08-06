@@ -1,4 +1,4 @@
-import type { ApiUser, ErrorCode, MeResponse, Preferences } from "../types";
+import type { AlertChannels, AlertSettings, ApiUser, ErrorCode, MeResponse, Preferences } from "../types";
 
 const API_BASE = (import.meta.env.VITE_API_BASE ?? "").replace(/\/$/, "");
 
@@ -71,6 +71,9 @@ export const api = {
   findEmail: (body: { name: string; phone: string }) => request<{ email: string | null }>("/api/account/email-lookup", { method: "POST", body: JSON.stringify(body) }),
   resetPassword: (email: string) => request("/api/auth/forget-password", { method: "POST", body: JSON.stringify({ email }) }),
   updateMe: (body: Partial<Pick<ApiUser, "name" | "email" | "phone">>) => request<ApiUser>("/api/me", { method: "PATCH", body: JSON.stringify(body) }),
+  getAlertSettings: () => request<AlertSettings>("/api/settings/alerts"),
+  updateAlertSettings: (channels: AlertChannels) => request<AlertSettings>("/api/settings/alerts", { method: "PATCH", body: JSON.stringify({ channels }) }),
+  changePassword: (body: { currentPassword: string; newPassword: string }) => request<void>("/api/me/password", { method: "POST", body: JSON.stringify(body) }),
   updatePreferences: (body: Preferences) => request<Preferences>("/api/settings/preferences", { method: "PATCH", body: JSON.stringify(body) }),
 };
 

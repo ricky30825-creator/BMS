@@ -34,7 +34,9 @@ v3 프로토타입과 정본 문서에는 모드 1/2, 대표 온도 최댓값, s
 
 `backend/dist/`는 TypeScript 빌드 산출물이며 소스 구현의 근거로 세지 않는다. `PLAN.md`의 예정 폴더 구조도 실제 디렉터리 존재를 의미하지 않는다.
 
-같은 날짜에 프론트엔드 실행 기반과 v3 도달 화면을 추가했다. `/api/me` 부트, 자산·세션 게이트, 대시보드 snapshot/WS 재연결, 릴레이 서버 승인, F21 fail-closed, 관리자 상태·메모 분리 UI를 계약형 클라이언트와 MSW로 연결했다. 실제 백엔드에 아직 없는 일부 목록·추세·공지 엔드포인트는 UI에서 빈 상태 또는 사용 불가 상태로 명시하며, 실제 인증 쿠키·WebSocket·브라우저 폭별 인수는 별도 통합 게이트다.
+같은 날짜에 프론트엔드 실행 기반과 v3 도달 화면을 추가했다. `/api/me` 부트, 자산·세션 게이트, 대시보드 snapshot/WS 재연결, 릴레이 서버 승인, F21 fail-closed, 관리자 상태·메모 분리 UI를 계약형 클라이언트와 MSW로 연결했다. 알림 설정은 GET canonical 조회와 `{ channels: { KAKAO, EMAIL, SMS, WEBPUSH } }` PATCH 응답 반영·실패 rollback을 사용하며, 비밀번호 변경은 현재/새/새 확인 입력을 검증한 뒤 확인 필드를 제외하고 POST한다. F21은 기본 `SAFETY_PROFILE_NOT_READY` 자산을 계속 잠그고, capability=true 모드 2는 MSW 전용 검증 시나리오에서만 요청·진행·중단·이력·상세를 확인한다. 실제 백엔드에 아직 없는 일부 목록·추세·공지 엔드포인트는 UI에서 빈 상태 또는 사용 불가 상태로 명시하며, 실백엔드 인증 쿠키·실WebSocket·운영 하드웨어와의 통합은 별도 게이트다.
+
+2026-08-06 프론트엔드 계약 회귀: WebSocket 클라이언트 메시지는 `{ v: 1, type, payload }` 봉투를 사용하고, 일반 재연결은 마지막 cursor/eventId로 resume하며 snapshot을 재조회하지 않는다. `resync.required`/`4410`에서만 `/api/me`, dashboard, alert summary, relay, active diagnosis를 다시 조회한다. Vitest/RTL/MSW 계약 테스트는 이 동작과 알림·비밀번호·F21 요청 shape 및 안전 profile 시나리오를 검증한다.
 
 ## PLAN 로드맵과 실제 상태
 

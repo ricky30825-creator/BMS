@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -6,16 +6,17 @@ import { AlertTriangle, ArrowDown, ArrowUp, BarChart3, BatteryCharging, Check, D
 import { useQuery } from "@tanstack/react-query";
 import { Link, useNavigate } from "react-router-dom";
 import { api, ApiError } from "../api/client";
+import { buildCapacityDiagnosisBody, buildQuickDiagnosisBody, type SocHintLevel } from "../api/diagnosis";
 import { normalizeBattery } from "../api/normalize";
-import { useAckAlert, useAckAll, useActiveDiagnosis, useAnomalySummary, useBattery, useBatteries, useCreateBattery, useDashboard, useDiagnosisStart, useDiagnosisStop, useEvidence, useEvents, useNotices, useRelay, useRelayHistory, useRelayMutation, useStartSession, useTrends, useUpdateBattery, useAlertSummary, useAlerts } from "../api/hooks";
+import { useAckAlert, useAckAll, useActiveDiagnosis, useAnomalySummary, useBattery, useBatteries, useCreateBattery, useDashboard, useDiagnosisDetail, useDiagnosisHistory, useDiagnosisStart, useDiagnosisStop, useEvidence, useEvents, useNotices, useRelay, useRelayHistory, useRelayMutation, useStartSession, useTrends, useUpdateBattery, useAlertSummary, useAlerts } from "../api/hooks";
 import { useRealtime, type RealtimeState } from "../realtime/useRealtime";
-import type { Alert, Battery, BatteryEvent, Dashboard, Grade, MeResponse, NoticeCategory, Relay, TrendResponse } from "../types";
+import type { Alert, AlertChannels, Battery, BatteryEvent, Dashboard, Grade, MeResponse, NoticeCategory, Relay, TrendResponse } from "../types";
 import { Button, Card, EmptyState, Field, MetricStatusBadge, Modal, PageHeading, Pagination, StatusBadge, TableState, Tabs, formatDateTime, formatTime, relativeTime, score100 } from "../components/ui";
 import { Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis, BarChart, Bar, CartesianGrid, Cell } from "recharts";
 
 function errorMessage(error: unknown): string {
   if (!(error instanceof ApiError)) return "잠시 후 다시 시도하세요.";
-  const messages: Record<string, string> = { NO_ACTIVE_SESSION: "활성 측정 세션이 없습니다. 배터리를 연결하세요.", BATTERY_BLOCKED: "운영 상태가 BLOCKED인 배터리는 연결할 수 없습니다.", DEVICE_OFFLINE: "진단기가 오프라인입니다.", REAUTH_REQUIRED: "비밀번호 재인증에 실패했습니다.", REASON_REQUIRED: "사유를 입력하세요.", INTERLOCK_LOCKED: "Fail-Safe 인터락이 유지 중이라 복구할 수 없습니다.", SAFETY_PROFILE_NOT_READY: "안전 프로필이 준비되지 않아 실행할 수 없습니다.", MODE_NOT_SUPPORTED: "모드 2 보조배터리에서만 사용할 수 있습니다.", VERSION_CONFLICT: "다른 관리자가 먼저 변경했습니다. 다시 불러오세요.", RUNTIME_NOT_READY: "현재 서버 런타임이 준비되지 않았습니다." };
+  const messages: Record<string, string> = { NO_ACTIVE_SESSION: "활성 측정 세션이 없습니다. 배터리를 연결하세요.", BATTERY_BLOCKED: "운영 상태가 BLOCKED인 배터리는 연결할 수 없습니다.", DEVICE_OFFLINE: "진단기가 오프라인입니다.", REAUTH_REQUIRED: "비밀번호 재인증에 실패했습니다.", REASON_REQUIRED: "사유를 입력하세요.", INTERLOCK_LOCKED: "Fail-Safe 인터락이 유지 중이라 복구할 수 없습니다.", SAFETY_PROFILE_NOT_READY: "안전 프로필이 준비되지 않아 실행할 수 없습니다.", MODE_NOT_SUPPORTED: "모드 2 보조배터리에서만 사용할 수 있습니다.", VERSION_CONFLICT: "다른 관리자가 먼저 변경했습니다. 다시 불러오세요.", RUNTIME_NOT_READY: "현재 서버 런타임이 준비되지 않았습니다.", ACK_REQUIRED: "안전 안내를 확인해야 합니다.", FULL_CHARGE_REQUIRED: "완충 확인 후 정밀 진단을 시작할 수 있습니다.", CAPACITY_REQUIRED: "정격 용량이 등록된 자산만 정밀 진단을 실행할 수 있습니다.", VALIDATION_FAILED: "입력값을 확인하세요." };
   return messages[error.code] ?? "요청을 처리하지 못했습니다.";
 }
 
@@ -123,10 +124,51 @@ export function NoticesPage() {
 function categoryLabel(value: NoticeCategory): string { return ({ IMPORTANT: "중요", MAINTENANCE: "점검", FEATURE: "기능", INFO: "안내" } as Record<NoticeCategory, string>)[value]; }
 
 export function PowerbankDiagnosisPage({ me }: { me: MeResponse }) {
-  const batteryId = me.activeSession?.batteryId; const battery = useBattery(batteryId, Boolean(batteryId)); const active = useActiveDiagnosis(Boolean(batteryId)); const quick = useDiagnosisStart("quick"); const capacity = useDiagnosisStart("capacity"); const stop = useDiagnosisStop(); const [ack, setAck] = useState(false); const supported = battery.data?.targetMode === 2; const allowed = supported && battery.data?.diagnosisCapability?.executionAllowed === true;
-  const run = async (kind: "quick" | "capacity") => { if (!ack) return; try { await (kind === "quick" ? quick : capacity).mutateAsync({ acknowledged: true, fullyCharged: kind === "capacity" ? true : undefined }); } catch { /* status is rendered from the mutation error */ } };
+  const batteryId = me.activeSession?.batteryId;
+  const battery = useBattery(batteryId, Boolean(batteryId));
+  const active = useActiveDiagnosis(Boolean(batteryId));
+  const history = useDiagnosisHistory(batteryId, Boolean(batteryId));
+  const quick = useDiagnosisStart("quick");
+  const capacity = useDiagnosisStart("capacity");
+  const stop = useDiagnosisStop();
+  const [ack, setAck] = useState(false);
+  const [quickSocHint, setQuickSocHint] = useState<"" | `${SocHintLevel}`>("");
+  const [dischargeCurrentA, setDischargeCurrentA] = useState("1");
+  const [fullyChargedConfirmed, setFullyChargedConfirmed] = useState(false);
+  const [selectedDiagnosisId, setSelectedDiagnosisId] = useState<string | null>(null);
+  const detail = useDiagnosisDetail(selectedDiagnosisId ?? undefined, Boolean(selectedDiagnosisId));
+  const supported = battery.data?.targetMode === 2;
+  const allowed = supported && battery.data?.diagnosisCapability?.executionAllowed === true;
+  const dischargeCurrent = Number(dischargeCurrentA);
+  const capacityInputValid = Number.isFinite(dischargeCurrent) && dischargeCurrent > 0;
+  const run = async (kind: "quick" | "capacity") => {
+    if (!ack || !allowed) return;
+    try {
+      if (kind === "quick") {
+        await quick.mutateAsync(buildQuickDiagnosisBody(quickSocHint === "" ? null : Number(quickSocHint) as SocHintLevel));
+      } else {
+        await capacity.mutateAsync(buildCapacityDiagnosisBody(dischargeCurrent, fullyChargedConfirmed));
+      }
+    } catch {
+      // The mutation error is rendered below.
+    }
+  };
   if (!batteryId) return <div className="page-stack"><PageHeading eyebrow="F21 · POWER-BANK DIAGNOSIS" title="보조배터리 진단" description="모드 2 자산의 열화 진단을 실행합니다." /><GateCard /></div>;
-  return <div className="page-stack"><PageHeading eyebrow="F21 · POWER-BANK DIAGNOSIS" title="보조배터리 진단" description={`${battery.data?.label ?? "—"} · 모드 2 안전 진단`} /><Card className="diagnosis-context"><div><span className="eyebrow">CONNECTED ASSET</span><h2>{battery.data?.label ?? "—"}</h2><p>{battery.data?.maker ?? "제조사 미입력"} · {battery.data?.model ?? "모델 미입력"}</p></div><div className="diagnosis-values"><div><small>상대 SOC</small><strong className="mono">{battery.data?.latest?.socPct == null ? "—" : `${battery.data.latest.socPct}%`}</strong><span>{battery.data?.latest?.socBasis === "RELATIVE_SESSION_START" ? "세션 시작 기준" : "기준 없음"}</span></div><div><small>정격 용량</small><strong className="mono">{battery.data?.capacityWh == null ? "—" : `${battery.data.capacityWh} Wh`}</strong></div></div></Card>{!supported && <Card className="notice-callout"><LockKeyhole size={20} /><div><strong>모드 2 보조배터리 전용</strong><p>연결된 자산이 모드 1 외부 셀이므로 진단 경로가 잠겨 있습니다.</p></div></Card>}{supported && !allowed && <Card className="notice-callout safety-locked"><LockKeyhole size={20} /><div><strong>안전 프로필 준비 필요</strong><p>현재 진단기는 확정 안전 문턱과 부하 제어가 검증되지 않은 프로필입니다. 사람이 지켜본다는 확인만으로 잠금을 해제할 수 없습니다.</p><span className="mono">SAFETY_PROFILE_NOT_READY</span></div></Card>}<div className="diagnosis-actions"><Card><div className="card-title-row"><div><h2>빠른 진단</h2><p>약 2분 · 낮은 신뢰도 · 잔량 힌트</p></div><BatteryCharging size={20} /></div><p>빠른 진단 결과는 열화 건강도로 사용하지 않으며, 서버 capability가 준비된 경우에만 실행됩니다.</p><Button variant="secondary" disabled={!allowed || !ack} loading={quick.isPending} onClick={() => void run("quick")}>빠른 진단 시작</Button></Card><Card><div className="card-title-row"><div><h2>정밀 용량 테스트</h2><p>수 시간 · 높은 신뢰도 · 완충 확인 필수</p></div><BarChart3 size={20} /></div><p>정격 용량과 완충 상태를 서버가 확인한 뒤에만 시작됩니다.</p><Button variant="secondary" disabled={!allowed || !ack || !battery.data?.capacityWh} loading={capacity.isPending} onClick={() => void run("capacity")}>정밀 용량 테스트 시작</Button></Card></div><label className="safety-ack"><input type="checkbox" checked={ack} onChange={(event) => setAck(event.target.checked)} disabled={!allowed} /><span>진단 중 이상 알림은 억제되지만 Fail-Safe 자동 차단은 항상 우선함을 확인했습니다.</span></label>{(quick.error || capacity.error) && <p className="form-error">{errorMessage(quick.error ?? capacity.error)}</p>}{active.data && <Card className="diagnosis-progress"><div className="card-title-row"><div><h2>진단 진행 중</h2><p>{active.data.kind === "QUICK" ? "빠른 진단" : "정밀 용량 테스트"} · {active.data.phase ?? "진행"}</p></div><Button variant="danger-outline" loading={stop.isPending} onClick={() => void stop.mutateAsync()}>진단 중단</Button></div><div className="progress-track"><span style={{ width: "32%" }} /></div></Card>}<Card><div className="card-title-row"><h2>과거 진단 이력</h2><span className="field-hint">유효한 결과만 건강도에 반영</span></div><TableState state="empty" message="유효한 진단 이력이 없습니다." /></Card></div>;
+  return <div className="page-stack">
+    <PageHeading eyebrow="F21 · POWER-BANK DIAGNOSIS" title="보조배터리 진단" description={`${battery.data?.label ?? "—"} · 모드 2 안전 진단`} />
+    <Card className="diagnosis-context"><div><span className="eyebrow">CONNECTED ASSET</span><h2>{battery.data?.label ?? "—"}</h2><p>{battery.data?.maker ?? "제조사 미입력"} · {battery.data?.model ?? "모델 미입력"}</p></div><div className="diagnosis-values"><div><small>상대 SOC</small><strong className="mono">{battery.data?.latest?.socPct == null ? "—" : `${battery.data.latest.socPct}%`}</strong><span>{battery.data?.latest?.socBasis === "RELATIVE_SESSION_START" ? "세션 시작 기준" : "기준 없음"}</span></div><div><small>정격 용량</small><strong className="mono">{battery.data?.capacityWh == null ? "—" : `${battery.data.capacityWh} Wh`}</strong></div></div></Card>
+    {!supported && <Card className="notice-callout"><LockKeyhole size={20} /><div><strong>모드 2 보조배터리 전용</strong><p>연결된 자산이 모드 1 외부 셀이므로 진단 경로가 잠겨 있습니다.</p></div></Card>}
+    {supported && !allowed && <Card className="notice-callout safety-locked"><LockKeyhole size={20} /><div><strong>안전 프로필 준비 필요</strong><p>현재 진단기는 확정 안전 문턱과 부하 제어가 검증되지 않은 프로필입니다. 사람이 지켜본다는 확인만으로 잠금을 해제할 수 없습니다.</p><span className="mono">{battery.data?.diagnosisCapability?.reasonCode ?? "SAFETY_PROFILE_NOT_READY"}</span></div></Card>}
+    <div className="diagnosis-actions">
+      <Card><div className="card-title-row"><div><h2>빠른 진단</h2><p>약 2분 · 낮은 신뢰도 · 잔량 힌트</p></div><BatteryCharging size={20} /></div><p>빠른 진단 결과는 열화 건강도로 사용하지 않으며, 서버 capability가 준비된 경우에만 실행됩니다.</p><Field label="겉면 잔량 힌트"><select value={quickSocHint} onChange={(event) => setQuickSocHint(event.target.value as "" | `${SocHintLevel}`)} disabled={!allowed}><option value="">모름</option><option value="1">1단계</option><option value="2">2단계</option><option value="3">3단계</option><option value="4">4단계</option></select></Field><Button variant="secondary" disabled={!allowed || !ack} loading={quick.isPending} onClick={() => void run("quick")}>빠른 진단 시작</Button></Card>
+      <Card><div className="card-title-row"><div><h2>정밀 용량 테스트</h2><p>수 시간 · 높은 신뢰도 · 완충 확인 필수</p></div><BarChart3 size={20} /></div><p>정격 용량과 완충 상태를 서버가 확인한 뒤에만 시작됩니다.</p><Field label="방전 전류 (A)" hint="기본 1.0 A"><input value={dischargeCurrentA} onChange={(event) => setDischargeCurrentA(event.target.value)} type="number" min="0.01" step="0.01" disabled={!allowed} /></Field><label className="checkbox-field"><input type="checkbox" checked={fullyChargedConfirmed} onChange={(event) => setFullyChargedConfirmed(event.target.checked)} disabled={!allowed} /><span>완충 상태임을 확인했습니다.</span></label><Button variant="secondary" disabled={!allowed || !ack || !battery.data?.capacityWh || !fullyChargedConfirmed || !capacityInputValid} loading={capacity.isPending} onClick={() => void run("capacity")}>정밀 용량 테스트 시작</Button></Card>
+    </div>
+    <label className="safety-ack"><input type="checkbox" checked={ack} onChange={(event) => setAck(event.target.checked)} disabled={!allowed} /><span>진단 중 이상 알림은 억제되지만 Fail-Safe 자동 차단은 항상 우선함을 확인했습니다.</span></label>
+    {(quick.error || capacity.error) && <p className="form-error">{errorMessage(quick.error ?? capacity.error)}</p>}
+    {active.data && <Card className="diagnosis-progress"><div className="card-title-row"><div><h2>진단 진행 중</h2><p>{active.data.kind === "QUICK" ? "빠른 진단" : "정밀 용량 테스트"} · {active.data.phase ?? "진행"}</p></div><Button variant="danger-outline" loading={stop.isPending} onClick={() => void stop.mutateAsync()}>진단 중단</Button></div><div className="progress-track"><span style={{ width: "32%" }} /></div><div className="diagnosis-live-values"><span>목표 부하 <strong className="mono">{metricValue(active.data.loadTargetA, 2)} A</strong></span><span>실측 부하 <strong className="mono">{metricValue(active.data.loadActualA, 2)} A</strong></span></div></Card>}
+    <Card><div className="card-title-row"><h2>과거 진단 이력</h2><span className="field-hint">유효한 결과만 건강도에 반영</span></div>{history.isPending ? <TableState state="loading" message="진단 이력을 불러오는 중입니다." /> : history.error ? <TableState state="error" message={errorMessage(history.error)} /> : history.data?.items.length ? <div className="diagnosis-history-list">{history.data.items.map((item) => <div className="diagnosis-history-row" key={item.id}><div><strong>{item.kind === "QUICK" ? "빠른 진단" : "정밀 용량 테스트"}</strong><small>{item.status} · {formatDateTime(item.measuredAt)}{item.confidence ? ` · ${item.confidence}` : ""}</small></div><span className="mono">{item.summary?.sohRelPct == null ? "—" : `${item.summary.sohRelPct}%`}</span><Button variant="ghost" onClick={() => setSelectedDiagnosisId(item.id)}>상세</Button></div>)}</div> : <TableState state="empty" message="유효한 진단 이력이 없습니다." />}</Card>
+    {selectedDiagnosisId && <Modal title={detail.data?.kind === "QUICK" ? "빠른 진단 상세" : "정밀 용량 테스트 상세"} description={detail.data ? `${detail.data.status} · ${formatDateTime(detail.data.measuredAt ?? detail.data.startedAt)}` : ""} onClose={() => setSelectedDiagnosisId(null)} wide>{detail.isPending ? <TableState state="loading" /> : detail.error ? <TableState state="error" message={errorMessage(detail.error)} /> : detail.data ? <div className="diagnosis-detail"><div className="detail-summary"><span>상태<strong>{detail.data.status}</strong></span><span>신뢰도<strong>{detail.data.confidence ?? "—"}</strong></span><span>시작<strong>{formatDateTime(detail.data.startedAt)}</strong></span></div>{detail.data.kind === "QUICK" ? <div className="raw-list"><div><code>잔량 힌트</code><span>{detail.data.socHintLevel ?? "모름"}</span></div><div><code>규제 무릎 전류</code><span className="mono">{metricValue(detail.data.quick?.regulationKneeA, 2)} A</span></div><div><code>열 기울기</code><span className="mono">{metricValue(detail.data.quick?.thermalSlopeCPerMin, 2)} °C/min</span></div><div><code>판정</code><span>{detail.data.quick?.grade ?? "—"}</span></div></div> : <div className="raw-list"><div><code>방전 전류</code><span className="mono">{metricValue(detail.data.capacity?.dischargeCurrentA, 2)} A</span></div><div><code>전달 용량</code><span className="mono">{metricValue(detail.data.capacity?.deliveredWh, 1)} Wh</span></div><div><code>상대 SOH</code><span className="mono">{metricValue(detail.data.capacity?.sohRelPct, 1)}%</span></div><div><code>기준 결과</code><span>{detail.data.capacity?.isBaseline ? "기준" : "비교"}</span></div></div>}</div> : null}</Modal>}
+  </div>;
 }
 
 const relaySchema = z.object({ reason: z.string().min(1, "사유를 입력하세요."), password: z.string().min(1, "비밀번호를 입력하세요.") });
@@ -137,7 +179,84 @@ export function RelayPage() {
   const relay = useRelay(); const history = useRelayHistory(); const [action, setAction] = useState<"cut" | "restore" | null>(null); if (relay.isPending) return <TableState state="loading" />; if (!relay.data) return <Card><TableState state="error" message={errorMessage(relay.error)} /></Card>; const current = relay.data; return <div className="page-stack"><PageHeading eyebrow="SAFETY CONTROL" title="릴레이 제어 · Kill-Switch" description="원격 차단·복구는 항상 서버 승인 게이트를 거칩니다." /><Card className={`relay-state-card ${current.state === "OPEN" ? "relay-open" : "relay-closed"}`}><div className="relay-state-icon"><ShieldAlert size={28} /></div><div><span className="eyebrow">CURRENT RELAY STATE</span><h2>{current.state === "OPEN" ? "차단됨 (OPEN)" : "연결됨 (CLOSED)"}</h2><p>{current.interlock.engaged ? `Fail-Safe 인터락 유지 · ${current.interlock.condition ?? "조건 확인 필요"}` : `마지막 변경 ${formatDateTime(current.changedAt, true)}`}</p></div><div className="relay-actions">{current.state === "CLOSED" ? <Button variant="danger-outline" onClick={() => setAction("cut")}>릴레이 차단</Button> : <Button variant="primary" disabled={!current.interlock.canRestore} onClick={() => setAction("restore")}>릴레이 복구</Button>}</div></Card><div className="two-column-layout"><Card><div className="card-title-row"><h2>안전 원칙</h2><ShieldCheck size={20} /></div><ul className="principle-list"><li>Fail-Safe 인터락은 사용자 조작보다 우선합니다.</li><li>차단·복구 모두 사유와 비밀번호 재인증이 필수입니다.</li><li>서버 성공 응답 전에는 화면 상태를 바꾸지 않습니다.</li><li>자동 복구는 없으며, 자동 차단은 서버 이벤트로만 표시합니다.</li></ul></Card><Card><div className="card-title-row"><h2>최근 제어 이력</h2><span className="field-hint">감사 추적</span></div>{history.isPending ? <TableState state="loading" /> : history.data?.items.length ? <div className="control-history">{history.data.items.map((item) => <div key={item.id}><span className={`history-dot ${item.action === "RELAY_AUTO_CUT" ? "danger" : "primary"}`} /><div><strong>{item.action === "RELAY_AUTO_CUT" ? "Fail-Safe 자동 차단" : item.action === "RELAY_CUT" ? "수동 릴레이 차단" : "수동 릴레이 복구"}</strong><small>{formatDateTime(item.at, true)} · {item.reason ?? item.reasonCode ?? "시스템"}</small></div></div>)}</div> : <TableState state="empty" message="제어 이력이 없습니다." />}</Card></div>{action && <RelayModal action={action} relay={current} onClose={() => setAction(null)} />}</div>;
 }
 
+const passwordSchema = z.object({
+  currentPassword: z.string().min(1, "현재 비밀번호를 입력하세요."),
+  newPassword: z.string().regex(/^(?=.*[A-Za-z])(?=.*\d)(?=.*[^A-Za-z\d]).{8,}$/, "영문·숫자·특수문자를 포함한 8자 이상이어야 합니다."),
+  newPasswordConfirm: z.string().min(1, "새 비밀번호를 다시 입력하세요."),
+}).refine((values) => values.newPassword === values.newPasswordConfirm, { path: ["newPasswordConfirm"], message: "새 비밀번호가 일치하지 않습니다." });
+type PasswordFormValues = z.infer<typeof passwordSchema>;
+
+function PasswordChangeForm() {
+  const form = useForm<PasswordFormValues>({ resolver: zodResolver(passwordSchema), defaultValues: { currentPassword: "", newPassword: "", newPasswordConfirm: "" } });
+  const [message, setMessage] = useState("");
+  const submit = form.handleSubmit(async ({ currentPassword, newPassword }) => {
+    setMessage("");
+    try {
+      await api.changePassword({ currentPassword, newPassword });
+      form.reset();
+      setMessage("비밀번호가 변경되었습니다.");
+    } catch (error) {
+      setMessage(errorMessage(error));
+    }
+  });
+  return <div className="password-section"><div className="section-heading-inline"><div><h2>비밀번호 변경</h2><p>새 비밀번호는 영문·숫자·특수문자를 포함한 8자 이상이어야 합니다.</p></div></div><form onSubmit={submit} className="form-stack"><Field label="현재 비밀번호" error={form.formState.errors.currentPassword?.message}><input {...form.register("currentPassword")} type="password" autoComplete="current-password" /></Field><Field label="새 비밀번호" error={form.formState.errors.newPassword?.message}><input {...form.register("newPassword")} type="password" autoComplete="new-password" /></Field><Field label="새 비밀번호 확인" error={form.formState.errors.newPasswordConfirm?.message}><input {...form.register("newPasswordConfirm")} type="password" autoComplete="new-password" /></Field><div className="settings-actions"><Button variant="secondary" type="submit" loading={form.formState.isSubmitting}>비밀번호 변경</Button></div>{message && <p className="form-message" role="status">{message}</p>}</form></div>;
+}
+
+const alertChannelOptions: Array<[keyof AlertChannels, string, string]> = [
+  ["KAKAO", "카카오톡 알림", "위험·경고 발생 시 즉시 발송"],
+  ["EMAIL", "이메일", "일일 요약 및 위험 알림"],
+  ["SMS", "SMS", "위험 등급만 발송"],
+  ["WEBPUSH", "웹푸시 (PWA)", "브라우저·모바일 푸시"],
+];
+
 export function SettingsPage({ me, onProfileSaved, onPreferencesSaved }: { me: MeResponse; onProfileSaved: (user: MeResponse["user"]) => void; onPreferencesSaved: (preferences: MeResponse["preferences"]) => void }) {
-  const [tab, setTab] = useState("alerts"); const [saved, setSaved] = useState(""); const profile = useForm({ defaultValues: { name: me.user?.name ?? "", email: me.user?.email ?? "", phone: me.user?.phone ?? "" } }); const [channels, setChannels] = useState<Record<string, boolean>>({ KAKAO: true, EMAIL: true, SMS: false, WEBPUSH: false }); const submit = profile.handleSubmit(async (values) => { try { const user = await api.updateMe(values); onProfileSaved(user); setSaved("계정 정보가 저장되었습니다."); } catch { setSaved("저장하지 못했습니다."); } }); const selectTheme = async (theme: "light" | "dark" | "system") => { try { const preferences = await api.updatePreferences({ ...me.preferences, theme }); onPreferencesSaved(preferences); setSaved("테마가 저장되었습니다."); } catch { setSaved("테마를 저장하지 못했습니다."); } };
-  return <div className="page-stack"><PageHeading eyebrow="SETTINGS" title="설정" description="알림 수신·계정 정보·테마를 관리합니다." />{saved && <div className="save-message" role="status"><Check size={16} />{saved}</div>}<Card><Tabs value={tab} onChange={setTab} items={[{ value: "alerts", label: "알림 수신" }, { value: "account", label: "계정 정보" }, { value: "theme", label: "테마" }]} />{tab === "alerts" && <div className="settings-section"><div className="section-heading-inline"><div><h2>알림 수신 채널</h2><p>동일 이벤트는 서버 정책에 따라 중복 발송이 억제됩니다.</p></div></div>{Object.entries({ KAKAO: "카카오톡 알림", EMAIL: "이메일", SMS: "SMS", WEBPUSH: "웹푸시 (PWA)" }).map(([key, label]) => <label className="toggle-row" key={key}><span><strong>{label}</strong><small>{key === "KAKAO" ? "위험·경고 발생 시 즉시 발송" : key === "EMAIL" ? "일일 요약 및 위험 알림" : key === "SMS" ? "위험 등급만 발송" : "브라우저·모바일 푸시"}</small></span><input type="checkbox" checked={channels[key]} onChange={async (event) => { const next = { ...channels, [key]: event.target.checked }; setChannels(next); try { await api.patch("/api/settings/alerts", next); } catch { setSaved("알림 설정을 저장하지 못했습니다."); } }} /></label>)}</div>}{tab === "account" && <form onSubmit={submit} className="settings-section form-stack"><Field label="이름"><input {...profile.register("name")} /></Field><Field label="이메일"><input {...profile.register("email")} type="email" /></Field><Field label="전화번호" hint="SMS·카카오 알림 수신에 사용됩니다."><input {...profile.register("phone")} /></Field><div className="settings-actions"><Button variant="primary" type="submit" loading={profile.formState.isSubmitting}>변경 저장</Button></div></form>}{tab === "theme" && <div className="settings-section"><div className="section-heading-inline"><div><h2>테마</h2><p>라이트·다크·시스템 테마를 선택합니다.</p></div></div><div className="theme-options">{(["light", "dark", "system"] as const).map((theme) => <button key={theme} className={me.preferences.theme === theme ? "active" : ""} onClick={() => void selectTheme(theme)}><span className={`theme-preview theme-${theme}`} /><strong>{theme === "light" ? "라이트" : theme === "dark" ? "다크" : "시스템"}</strong><small>{me.preferences.theme === theme ? "현재 선택" : "선택"}</small></button>)}</div></div>}</Card></div>;
+  const [tab, setTab] = useState("alerts");
+  const [saved, setSaved] = useState("");
+  const [channels, setChannels] = useState<AlertChannels>({ KAKAO: false, EMAIL: false, SMS: false, WEBPUSH: false });
+  const [alertsLoading, setAlertsLoading] = useState(true);
+  const [alertsSaving, setAlertsSaving] = useState(false);
+  const [alertsError, setAlertsError] = useState("");
+  const profile = useForm({ defaultValues: { name: me.user?.name ?? "", email: me.user?.email ?? "", phone: me.user?.phone ?? "" } });
+
+  useEffect(() => {
+    let mounted = true;
+    setAlertsLoading(true);
+    void api.getAlertSettings().then((response) => {
+      if (mounted) {
+        setChannels(response.channels);
+        setAlertsError("");
+      }
+    }).catch(() => {
+      if (mounted) setAlertsError("알림 설정을 불러오지 못했습니다.");
+    }).finally(() => {
+      if (mounted) setAlertsLoading(false);
+    });
+    return () => { mounted = false; };
+  }, []);
+
+  const submit = profile.handleSubmit(async (values) => {
+    try { const user = await api.updateMe(values); onProfileSaved(user); setSaved("계정 정보가 저장되었습니다."); } catch { setSaved("저장하지 못했습니다."); }
+  });
+  const selectTheme = async (theme: "light" | "dark" | "system") => {
+    try { const preferences = await api.updatePreferences({ ...me.preferences, theme }); onPreferencesSaved(preferences); setSaved("테마가 저장되었습니다."); } catch { setSaved("테마를 저장하지 못했습니다."); }
+  };
+  const toggleChannel = async (key: keyof AlertChannels, value: boolean) => {
+    const previous = channels;
+    const next = { ...previous, [key]: value };
+    setChannels(next);
+    setAlertsSaving(true);
+    setAlertsError("");
+    try {
+      const response = await api.updateAlertSettings(next);
+      setChannels(response.channels);
+      setSaved("알림 설정이 저장되었습니다.");
+    } catch {
+      setChannels(previous);
+      setAlertsError("알림 설정을 저장하지 못했습니다.");
+      setSaved("알림 설정을 저장하지 못했습니다.");
+    } finally {
+      setAlertsSaving(false);
+    }
+  };
+  return <div className="page-stack"><PageHeading eyebrow="SETTINGS" title="설정" description="알림 수신·계정 정보·테마를 관리합니다." />{saved && <div className="save-message" role="status"><Check size={16} />{saved}</div>}<Card><Tabs value={tab} onChange={setTab} items={[{ value: "alerts", label: "알림 수신" }, { value: "account", label: "계정 정보" }, { value: "theme", label: "테마" }]} />{tab === "alerts" && <div className="settings-section"><div className="section-heading-inline"><div><h2>알림 수신 채널</h2><p>동일 이벤트는 서버 정책에 따라 중복 발송이 억제됩니다.</p></div></div>{alertsLoading ? <TableState state="loading" message="서버 알림 설정을 불러오는 중입니다." /> : <>{alertChannelOptions.map(([key, label, hint]) => <label className="toggle-row" key={key}><span><strong>{label}</strong><small>{hint}</small></span><input type="checkbox" checked={channels[key]} disabled={alertsSaving} onChange={(event) => void toggleChannel(key, event.target.checked)} /></label>)}{alertsError && <p className="form-error" role="alert">{alertsError}</p>}</>}</div>}{tab === "account" && <div className="settings-section"><form onSubmit={submit} className="form-stack"><Field label="이름"><input {...profile.register("name")} /></Field><Field label="이메일"><input {...profile.register("email")} type="email" /></Field><Field label="전화번호" hint="SMS·카카오 알림 수신에 사용됩니다."><input {...profile.register("phone")} /></Field><div className="settings-actions"><Button variant="primary" type="submit" loading={profile.formState.isSubmitting}>변경 저장</Button></div></form><PasswordChangeForm /></div>}{tab === "theme" && <div className="settings-section"><div className="section-heading-inline"><div><h2>테마</h2><p>라이트·다크·시스템 테마를 선택합니다.</p></div></div><div className="theme-options">{(["light", "dark", "system"] as const).map((theme) => <button key={theme} className={me.preferences.theme === theme ? "active" : ""} onClick={() => void selectTheme(theme)}><span className={`theme-preview theme-${theme}`} /><strong>{theme === "light" ? "라이트" : theme === "dark" ? "다크" : "시스템"}</strong><small>{me.preferences.theme === theme ? "현재 선택" : "선택"}</small></button>)}</div></div>}</Card></div>;
 }

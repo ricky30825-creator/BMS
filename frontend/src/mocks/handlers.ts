@@ -1,5 +1,5 @@
 import { http, HttpResponse } from "msw";
-import type { Battery, Grade, MeResponse, Relay } from "../types";
+import type { AlertChannels, AlertSettings, Battery, Diagnosis, DiagnosisListItem, Grade, MeResponse, Relay } from "../types";
 
 const now = () => new Date().toISOString();
 const randomId = () => typeof crypto !== "undefined" && typeof crypto.randomUUID === "function" ? crypto.randomUUID() : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
@@ -10,14 +10,39 @@ const batteries: Battery[] = [
   { id: "b_pack_001", label: "PACK-001", chemistry: "LI_ION", seriesCount: 3, maker: "Samsung SDI", model: "18650", targetMode: 1, capacityWh: null, ratedOutputCurrentA: null, opsStatus: "NORMAL", latest: { ...baseMetric(.18, 31.2, 78) }, health: { source: "BACKEND_BQ27441_AGGREGATE", sohPct: 92, rulCycles: 480, cycleCount: 312, internalResistanceMohm: 18.4 }, diagnosisCapability: { executionAllowed: false, reasonCode: "MODE_NOT_SUPPORTED" } },
   { id: "b_pack_002", label: "PACK-002", chemistry: "LI_PO", seriesCount: null, maker: null, model: "37Wh USB", targetMode: 2, capacityWh: 37, ratedOutputCurrentA: 2, opsStatus: "WATCH", latest: { ...baseMetric(.58, 47, null), voltageV: 5.1, currentA: -1.2, powerW: -6.12, representativeTempSource: "IR_SURFACE", tempContact: null, tempIrSurface: 47, socBasis: null }, health: null, diagnosisCapability: { executionAllowed: false, reasonCode: "SAFETY_PROFILE_NOT_READY" } },
   { id: "b_pack_003", label: "PACK-003", chemistry: "LI_ION", seriesCount: 3, maker: "CellGuard Lab", model: "3S bench pack", targetMode: 1, capacityWh: null, ratedOutputCurrentA: null, opsStatus: "NORMAL", latest: null, health: null, diagnosisCapability: { executionAllowed: false, reasonCode: "MODE_NOT_SUPPORTED" } },
+  { id: "b_pack_004", label: "PACK-004", chemistry: "LI_PO", seriesCount: null, maker: "CellGuard Lab", model: "Validated Mode 2", targetMode: 2, capacityWh: 37, ratedOutputCurrentA: 2, opsStatus: "NORMAL", latest: { ...baseMetric(.24, 42, null), voltageV: 5.05, currentA: -1, powerW: -5.05, representativeTempSource: "IR_SURFACE", tempContact: null, tempIrSurface: 42, socBasis: "RELATIVE_SESSION_START" }, health: null, diagnosisCapability: { executionAllowed: true, reasonCode: null } },
 ];
 const demoUser: NonNullable<MeResponse["user"]> = { id: "u_hong", loginId: "hong", name: "홍길동", email: "hong@cellguard.io", phone: "010-1234-5678", role: "USER", status: "ACTIVE" };
 let currentUser: MeResponse["user"] = null;
 let session: MeResponse["activeSession"] = null;
+let currentPassword = "demo-password";
+let alertChannels: AlertChannels = { KAKAO: true, EMAIL: true, SMS: false, WEBPUSH: false };
+let activeDiagnosis: Diagnosis | null = null;
+const completedCapacityDiagnosis: Diagnosis = { id: "dg_pack_004_001", batteryId: "b_pack_004", batteryLabel: "PACK-004", sessionId: "s_history", kind: "CAPACITY", status: "COMPLETED", confidence: "HIGH", startedAt: "2026-07-28T05:20:00.000Z", measuredAt: "2026-07-28T11:40:00.000Z", socHintLevel: null, loadTargetA: null, loadActualA: null, partialMetrics: null, quick: null, capacity: { deliveredWh: 31.2, ratedWh: 37, baselineWh: 34.8, sohRelPct: 89.7, sohAbsPct: 95.8, assumedEfficiency: 0.88, dischargeCurrentA: 1, isBaseline: false, partial: false } };
+const diagnosisHistory: Record<string, Diagnosis[]> = { b_pack_004: [completedCapacityDiagnosis] };
 let relay: Relay = { batteryId: "b_pack_001", state: "CLOSED", changedAt: now(), changedBy: { type: "SYSTEM", systemCode: "SYSTEM" }, interlock: { engaged: false, condition: null, canRestore: true } };
 const page = <T>(items: T[]) => ({ items, page: { number: 1, size: items.length || 20, total: items.length, totalPages: items.length ? 1 : 0 } });
 const currentBattery = () => batteries.find((item) => item.id === session?.batteryId) ?? batteries[0];
 const bad = (status: number, code: string, message = code) => HttpResponse.json({ error: { code, message } }, { status });
+const alertSettings = (): AlertSettings => ({ channels: alertChannels, policy: { sendOn: ["DANGER", "WARNING"], smsOnlyDanger: true, dedupeWindowMinutes: 5 } });
+const diagnosisListItem = (diagnosis: Diagnosis): DiagnosisListItem => ({ id: diagnosis.id, batteryId: diagnosis.batteryId, batteryLabel: diagnosis.batteryLabel, kind: diagnosis.kind, status: diagnosis.status, confidence: diagnosis.confidence, measuredAt: diagnosis.measuredAt, socHintLevel: diagnosis.socHintLevel, summary: diagnosis.kind === "QUICK" ? { regulationKneeA: diagnosis.quick?.regulationKneeA ?? null, thermalSlopeCPerMin: diagnosis.quick?.thermalSlopeCPerMin ?? null, grade: diagnosis.quick?.grade ?? null } : { sohRelPct: diagnosis.capacity?.sohRelPct ?? null, deliveredWh: diagnosis.capacity?.deliveredWh ?? null } });
+const allDiagnoses = () => Object.values(diagnosisHistory).flat();
+const startDiagnosis = async (kind: "quick" | "capacity", request: Request) => {
+  if (!session) return bad(409, "NO_ACTIVE_SESSION");
+  const battery = currentBattery();
+  if (battery.targetMode !== 2) return bad(409, "MODE_NOT_SUPPORTED");
+  if (activeDiagnosis) return bad(409, "DIAGNOSIS_IN_PROGRESS");
+  if (battery.diagnosisCapability?.executionAllowed !== true) return bad(409, "SAFETY_PROFILE_NOT_READY");
+  if (relay.batteryId === battery.id && relay.state === "OPEN") return bad(409, "RELAY_CUT");
+  const body = await request.json() as { socHintLevel?: number | null; dischargeCurrentA?: number; fullyChargedConfirmed?: boolean; acknowledged?: boolean };
+  if (body.acknowledged !== true) return bad(400, "ACK_REQUIRED");
+  if (kind === "quick" && (!("socHintLevel" in body) || (body.socHintLevel !== null && ![1, 2, 3, 4].includes(body.socHintLevel ?? 0)))) return bad(422, "VALIDATION_FAILED");
+  if (kind === "capacity" && (typeof body.dischargeCurrentA !== "number" || body.dischargeCurrentA <= 0)) return bad(422, "VALIDATION_FAILED");
+  if (kind === "capacity" && body.fullyChargedConfirmed !== true) return bad(400, "FULL_CHARGE_REQUIRED");
+  const diagnosis: Diagnosis = { id: `dg_${randomId()}`, batteryId: battery.id, batteryLabel: battery.label, sessionId: session.id, kind: kind === "quick" ? "QUICK" : "CAPACITY", status: "RUNNING", phase: kind === "quick" ? "P0" : "CAPACITY", startedAt: now(), estimatedEndAt: new Date(Date.now() + (kind === "quick" ? 120_000 : 21_600_000)).toISOString(), loadTargetA: kind === "quick" ? 0.5 : body.dischargeCurrentA ?? 1, loadActualA: kind === "quick" ? 0.48 : body.dischargeCurrentA ?? 1, socHintLevel: kind === "quick" ? body.socHintLevel as 1 | 2 | 3 | 4 | null : null, partialMetrics: kind === "quick" ? { vLightLoadV: 5.06, regulationKneeA: null, thermalSlopeCPerMin: null, specAttainmentPct: null } : { deliveredWh: null, specAttainmentPct: null }, quick: null, capacity: null };
+  activeDiagnosis = diagnosis;
+  return HttpResponse.json(diagnosis, { status: 202 });
+};
 const users = [demoUser, { id: "u_admin", loginId: "lee", name: "이연구", email: "lee@lab.io", role: "ADMIN" as const, status: "ACTIVE" as const, phone: "010-3456-7890" }, { id: "u_park", loginId: "parktest", name: "박테스트", email: "park@test.io", role: "USER" as const, status: "SUSPENDED" as const, phone: "010-4567-8901" }];
 
 export const handlers = [
@@ -28,8 +53,10 @@ export const handlers = [
   http.post("/api/auth/forget-password", () => HttpResponse.json({ ok: true })),
   http.get("/api/me", () => currentUser ? HttpResponse.json({ user: currentUser, activeSession: session, unreadAlertCount: 1, activeAnomalyCount: 2, preferences: { theme: "light", lang: "ko" } }) : bad(401, "UNAUTHENTICATED")),
   http.patch("/api/me", async ({ request }) => { currentUser = { ...currentUser!, ...(await request.json() as object) }; return HttpResponse.json(currentUser); }),
+  http.post("/api/me/password", async ({ request }) => { const body = await request.json() as { currentPassword?: string; newPassword?: string }; if (body.currentPassword !== currentPassword) return bad(401, "REAUTH_REQUIRED"); if (!body.newPassword || !/^(?=.*[A-Za-z])(?=.*\d)(?=.*[^A-Za-z\d]).{8,}$/.test(body.newPassword)) return bad(422, "VALIDATION_FAILED"); currentPassword = body.newPassword; return HttpResponse.json({ ok: true }); }),
   http.patch("/api/settings/preferences", async ({ request }) => HttpResponse.json({ theme: (await request.json() as { theme: "light" | "dark" | "system" }).theme, lang: "ko" })),
-  http.patch("/api/settings/alerts", () => HttpResponse.json({ ok: true })),
+  http.get("/api/settings/alerts", () => HttpResponse.json(alertSettings())),
+  http.patch("/api/settings/alerts", async ({ request }) => { const body = await request.json() as { channels?: AlertChannels }; if (!body.channels || ["KAKAO", "EMAIL", "SMS", "WEBPUSH"].some((key) => typeof body.channels?.[key as keyof AlertChannels] !== "boolean")) return bad(422, "VALIDATION_FAILED"); alertChannels = { ...body.channels }; return HttpResponse.json(alertSettings()); }),
   http.get("/api/batteries", () => HttpResponse.json(page(batteries.map((item) => ({ ...item, isConnected: item.id === session?.batteryId }))))),
   http.post("/api/batteries", async ({ request }) => { const body = await request.json() as Partial<Battery>; const created: Battery = { id: `b_${randomId()}`, label: body.label ?? "NEW", chemistry: body.chemistry ?? "LI_ION", seriesCount: body.seriesCount ?? null, maker: body.maker ?? null, model: body.model ?? null, targetMode: body.targetMode ?? 1, capacityWh: body.capacityWh ?? null, ratedOutputCurrentA: body.ratedOutputCurrentA ?? null, opsStatus: "NORMAL", latest: null, health: null, diagnosisCapability: { executionAllowed: false, reasonCode: body.targetMode === 2 ? "SAFETY_PROFILE_NOT_READY" : "MODE_NOT_SUPPORTED" } }; batteries.push(created); return HttpResponse.json(created, { status: 201 }); }),
   http.patch("/api/batteries/:id", async ({ params, request }) => { const battery = batteries.find((item) => item.id === params.id); if (!battery) return bad(404, "NOT_FOUND"); Object.assign(battery, await request.json()); return HttpResponse.json(battery); }),
@@ -51,9 +78,12 @@ export const handlers = [
   http.post("/api/alerts/ack-all", () => HttpResponse.json({ acknowledgedCount: 1 })),
   http.get("/api/notices", () => HttpResponse.json(page([{ id: "n1", category: "MAINTENANCE", title: "7월 정기 서버 점검 (무중단)", summary: "WebSocket 순단이 발생할 수 있습니다.", publishedAt: "2026-07-01T00:00:00.000Z" }, { id: "n2", category: "FEATURE", title: "이상 근거(XAI) 패널 정식 오픈", summary: "이상점수 상승에 기여한 특징을 확인합니다.", publishedAt: "2026-06-28T00:00:00.000Z" }]))),
   http.get("/api/notices/:id", ({ params }) => HttpResponse.json({ id: params.id, category: "MAINTENANCE", title: "7월 정기 서버 점검 (무중단)", body: "7/7 00:00~04:00 인프라 점검이 진행됩니다. WebSocket 순단이 발생할 수 있으나 자동 재연결됩니다.", publishedAt: "2026-07-01T00:00:00.000Z" })),
-  http.get("/api/diagnosis/active", () => HttpResponse.json(null)),
-  http.post("/api/diagnosis/:kind", () => bad(409, "SAFETY_PROFILE_NOT_READY")),
-  http.delete("/api/diagnosis/active", () => bad(409, "NO_DIAGNOSIS_IN_PROGRESS")),
+  http.get("/api/diagnosis/active", () => HttpResponse.json(activeDiagnosis)),
+  http.post("/api/diagnosis/quick", ({ request }) => startDiagnosis("quick", request)),
+  http.post("/api/diagnosis/capacity", ({ request }) => startDiagnosis("capacity", request)),
+  http.delete("/api/diagnosis/active", () => { if (!activeDiagnosis) return bad(409, "NO_DIAGNOSIS_IN_PROGRESS"); const aborted: Diagnosis = { ...activeDiagnosis, status: "ABORTED", abortReason: "USER" }; diagnosisHistory[aborted.batteryId] = [aborted, ...(diagnosisHistory[aborted.batteryId] ?? [])]; activeDiagnosis = null; return HttpResponse.json(aborted); }),
+  http.get("/api/batteries/:id/diagnoses", ({ params }) => { const items = (diagnosisHistory[String(params.id)] ?? []).map(diagnosisListItem); return HttpResponse.json(page(items)); }),
+  http.get("/api/diagnoses/:id", ({ params }) => { const diagnosis = allDiagnoses().find((item) => item.id === String(params.id)) ?? (activeDiagnosis?.id === String(params.id) ? activeDiagnosis : undefined); return diagnosis ? HttpResponse.json(diagnosis) : bad(404, "NOT_FOUND"); }),
   http.get("/api/admin/overview", () => HttpResponse.json({ users: 3, batteries: batteries.length, activeSessions: session ? 1 : 0, blockedBatteries: 0, relayOpen: relay.state === "OPEN" ? 1 : 0 })),
   http.get("/api/admin/event-trend", () => HttpResponse.json({ buckets: ["월", "화", "수", "목", "금", "토", "일"], series: [{ grade: "CAUTION", values: [2, 3, 1, 4, 2, 1, 3] }, { grade: "WARNING", values: [1, 2, 1, 2, 1, 0, 2] }, { grade: "DANGER", values: [0, 1, 0, 1, 0, 0, 1] }] })),
   http.get("/api/admin/users", () => HttpResponse.json(page(users.map((user) => ({ ...user, batteryCount: user.id === "u_hong" ? 2 : 0 }))))),

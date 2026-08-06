@@ -31,6 +31,8 @@ export type ActiveSession = {
 };
 
 export type Preferences = { theme: "light" | "dark" | "system"; lang: "ko" | "en" };
+export type AlertChannels = { KAKAO: boolean; EMAIL: boolean; SMS: boolean; WEBPUSH: boolean };
+export type AlertSettings = { channels: AlertChannels; policy?: { sendOn?: string[]; smsOnlyDanger?: boolean; dedupeWindowMinutes?: number } };
 
 export type MeResponse = {
   user: ApiUser | null;
@@ -73,7 +75,7 @@ export type BatteryHealth = {
   } | null;
 };
 
-export type DiagnosisCapability = { executionAllowed: boolean; reasonCode: string };
+export type DiagnosisCapability = { executionAllowed: boolean; reasonCode: string | null };
 
 export type Battery = {
   id: string;
@@ -206,10 +208,34 @@ export type Diagnosis = {
   startedAt: string;
   measuredAt?: string;
   estimatedEndAt?: string | null;
+  loadTargetA?: number | null;
+  loadActualA?: number | null;
+  socHintLevel?: 1 | 2 | 3 | 4 | null;
   abortReason?: string | null;
+  partialMetrics?: Record<string, number | null> | null;
   result?: Record<string, unknown> | null;
-  quick?: Record<string, unknown> | null;
-  capacity?: Record<string, unknown> | null;
+  quick?: {
+    regulationKneeA?: number | null;
+    thermalSlopeCPerMin?: number | null;
+    grade?: string | null;
+    [key: string]: unknown;
+  } | null;
+  capacity?: {
+    deliveredWh?: number | null;
+    ratedWh?: number | null;
+    baselineWh?: number | null;
+    sohRelPct?: number | null;
+    sohAbsPct?: number | null;
+    assumedEfficiency?: number | null;
+    dischargeCurrentA?: number | null;
+    isBaseline?: boolean | null;
+    partial?: boolean | null;
+    [key: string]: unknown;
+  } | null;
+};
+
+export type DiagnosisListItem = Pick<Diagnosis, "id" | "batteryId" | "batteryLabel" | "kind" | "status" | "confidence" | "measuredAt" | "socHintLevel"> & {
+  summary?: Record<string, number | string | null> | null;
 };
 
 export type AdminOverview = { users: number; batteries: number; activeSessions: number; blockedBatteries: number; relayOpen: number };
