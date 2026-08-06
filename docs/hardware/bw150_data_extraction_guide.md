@@ -141,37 +141,49 @@ soc_pct = 100 × (1 − 누적방전_mAh / 정격_mAh)
 python3 edge/bw150/detect.py
 ```
 
-#### macOS에서의 주의
+#### ✅ B4 확정 — CH340G 시리얼이 아니라 **USB HID**다 (2026-08-06 실물 확인)
 
-- **ATORCH 공식 PC 소프트웨어는 Windows 전용이다**(매뉴얼 FAQ: Win7/Win10 이상만 지원). **맥에서는 못 쓴다** — 그래서 §3-4의 자체 스크립트가 선택이 아니라 필수다.
-- CH340 계열이면 `/dev/cu.wchusbserialXXXX`로 잡힌다. **macOS 11.3 이상은 드라이버가 내장**이라 따로 설치할 게 없다.
-- 포트가 안 잡히면 시리얼이 아니라 **진짜 USB HID**일 수 있다(매뉴얼이 "HID"라고 부르는 이유). 확인:
+실물을 연결해 확인한 결과다. **기존 문서의 "CH340G" 전제는 틀렸다.**
+
+| 항목 | 실측값 |
+|---|---|
+| 제품 문자열 | `ATORCH BW150 V1.1.0` (제조사 `APP`) |
+| VID / PID | **`0x0483` / `0x5750`** — STMicroelectronics. STM32 내장 USB이지 USB-시리얼 변환칩이 아니다 |
+| 인터페이스 | USB HID, 벤더 정의 usage page **`0xFF02`**, usage `0x02` |
+| 리포트 | 입력·출력 각각 **64바이트**, **리포트 ID 없음** |
+| 리포트 디스크립터 | `06 02 FF 09 02 A1 01 09 03 15 00 26 FF 00 75 08 95 40 81 00 09 04 15 00 26 FF 00 75 08 95 40 91 00 C0` |
+
+**결과적으로 `/dev/cu.*` 시리얼 포트는 절대 생기지 않는다.** `pyserial`이 아니라 **`hidapi`**를 쓴다.
 
 ```bash
-system_profiler SPUSBDataType | grep -A6 -i 'hid\|ch34\|atorch'
+pip install hidapi
 ```
 
-HID로 잡히면 `pyserial`이 아니라 `hidapi`가 필요하고, 그게 번거로우면 **BLE로 우회한다**(§3-2). 맥은 BLE가 내장이라 오히려 이쪽이 쉬울 수 있다.
+- 리포트 ID가 없으므로 **macOS hidapi로 쓸 때 앞에 `0x00` 바이트를 붙여야 한다**(64바이트 페이로드 + 1 = 65바이트 write).
+- `get_input_report`·`get_feature_report`는 **지원하지 않는다**(read error). 인터럽트 IN 리포트만 온다.
+- **ATORCH 공식 PC 소프트웨어는 Windows 전용이다**(매뉴얼 FAQ: Win7/Win10 이상). 맥에서는 못 쓰므로 §3-4의 자체 스크립트가 선택이 아니라 필수다.
+- 장치가 안 보이면: `ioreg -p IOUSB -w0 -l | grep -i 'product name'`
+  (`system_profiler SPUSBDataType`는 환경에 따라 출력이 비어 나올 수 있다.)
 
-> 이게 §9의 **B4**(CH340G인가 HID인가) 항목이다. 실물을 꽂아 봐야 답이 나온다.
+> **HID라는 사실이 프로토콜 자체를 바꾸지는 않는다.** `FF 55` 프레임은 64바이트 HID 리포트 안에 실려 오는 것으로 보이며, 파서는 그대로 쓴다. 다만 **PX-100 제어 명령이 HID 경로에서도 통하는지는 별도 확인이 필요하다**(§9 B3).
 
 #### 확인 스크립트
 
 ```bash
-# 1) 포트 후보 찾기
+# 1) 장치 확인 (HID 열거)
 python3 edge/bw150/detect.py
 
-# 2) 프레임 읽기 — B1(디바이스 타입)·체크섬을 자동 판정한다
-python3 edge/bw150/detect.py --port /dev/cu.wchusbserial1234
+# 2) 입력 리포트 읽기 — B1(디바이스 타입)·체크섬을 자동 판정한다
+python3 edge/bw150/detect.py --read
 
-# 3) 파싱이 실패하면 hex 원본 보기
-python3 edge/bw150/detect.py --port /dev/cu.XXX --raw
+# 3) 파싱이 실패하면 리포트 원본 hex 보기
+python3 edge/bw150/detect.py --read --raw
 
-# 4) B3 — PX-100 제어 명령이 통하는지 (⚠️ 배터리가 물려 있으면 실제로 방전된다)
-python3 edge/bw150/detect.py --port /dev/cu.XXX --ping
+# 4) 리포트가 안 오면 깨우기 명령 시험 (리셋·버튼 명령은 제외돼 있다)
+python3 edge/bw150/detect.py --probe
 ```
 
-의존성은 `pyserial` 하나다(`pip install pyserial`).
+의존성은 `hidapi` 하나다(`pip install hidapi`).
 
 ### 3-1. ① 유선 시리얼 — 프로토콜 명세
 
@@ -486,7 +498,8 @@ BW150 CSV는 **1초**, 조립 후 스트림은 **100ms**다. 30-step 윈도우�
 | **B1** | **디바이스 타입 바이트** | 첫 프레임의 3번째 바이트를 hex로 출력. `02` 기대 | 파서가 통째로 어긋난다 |
 | **B2** | **오프셋 10-12가 Ah인가 W인가** | 알려진 부하로 방전하며 `V×I`와 비교 | 누적 용량을 전력으로 오독 → `soc_pct`가 전부 틀린다 |
 | **B3** | **PX-100 제어 명령이 통하는가** | `B1 B2 01 01 00 B6` 전송 후 `0x6F` 응답 확인 | 자동 계단 스윙 불가 → 진단 시험을 손으로 돌려야 한다 |
-| **B4** | **PC 연결이 CH340G 시리얼인가 HID인가** | 연결 후 `ls /dev/tty.*` 또는 장치 관리자 확인 | 시리얼 포트가 안 잡히면 BLE로 우회 |
+| ~~B4~~ | ~~PC 연결이 CH340G인가 HID인가~~ | **✅ 닫힘(2026-08-06) — USB HID 확정.** VID `0x0483`/PID `0x5750`, usage page `0xFF02`, 64바이트 리포트. 상세는 §3-1a | — |
+| **B15** | **HID 입력 리포트가 언제 흐르기 시작하는가** | 장치는 열리고 write도 되는데 **입력 리포트가 0개**다. 본체를 측정 모드(CC 등)에 두고 Start를 누른 뒤 `--read` 재시도 | 이게 안 풀리면 HID 수집이 불가능해 BLE로 우회해야 한다 |
 | B5 | 오프셋 17-20(4바이트)의 정체 | 값 변화 관찰 | 없어도 수집엔 지장 없음 |
 | B6 | BLE 쓰기 특성이 `FFE2`인가 `FFE1` 겸용인가 | BLE 스캔으로 특성 목록 확인 | BLE 제어만 영향 |
 | B7 | Tuya DP 번호가 §3-3 표와 같은가 | `d.status()`의 `dps` 대조 | Tuya 경로만 영향 |

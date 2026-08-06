@@ -1,15 +1,21 @@
 #!/usr/bin/env python3
 """BW150 연결 확인 도구 — 추출 가이드 §9의 B1~B4를 소거한다.
 
+⚠️ 실물 확인 결과(2026-08-06): BW150은 CH340G 시리얼이 아니라 **USB HID**다.
+   VID 0x0483 (STMicroelectronics) / PID 0x5750, 벤더 정의 usage page 0xFF02,
+   입력·출력 리포트 각각 64바이트, 리포트 ID 없음.
+   그래서 기본 경로는 HID이며, 시리얼은 --serial 로만 시도한다.
+
 사용법:
-    python3 detect.py                      # 포트 후보를 찾아 알려준다
-    python3 detect.py --port /dev/cu.XXX   # 연결해서 프레임을 읽는다
-    python3 detect.py --port ... --raw     # 파싱 없이 hex만 (파싱이 실패할 때)
-    python3 detect.py --port ... --ping    # PX-100 제어 명령이 통하는지 시험 (B3)
+    python3 detect.py                       # 장치를 찾아 상태를 알려준다
+    python3 detect.py --read                # HID 입력 리포트를 읽는다
+    python3 detect.py --read --raw          # 파싱 없이 hex만
+    python3 detect.py --probe               # 스트림을 깨우는 명령 후보들을 시험 (읽기 전용만)
+    python3 detect.py --serial /dev/cu.XXX  # 시리얼판일 때
 
 프로토콜 근거는 docs/hardware/bw150_data_extraction_guide.md §3-1.
-BW150 직접 캡처가 아니라 DL24 계열에서 나온 명세이므로, 이 스크립트의 목적은
-"맞는지 확인하는 것"이지 "맞다고 가정하는 것"이 아니다.
+바이트 오프셋은 DL24 계열에서 나온 명세라 BW150에서 확정된 게 아니다.
+이 스크립트의 목적은 "맞는지 확인하는 것"이지 "맞다고 가정하는 것"이 아니다.
 """
 
 from __future__ import annotations
@@ -18,30 +24,13 @@ import argparse
 import sys
 import time
 
-try:
-    import serial
-    from serial.tools import list_ports
-except ImportError:
-    sys.exit("pyserial이 없다.  pip install pyserial")
-
+VID, PID = 0x0483, 0x5750
 MAGIC = b"\xff\x55"
 FRAME_LEN = {0x01: 36, 0x02: 8, 0x11: 10}
 DEVICE_TYPE = {0x01: "AC 미터", 0x02: "DC 미터/부하", 0x03: "USB 미터"}
 
-# 이 문자열이 포트 이름/설명에 있으면 BW150 후보로 본다
-HINTS = ("wchusbserial", "usbserial", "ch340", "ch910", "SLAB", "usbmodem")
 
-
-def find_ports():
-    """연결 가능성이 있는 시리얼 포트를 (후보, 그 외)로 나눠 돌려준다."""
-    likely, others = [], []
-    for p in list_ports.comports():
-        blob = f"{p.device} {p.description} {p.manufacturer or ''}".lower()
-        if "bluetooth-incoming" in blob or "debug-console" in blob:
-            continue
-        (likely if any(h.lower() in blob for h in HINTS) else others).append(p)
-    return likely, others
-
+# ── 프레임 해석 ────────────────────────────────────────────────────────────
 
 def checksum(payload: bytes) -> int:
     """frame[2:-1]을 넣는다 — 매직 헤더와 체크섬 바이트를 뺀 나머지 전부."""
@@ -69,7 +58,6 @@ def parse_report(f: bytes) -> dict:
         "voltage_v": voltage,
         "current_a": current,
         "power_w": voltage * current,
-        "resistance_ohm": (voltage / current) if current else None,
         "capacity_ah": u24(f, 10) * 0.01,
         "energy_wh": u32(f, 13) * 10.0,
         "temp_c": u16(f, 24),
@@ -83,164 +71,253 @@ def px100(cmd: int, d1: int = 0, d2: int = 0) -> bytes:
     return bytes((0xB1, 0xB2, cmd, d1, d2, 0xB6))
 
 
-def cmd_list_ports() -> int:
-    likely, others = find_ports()
-    if likely:
-        print("BW150 후보 포트:")
-        for p in likely:
-            print(f"  {p.device}   {p.description}")
-        print(f"\n다음: python3 detect.py --port {likely[0].device}")
-        return 0
-
-    print("USB 시리얼 포트를 못 찾았다.\n")
-    if others:
-        print("연결된 다른 포트(후보는 아님):")
-        for p in others:
-            print(f"  {p.device}   {p.description}")
-        print()
-    print("확인 순서:")
-    print("  1. BW150에 자체 전원이 들어갔는가 — 화면이 켜져 있어야 한다.")
-    print("     (DC5.5 잭 12V, 또는 CC 포트에 USB 5V/2A·QC/PD 12V)")
-    print("  2. 케이블을 'HID computer online' 포트에 꽂았는가 —")
-    print("     전원용 CC 포트와 다른 포트다.")
-    print("  3. 동봉된 'Computer Online cable'을 쓰고 있는가 — 충전 전용")
-    print("     케이블은 데이터 선이 없어 아무것도 안 잡힌다.")
-    print("  4. 그래도 없으면 시리얼이 아니라 진짜 HID일 수 있다:")
-    print("     system_profiler SPUSBDataType | grep -A6 -i 'hid\\|ch34\\|atorch'")
-    print("     이때는 BLE 경로로 우회한다 (가이드 §3-2).")
-    return 1
+def atorch_cmd(cmd: int, adu: int = 0x02, data: int = 0) -> bytes:
+    """FF 55 11 … 명령 프레임(10바이트). 리셋·버튼용이지 부하 ON/OFF가 아니다."""
+    body = bytes((0x11, adu, cmd,
+                  (data >> 16) & 0xFF, (data >> 8) & 0xFF, data & 0xFF, 0x00))
+    return MAGIC + body + bytes((checksum(body),))
 
 
-def cmd_read(port: str, seconds: float, raw: bool, ping: bool) -> int:
-    print(f"{port} 9600 8N1 로 연다...")
+class FrameSync:
+    """바이트 스트림에서 FF 55 프레임을 뽑아낸다. HID·시리얼 공용."""
+
+    def __init__(self) -> None:
+        self.buf = bytearray()
+
+    def feed(self, chunk: bytes):
+        self.buf.extend(chunk)
+        while True:
+            i = self.buf.find(MAGIC)
+            if i < 0:
+                del self.buf[:-1]
+                return
+            if i:
+                del self.buf[:i]
+            if len(self.buf) < 4:
+                return
+            need = FRAME_LEN.get(self.buf[2])
+            if need is None:
+                del self.buf[:2]
+                continue
+            if len(self.buf) < need:
+                return
+            frame = bytes(self.buf[:need])
+            del self.buf[:need]
+            yield frame
+
+
+# ── HID 경로 ───────────────────────────────────────────────────────────────
+
+def open_hid():
     try:
-        ser = serial.Serial(port, 9600, timeout=1)
-    except serial.SerialException as e:
-        print(f"열기 실패: {e}")
+        import hid
+    except ImportError:
+        sys.exit("hidapi가 없다.  pip install hidapi")
+    h = hid.device()
+    h.open(VID, PID)
+    return h
+
+
+def hid_write(h, payload: bytes) -> int:
+    """리포트 ID 없는 장치라 macOS hidapi는 앞에 0x00을 붙여야 한다."""
+    return h.write(bytes([0x00]) + payload + bytes(64 - len(payload)))
+
+
+def cmd_info() -> int:
+    try:
+        import hid
+    except ImportError:
+        sys.exit("hidapi가 없다.  pip install hidapi")
+
+    found = [d for d in hid.enumerate() if (d["vendor_id"], d["product_id"]) == (VID, PID)]
+    if not found:
+        print("BW150 (VID 0x0483 / PID 0x5750) 을 못 찾았다.\n")
+        print("확인 순서:")
+        print("  1. BW150 화면이 켜져 있는가 — 자체 전원이 필요하다")
+        print("     (DC5.5 잭 12V, 또는 CC 포트에 USB 5V/2A·QC/PD 12V)")
+        print("  2. 케이블을 'HID computer online' 포트에 꽂았는가")
+        print("     — 전원용 CC 포트와 다른 포트다")
+        print("  3. 동봉된 'Computer Online cable'을 쓰고 있는가")
+        print("     — 충전 전용 케이블은 데이터 선이 없어 아무것도 안 잡힌다")
+        print("\n  USB 장치 전체 확인:")
+        print("     ioreg -p IOUSB -w0 -l | grep -i 'product name'")
         return 1
 
-    if ping:
-        print("\n[B3] PX-100 제어 명령 시험 — 부하 ON(B1 B2 01 01 00 B6) 전송")
-        print("     ⚠️ 배터리가 물려 있으면 실제로 방전이 시작된다.")
-        ser.reset_input_buffer()
-        ser.write(px100(0x01, 0x01, 0x00))
-        time.sleep(0.5)
-        resp = ser.read(8)
-        if resp == b"\x6f" or resp.startswith(b"\x6f"):
-            print(f"     ✅ ACK 0x6F 수신 — PX-100 제어가 통한다. resp={resp.hex(' ')}")
-        elif resp:
-            print(f"     ⚠️ 응답은 왔으나 0x6F가 아니다: {resp.hex(' ')}")
-            print("        (텔레메트리 프레임이 섞였을 수 있다. --raw로 다시 볼 것)")
-        else:
-            print("     ❌ 응답 없음 — 제어는 본체 버튼/Tuya로 하고 시리얼은 읽기 전용.")
-        print("     부하 OFF 전송")
-        ser.write(px100(0x01, 0x00, 0x00))
-        time.sleep(0.3)
-        ser.reset_input_buffer()
+    d = found[0]
+    print("✅ BW150 발견 (USB HID)")
+    print(f"   제품   : {d['product_string']}")
+    print(f"   제조사 : {d['manufacturer_string']}")
+    print(f"   VID/PID: 0x{d['vendor_id']:04x} / 0x{d['product_id']:04x}")
+    print(f"   usage  : page 0x{d['usage_page']:04x} / 0x{d['usage']:02x} (벤더 정의)")
+    print("\n다음: python3 detect.py --read")
+    return 0
 
-    print(f"\n{seconds:.0f}초 동안 읽는다. Ctrl-C로 중단.\n")
-    buf = bytearray()
-    stats = {"frames": 0, "bad_crc": 0, "bytes": 0}
+
+def cmd_read(seconds: float, raw: bool) -> int:
+    h = open_hid()
+    print(f"열림: {h.get_manufacturer_string()} | {h.get_product_string()}")
+    print(f"{seconds:.0f}초 동안 입력 리포트를 읽는다. Ctrl-C로 중단.\n")
+
+    h.set_nonblocking(0)
+    sync = FrameSync()
+    reports = frames = bad_crc = 0
     seen_types: dict[int, int] = {}
+    first_type_shown = False
     deadline = time.time() + seconds
 
+    try:
+        while time.time() < deadline:
+            data = h.read(64, timeout_ms=500)
+            if not data:
+                continue
+            reports += 1
+            chunk = bytes(data)
+            if raw and reports <= 20:
+                print(f"  리포트 {reports:3d}: {chunk.hex(' ')}")
+
+            for frame in sync.feed(chunk):
+                frames += 1
+                mtype = frame[2]
+                seen_types[mtype] = seen_types.get(mtype, 0) + 1
+                ok = checksum(frame[2:-1]) == frame[-1]
+                if not ok:
+                    bad_crc += 1
+
+                if raw or not ok or mtype != 0x01:
+                    print(f"  [{'OK ' if ok else 'CRC✗'}] type=0x{mtype:02x} "
+                          f"{frame.hex(' ')}")
+                    continue
+
+                d = parse_report(frame)
+                if not first_type_shown:
+                    first_type_shown = True
+                    dt = d["device_type"]
+                    warn = "" if dt == 0x02 else "  ⚠️ DC(0x02)가 아니다 — 파서 확인 필요"
+                    print(f"  [B1] 디바이스 타입 = 0x{dt:02x} "
+                          f"({DEVICE_TYPE.get(dt, '미상')}){warn}")
+                print(f"  V={d['voltage_v']:7.3f}  I={d['current_a']:7.3f}  "
+                      f"P={d['power_w']:8.3f}W  Ah={d['capacity_ah']:8.2f}  "
+                      f"Wh={d['energy_wh']:9.1f}  T={d['temp_c']:3d}C  "
+                      f"t={d['runtime_s']:6d}s  [17:21]={d['off_17_20']}")
+    except KeyboardInterrupt:
+        print("\n중단.")
+    finally:
+        h.close()
+
+    print(f"\n--- 결과 ---\n리포트 {reports},  프레임 {frames},  체크섬 실패 {bad_crc}")
+    if seen_types:
+        print("메시지 타입별: " +
+              ", ".join(f"0x{t:02x}×{n}" for t, n in sorted(seen_types.items())))
+
+    if reports == 0:
+        print("\n❌ 입력 리포트가 하나도 안 왔다. 장치는 열리는데 데이터를 안 보낸다.")
+        print("   가장 흔한 원인: **BW150이 측정 화면에 있지 않다.**")
+        print("   본체에서 측정 모드(CC 등)로 들어가 Start를 누른 뒤 다시 시도할 것.")
+        print("   그래도 안 오면 --probe 로 깨우기 명령을 시험한다.")
+        return 1
+    if frames == 0:
+        print("\n⚠️ 리포트는 오는데 FF 55 프레임이 없다.")
+        print("   --raw 로 원본 hex를 떠서 가이드 §3-1의 레이아웃과 대조할 것.")
+        return 1
+    print("\n✅ 프레임 파싱 성공.")
+    return 0
+
+
+def cmd_probe() -> int:
+    """스트림을 깨우는 명령 후보를 시험한다. 파괴적 명령(리셋)은 넣지 않는다."""
+    candidates = [
+        ("빈 리포트",              b""),
+        ("PX100 0x10 출력상태",    px100(0x10)),
+        ("PX100 0x11 전압",        px100(0x11)),
+        ("PX100 0x12 전류",        px100(0x12)),
+        ("PX100 0x16 MOS온도",     px100(0x16)),
+        ("PX100 0x17 설정전류",    px100(0x17)),
+        ("Atorch FF5511 ADU=02",   atorch_cmd(0x00, adu=0x02)),
+        ("Atorch FF5511 ADU=03",   atorch_cmd(0x00, adu=0x03)),
+    ]
+    print("⚠️ 리셋·버튼 명령은 제외했다 (데이터가 지워지거나 화면이 바뀐다).\n")
+    hit = False
+    for label, payload in candidates:
+        h = open_hid()
+        h.set_nonblocking(0)
+        try:
+            hid_write(h, payload)
+        except Exception as e:
+            print(f"{label:24s} write 오류: {e}")
+            h.close()
+            continue
+        got = []
+        t0 = time.time()
+        while time.time() - t0 < 1.5:
+            d = h.read(64, timeout_ms=300)
+            if d:
+                got.append(bytes(d))
+        h.close()
+        if got:
+            hit = True
+            print(f"{label:24s} ✅ 수신 {len(got)}개")
+            for g in got[:2]:
+                print(f"{'':26s}{g.hex(' ')}")
+        else:
+            print(f"{label:24s} — 응답 없음")
+
+    if not hit:
+        print("\n어느 명령에도 반응이 없다.")
+        print("→ 본체를 측정 모드로 두고 Start를 누른 뒤 --read 를 다시 시도할 것.")
+        return 1
+    return 0
+
+
+# ── 시리얼 경로 (시리얼판일 때만) ──────────────────────────────────────────
+
+def cmd_serial(port: str, seconds: float, raw: bool) -> int:
+    try:
+        import serial
+    except ImportError:
+        sys.exit("pyserial이 없다.  pip install pyserial")
+    print(f"{port} 9600 8N1 로 연다...")
+    ser = serial.Serial(port, 9600, timeout=1)
+    sync = FrameSync()
+    frames = 0
+    deadline = time.time() + seconds
     try:
         while time.time() < deadline:
             chunk = ser.read(64)
             if not chunk:
                 continue
-            stats["bytes"] += len(chunk)
-            buf.extend(chunk)
-
-            while True:
-                i = buf.find(MAGIC)
-                if i < 0:
-                    del buf[:-1]  # 매직의 앞바이트만 남긴다
-                    break
-                if i:
-                    del buf[:i]
-                if len(buf) < 4:
-                    break
-
-                mtype = buf[2]
-                need = FRAME_LEN.get(mtype)
-                if need is None:
-                    print(f"  알 수 없는 메시지 타입 0x{mtype:02x} — 1바이트 건너뜀")
-                    del buf[:2]
-                    continue
-                if len(buf) < need:
-                    break
-
-                frame = bytes(buf[:need])
-                del buf[:need]
-                seen_types[mtype] = seen_types.get(mtype, 0) + 1
-
+            for frame in sync.feed(chunk):
+                frames += 1
                 ok = checksum(frame[2:-1]) == frame[-1]
-                if not ok:
-                    stats["bad_crc"] += 1
-                stats["frames"] += 1
-
-                if raw or not ok or mtype != 0x01:
-                    flag = "OK " if ok else "CRC✗"
-                    print(f"[{flag}] type=0x{mtype:02x} {frame.hex(' ')}")
+                if raw or not ok or frame[2] != 0x01:
+                    print(f"  [{'OK ' if ok else 'CRC✗'}] {frame.hex(' ')}")
                     continue
-
                 d = parse_report(frame)
-                if stats["frames"] == 1 or d["device_type"] != 0x02:
-                    dt = d["device_type"]
-                    print(f"  [B1] 디바이스 타입 = 0x{dt:02x} "
-                          f"({DEVICE_TYPE.get(dt, '미상')})"
-                          f"{'' if dt == 0x02 else '  ⚠️ DC(0x02)가 아니다 — 파서 확인 필요'}")
-                print(
-                    f"  V={d['voltage_v']:7.3f}  I={d['current_a']:7.3f}  "
-                    f"P={d['power_w']:8.3f}W  "
-                    f"Ah={d['capacity_ah']:8.2f}  Wh={d['energy_wh']:9.1f}  "
-                    f"T={d['temp_c']:3d}C  t={d['runtime_s']:6d}s  "
-                    f"[17:21]={d['off_17_20']}"
-                )
+                print(f"  V={d['voltage_v']:7.3f}  I={d['current_a']:7.3f}  "
+                      f"Ah={d['capacity_ah']:8.2f}  Wh={d['energy_wh']:9.1f}")
     except KeyboardInterrupt:
         print("\n중단.")
     finally:
         ser.close()
-
-    print("\n--- 결과 ---")
-    print(f"수신 바이트 {stats['bytes']},  프레임 {stats['frames']},  "
-          f"체크섬 실패 {stats['bad_crc']}")
-    if seen_types:
-        print("메시지 타입별: " +
-              ", ".join(f"0x{t:02x}×{n}" for t, n in sorted(seen_types.items())))
-
-    if stats["frames"] == 0:
-        print("\n❌ 프레임이 하나도 안 잡혔다.")
-        if stats["bytes"]:
-            print("   바이트는 오는데 FF 55 동기가 안 된다 → 보율이 9600이 아닐 수 있다.")
-        else:
-            print("   아무 바이트도 안 온다 → 포트가 틀렸거나 데이터 선이 없는 케이블이다.")
-        return 1
-    if stats["bad_crc"] == stats["frames"]:
-        print("\n❌ 전부 체크섬 실패 — 체크섬 규칙이 이 기기에서 다르다.")
-        print("   --raw 로 hex를 떠서 가이드 §3-1과 대조할 것.")
-        return 1
-
-    print("\n✅ 프레임 파싱 성공.")
-    print("   다음에 확인할 것:")
-    print("   - [B2] 알려진 전류로 방전하며 Ah 값이 시간에 따라 늘어나는지")
-    print("          (늘어나면 누적 용량이 맞다. 순간 전력처럼 보이면 파서가 틀린 것)")
-    print("   - [B3] --ping 으로 PX-100 제어 확인")
-    return 0
+    print(f"\n프레임 {frames}개")
+    return 0 if frames else 1
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="BW150 연결 확인")
-    ap.add_argument("--port", help="시리얼 포트 (생략하면 후보를 찾아 알려준다)")
+    ap = argparse.ArgumentParser(description="BW150 연결 확인 (기본 경로는 USB HID)")
+    ap.add_argument("--read", action="store_true", help="HID 입력 리포트를 읽는다")
+    ap.add_argument("--probe", action="store_true", help="스트림 깨우기 명령 시험")
+    ap.add_argument("--serial", metavar="PORT", help="시리얼판일 때의 포트")
     ap.add_argument("--seconds", type=float, default=10.0, help="읽는 시간 (기본 10초)")
     ap.add_argument("--raw", action="store_true", help="파싱 없이 hex만 출력")
-    ap.add_argument("--ping", action="store_true", help="PX-100 제어 명령 시험 (B3)")
     args = ap.parse_args()
 
-    if not args.port:
-        return cmd_list_ports()
-    return cmd_read(args.port, args.seconds, args.raw, args.ping)
+    if args.serial:
+        return cmd_serial(args.serial, args.seconds, args.raw)
+    if args.probe:
+        return cmd_probe()
+    if args.read:
+        return cmd_read(args.seconds, args.raw)
+    return cmd_info()
 
 
 if __name__ == "__main__":
