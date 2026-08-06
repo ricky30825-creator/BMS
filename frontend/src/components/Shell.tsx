@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { Link, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { Bell, Battery, ChartLine, ClipboardList, Gauge, LayoutDashboard, LogOut, Menu, Moon, Settings, ShieldCheck, Siren, Sun, Users, X } from "lucide-react";
-import type { MeResponse, Role } from "../types";
+import type { MeResponse } from "../types";
 import { Logo } from "./ui";
 
 type NavItem = { path: string; label: string; icon: typeof LayoutDashboard; badge?: number };
@@ -70,5 +70,3 @@ export function AppShell({ me, onLogout, onTheme, children }: { me: MeResponse; 
 export function PublicHeader({ onLogin, onSignUp }: { onLogin: () => void; onSignUp: () => void }) {
   return <header className="public-header"><Link to="/"><Logo /></Link><div className="public-actions"><button className="button button-ghost" onClick={onLogin}>로그인</button><button className="button button-primary" onClick={onSignUp}>무료로 시작하기</button></div></header>;
 }
-
-export const roleName: Record<Role, string> = { USER: "일반 사용자", ADMIN: "관리자" };

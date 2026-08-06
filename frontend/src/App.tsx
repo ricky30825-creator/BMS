@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
-import { QueryClient, QueryClientProvider, useQueryClient } from "@tanstack/react-query";
+import { QueryClientProvider, useQueryClient } from "@tanstack/react-query";
 import { AppShell } from "./components/Shell";
 import { Modal } from "./components/ui";
 import { api } from "./api/client";
@@ -10,8 +10,7 @@ import { AdminAuditPage, AdminBatteryPage, AdminEventTrendPage, AdminNoticePage,
 import { AlertsPage, AnomalyPage, BatteryDetailPage, BatteryPage, DashboardPage, EventsPage, NoticesPage, PowerbankDiagnosisPage, RelayPage, SettingsPage, TrendPage } from "./pages/UserPages";
 import { FindPage, LandingPage, LoginPage, SignupPage } from "./pages/PublicPages";
 import type { MeResponse } from "./types";
-
-export const queryClient = new QueryClient({ defaultOptions: { queries: { staleTime: 15_000, refetchOnWindowFocus: true, retry: 1 } } });
+import { queryClient } from "./queryClient";
 
 function ProtectedRoutes({ me, realtime }: { me: MeResponse; realtime: ReturnType<typeof useRealtime> }) {
   const isAdmin = me.user?.role === "ADMIN";
