@@ -5,8 +5,13 @@ async function signIn(page: Page, email: string) {
   await page.getByLabel("이메일").fill(email);
   await page.getByLabel("비밀번호").fill("demo-password");
   await page.getByRole("button", { name: "로그인" }).click();
-  await expect(page).toHaveURL(/\/battery$/);
-  await expect(page.getByRole("heading", { name: "배터리 관리" })).toBeVisible();
+  if (email === "lee@lab.io") {
+    await expect(page).toHaveURL(/\/admin$/);
+    await expect(page.getByRole("heading", { name: "관리자 대시보드" })).toBeVisible();
+  } else {
+    await expect(page).toHaveURL(/\/battery$/);
+    await expect(page.getByRole("heading", { name: "배터리 관리" })).toBeVisible();
+  }
 }
 
 async function connectBattery(page: Page, label: string) {
@@ -82,6 +87,20 @@ test.describe("CellGuard contract flows (MSW)", () => {
 
     await page.locator("aside").getByRole("button", { name: "배터리 운영 관리" }).click();
     await expect(page.getByRole("heading", { name: "배터리 운영 관리" })).toBeVisible();
+    const search = page.getByPlaceholder("배터리 · 소유자 검색");
+    await search.fill("박테스트");
+    const ownerRow = page.getByRole("row").filter({ hasText: "PACK-002" });
+    await expect(ownerRow).toContainText("박테스트");
+    await expect(page.getByRole("row").filter({ hasText: "PACK-001" })).toHaveCount(0);
+    await search.clear();
+    await search.fill("PACK-004");
+    await expect(page.getByRole("row").filter({ hasText: "PACK-004" })).toBeVisible();
+    await expect(page.getByRole("row").filter({ hasText: "PACK-001" })).toHaveCount(0);
+    await search.clear();
+    await page.getByLabel("운영 상태").selectOption("BLOCKED");
+    await expect(page.getByText("조건에 맞는 배터리가 없습니다.")).toBeVisible();
+    await page.getByLabel("운영 상태").selectOption("all");
+    await expect(page.getByRole("row").filter({ hasText: "PACK-003" })).toContainText("측정 없음 · —");
     const row = page.getByRole("row").filter({ hasText: "PACK-001" });
     await expect(row).toBeVisible();
     await row.getByRole("button", { name: "상세" }).click();
@@ -91,19 +110,108 @@ test.describe("CellGuard contract flows (MSW)", () => {
     const status = dialog.getByLabel("다음 상태");
     const statusReason = dialog.getByLabel("상태 변경 사유");
     const memo = dialog.getByLabel("관리자 전용 메모");
+    await expect(memo).toHaveValue("기존 관리자 메모");
+    await expect(dialog.getByText("3S · 11.1V", { exact: true })).toBeVisible();
+    await expect(dialog.getByText("11.9 V", { exact: true })).toBeVisible();
+    await expect(dialog.getByText("78 %", { exact: true })).toBeVisible();
+    await expect(dialog.locator(".detail-list div").filter({ hasText: "연결 진단기" }).locator("strong")).toHaveText("—");
+    await expect(dialog.getByText("운영 로그가 없습니다.")).toBeVisible();
     await expect(dialog.getByRole("button", { name: "상태 저장" })).toBeDisabled();
 
-    const memoRequest = page.waitForRequest((request) => request.method() === "PATCH" && new URL(request.url()).pathname === "/api/admin/batteries/b_pack_001/memo");
-    await memo.fill("현장 확인 메모");
-    await dialog.getByRole("button", { name: "메모 저장" }).click();
-    await memoRequest;
-    await expect(dialog.getByRole("button", { name: "상태 저장" })).toBeDisabled();
+    await memo.fill("내가 작성 중인 초안");
+    await page.evaluate(async () => {
+      const modulePath = "/src/queryClient.ts";
+      const { queryClient } = await import(modulePath);
+      const key = ["admin-battery", "b_pack_001"];
+      const current = queryClient.getQueryData(key) as { info: { adminMemo: string } };
+      queryClient.setQueryData(key, { ...current, info: { ...current.info, adminMemo: "다른 관리자의 최신 메모" } });
+    });
+    await expect(memo).toHaveValue("내가 작성 중인 초안");
+    await expect(dialog.getByText("다른 관리자가 메모를 변경했습니다.", { exact: false })).toBeVisible();
+    await expect(dialog.getByRole("button", { name: "메모 저장" })).toBeDisabled();
+    await dialog.getByRole("button", { name: "서버 메모 불러오기" }).click();
+    await expect(memo).toHaveValue("다른 관리자의 최신 메모");
 
     await status.selectOption("WATCH");
     await statusReason.fill("관찰 상태로 전환");
-    const statusRequest = page.waitForRequest((request) => request.method() === "PATCH" && new URL(request.url()).pathname === "/api/admin/batteries/b_pack_001/ops-status");
-    await dialog.getByRole("button", { name: "상태 저장" }).click();
-    await statusRequest;
+    await memo.fill("  Ａ 현장 확인 메모  ");
+    const [memoRequest, memoResponse, memoRefresh] = await Promise.all([
+      page.waitForRequest((request) => request.method() === "PATCH" && new URL(request.url()).pathname === "/api/admin/batteries/b_pack_001/memo"),
+      page.waitForResponse((response) => response.request().method() === "PATCH" && new URL(response.url()).pathname === "/api/admin/batteries/b_pack_001/memo"),
+      page.waitForResponse((response) => response.request().method() === "GET" && new URL(response.url()).pathname === "/api/admin/batteries/b_pack_001"),
+      dialog.getByRole("button", { name: "메모 저장" }).click(),
+    ]);
+    expect(memoRequest.postDataJSON()).toEqual({ memo: "  Ａ 현장 확인 메모  " });
+    expect(memoResponse.ok()).toBe(true);
+    const memoBody = await memoResponse.json();
+    expect(memoBody).toMatchObject({ memo: "A 현장 확인 메모" });
+    expect(memoBody).not.toHaveProperty("version");
+    expect(memoRefresh.ok()).toBe(true);
+    await expect(memo).toHaveValue("A 현장 확인 메모");
     await expect(status).toHaveValue("WATCH");
+    await expect(statusReason).toHaveValue("관찰 상태로 전환");
+    await expect(dialog.getByRole("button", { name: "상태 저장" })).toBeEnabled();
+
+    await memo.fill("저장하지 않은 후속 메모");
+    const [statusRequest, statusResponse, statusRefresh] = await Promise.all([
+      page.waitForRequest((request) => request.method() === "PATCH" && new URL(request.url()).pathname === "/api/admin/batteries/b_pack_001/ops-status"),
+      page.waitForResponse((response) => response.request().method() === "PATCH" && new URL(response.url()).pathname === "/api/admin/batteries/b_pack_001/ops-status"),
+      page.waitForResponse((response) => response.request().method() === "GET" && new URL(response.url()).pathname === "/api/admin/batteries/b_pack_001"),
+      dialog.getByRole("button", { name: "상태 저장" }).click(),
+    ]);
+    expect(statusRequest.postDataJSON()).toEqual({ opsStatus: "WATCH", reason: "관찰 상태로 전환" });
+    expect(statusResponse.ok()).toBe(true);
+    const statusBody = await statusResponse.json();
+    expect(statusBody).toMatchObject({ opsStatus: "WATCH" });
+    expect(statusBody).not.toHaveProperty("version");
+    expect(statusRefresh.ok()).toBe(true);
+    await expect(status).toHaveValue("WATCH");
+    await expect(memo).toHaveValue("저장하지 않은 후속 메모");
+
+    await dialog.getByRole("button", { name: "닫기" }).click();
+    await row.getByRole("button", { name: "상세" }).click();
+    const reopened = page.getByRole("dialog", { name: "PACK-001 운영 상세" });
+    await expect(reopened.getByLabel("관리자 전용 메모")).toHaveValue("A 현장 확인 메모");
+    await expect(reopened.getByLabel("다음 상태")).toHaveValue("WATCH");
+
+    const limits = await page.evaluate(async () => {
+      const memoResult = await fetch("/api/admin/batteries/b_pack_001/memo", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ memo: "가".repeat(2_001) }) });
+      const reasonResult = await fetch("/api/admin/batteries/b_pack_001/ops-status", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ opsStatus: "BLOCKED", reason: "가".repeat(501) }) });
+      const statusResult = await fetch("/api/admin/batteries/b_pack_001/ops-status", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ opsStatus: "INVALID", reason: "잘못된 상태" }) });
+      return { memo: { status: memoResult.status, body: await memoResult.json() }, reason: { status: reasonResult.status, body: await reasonResult.json() }, status: { status: statusResult.status, body: await statusResult.json() } };
+    });
+    expect(limits.memo).toMatchObject({ status: 422, body: { error: { code: "INPUT_TOO_LONG" } } });
+    expect(limits.reason).toMatchObject({ status: 422, body: { error: { code: "INPUT_TOO_LONG" } } });
+    expect(limits.status).toMatchObject({ status: 400, body: { error: { code: "VALIDATION_FAILED" } } });
+  });
+
+  test("keeps a successful admin PATCH value when the detail refresh fails", async ({ page }) => {
+    await signIn(page, "lee@lab.io");
+    await page.locator("aside").getByRole("button", { name: "배터리 운영 관리" }).click();
+    const row = page.getByRole("row").filter({ hasText: "PACK-001" });
+    await row.getByRole("button", { name: "상세" }).click();
+    const dialog = page.getByRole("dialog", { name: "PACK-001 운영 상세" });
+    const memo = dialog.getByLabel("관리자 전용 메모");
+    await expect(memo).toHaveValue("기존 관리자 메모");
+
+    await page.evaluate(() => {
+      const originalFetch = window.fetch.bind(window);
+      window.fetch = async (input, init) => {
+        const request = input instanceof Request ? input : null;
+        const url = new URL(request?.url ?? String(input), window.location.origin);
+        const method = init?.method ?? request?.method ?? "GET";
+        if (method === "GET" && url.pathname === "/api/admin/batteries/b_pack_001") {
+          return new Response(JSON.stringify({ error: { code: "TEMPORARY_FAILURE", message: "refresh failed" } }), { status: 500, headers: { "Content-Type": "application/json" } });
+        }
+        return originalFetch(input, init);
+      };
+    });
+
+    await memo.fill("  Ｂ 저장 성공  ");
+    const patchResponse = page.waitForResponse((response) => response.request().method() === "PATCH" && new URL(response.url()).pathname === "/api/admin/batteries/b_pack_001/memo");
+    await dialog.getByRole("button", { name: "메모 저장" }).click();
+    expect((await patchResponse).ok()).toBe(true);
+    await expect(dialog).toBeVisible();
+    await expect(memo).toHaveValue("B 저장 성공");
   });
 });

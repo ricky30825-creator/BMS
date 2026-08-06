@@ -7,7 +7,7 @@ import type { Dashboard, Diagnosis, MeResponse, Relay, WsEnvelope } from "../typ
 export type RealtimeState = "idle" | "loading" | "connecting" | "live" | "reconnecting" | "offline" | "expired" | "resyncing";
 export type ReconnectIntent = "initial" | "resume" | "resync";
 
-export const realtimeTopics = ["metrics", "anomaly", "relay", "alert", "event", "session"] as const;
+export const realtimeTopics = ["metrics", "anomaly", "relay", "alert", "event", "session", "diagnosis"] as const;
 
 export type ClientWsMessage =
   | { v: 1; type: "subscribe"; payload: { requestId: string; topics: readonly string[]; afterCursor: string } }
@@ -33,6 +33,13 @@ export function buildPingMessage(): ClientWsMessage {
 export function sequenceIsNew(next: string | undefined, previous: string | null): boolean {
   if (!next || previous === null) return true;
   try { return BigInt(next) > BigInt(previous); } catch { return next !== previous; }
+}
+
+export function applyDiagnosisEvent(current: Diagnosis | null | undefined, type: string, payload: unknown): Diagnosis | null | undefined {
+  if (type === "diagnosis.done") return payload as Diagnosis;
+  if (type === "diagnosis.progress") return current ? { ...current, ...(payload as Partial<Diagnosis>), status: "RUNNING" } : current;
+  if (type === "diagnosis.aborted") return current ? { ...current, ...(payload as Partial<Diagnosis>), status: "ABORTED" } : current;
+  return current;
 }
 
 function socketUrl(): string {
@@ -162,6 +169,18 @@ export function useRealtime({ enabled, sessionKey, onAutoCut, onSessionEnded, on
           else if (envelope.type === "relay.changed") setDashboard((current) => current ? { ...current, relay: envelope.payload as Relay } : current);
           else if (envelope.type === "relay.autoCut") callbacks.current.onAutoCut(envelope.payload);
           else if (envelope.type === "session.ended") callbacks.current.onSessionEnded();
+          else if (envelope.type === "diagnosis.progress" || envelope.type === "diagnosis.done" || envelope.type === "diagnosis.aborted") {
+            const payload = envelope.payload as Partial<Diagnosis>;
+            const current = queryClient.getQueryData<Diagnosis | null>(["diagnosis"]);
+            const next = applyDiagnosisEvent(current, envelope.type, payload);
+            queryClient.setQueryData(["diagnosis"], envelope.type === "diagnosis.done" || envelope.type === "diagnosis.aborted" ? null : next);
+            void queryClient.invalidateQueries({ queryKey: ["diagnosis"] });
+            if (payload.id) {
+              if (envelope.type === "diagnosis.done") queryClient.setQueryData(["diagnosis-detail", payload.id], payload as Diagnosis);
+              void queryClient.invalidateQueries({ queryKey: ["diagnosis-detail", payload.id] });
+            }
+            if (envelope.type !== "diagnosis.progress") void queryClient.invalidateQueries({ queryKey: ["diagnosis-history"] });
+          }
           else if (envelope.type === "resync.required") {
             setState("resyncing");
             void resyncQueries().then(() => {

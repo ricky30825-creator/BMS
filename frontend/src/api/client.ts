@@ -16,6 +16,29 @@ export class ApiError extends Error {
   }
 }
 
+type AuthFailureListener = (error: ApiError) => void;
+const authFailureListeners = new Set<AuthFailureListener>();
+const globalAuthFailureCodes = new Set<string>(["UNAUTHENTICATED", "ACCOUNT_SUSPENDED", "SESSION_EXPIRED", "AUTH_EXPIRED"]);
+const credentialEntryPaths = new Set(["/api/auth/sign-in/email", "/api/demo/login"]);
+
+export function subscribeAuthFailure(listener: AuthFailureListener): () => void {
+  authFailureListeners.add(listener);
+  return () => { authFailureListeners.delete(listener); };
+}
+
+export function isGlobalAuthFailure(path: string, code: string): boolean {
+  return !credentialEntryPaths.has(path.split("?")[0]) && globalAuthFailureCodes.has(code);
+}
+
+function apiError(response: Response, body: unknown, path: string): ApiError {
+  const value = body as { error?: { code?: string; message?: string; details?: Record<string, unknown> } } | null;
+  const error = new ApiError(response.status, (value?.error?.code ?? "UNKNOWN") as ErrorCode, value?.error?.message ?? response.statusText, value?.error?.details);
+  if (isGlobalAuthFailure(path, error.code)) {
+    for (const listener of [...authFailureListeners]) listener(error);
+  }
+  return error;
+}
+
 function toApiPath(path: string): string {
   return `${API_BASE}${path.startsWith("/") ? path : `/${path}`}`;
 }
@@ -32,8 +55,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const response = await fetch(toApiPath(path), { ...init, headers, credentials: "include" });
   const body = await readBody(response);
   if (!response.ok) {
-    const value = body as { error?: { code?: string; message?: string; details?: Record<string, unknown> } } | null;
-    throw new ApiError(response.status, (value?.error?.code ?? "UNKNOWN") as ErrorCode, value?.error?.message ?? response.statusText, value?.error?.details);
+    throw apiError(response, body, path);
   }
   return body as T;
 }
@@ -50,8 +72,7 @@ export const api = {
     const query = params?.toString() ? `?${params.toString()}` : "";
     const response = await fetch(toApiPath(`${path}${query}`), { credentials: "include" });
     if (!response.ok) {
-      const body = await readBody(response) as { error?: { code?: string; message?: string } } | null;
-      throw new ApiError(response.status, (body?.error?.code ?? "UNKNOWN") as ErrorCode, body?.error?.message ?? response.statusText);
+      throw apiError(response, await readBody(response), path);
     }
     return response.blob();
   },

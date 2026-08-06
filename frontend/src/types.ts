@@ -98,6 +98,38 @@ export type Battery = {
   diagnosisCapability?: DiagnosisCapability;
 };
 
+export type AdminBatteryListItem = {
+  id: string;
+  label: string;
+  owner: Pick<ApiUser, "id" | "name">;
+  maker: string | null;
+  model: string | null;
+  chemistry: Battery["chemistry"];
+  seriesCount: number | null;
+  mode: Mode;
+  score: number | null;
+  grade: Grade | null;
+  opsStatus: OpsStatus;
+  latest: { tempC: number | null; voltageV: number | null; socPct: number | null; measuredAt: string | null } | null;
+};
+
+export type AdminBatteryDetail = AdminBatteryListItem & {
+  info: {
+    seriesConfig: string;
+    device: { id: string; label: string; status: string } | null;
+    adminMemo: string;
+  };
+  opsLogs: Array<{ at: string; severity: EventSeverity; code: string; params?: Record<string, unknown> }>;
+};
+
+export type AdminStatusMutationResponse = {
+  opsStatus: OpsStatus;
+  updatedAt: string;
+  updatedBy: string;
+};
+
+export type AdminMemoMutationResponse = { memo: string; updatedAt: string; updatedBy: string };
+
 export type MetricValue = { value: number | null; status: MetricStatus; ageMs?: number; freshness?: "FRESH" | "STALE" };
 
 export type DashboardMetrics = {

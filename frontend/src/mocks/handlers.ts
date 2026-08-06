@@ -1,8 +1,15 @@
 import { http, HttpResponse } from "msw";
-import type { AlertChannels, AlertSettings, Battery, Diagnosis, DiagnosisListItem, Grade, MeResponse, Relay } from "../types";
+import type { AdminBatteryDetail, AdminBatteryListItem, AlertChannels, AlertSettings, Battery, Diagnosis, DiagnosisListItem, Grade, MeResponse, Relay } from "../types";
 
 const now = () => new Date().toISOString();
 const randomId = () => typeof crypto !== "undefined" && typeof crypto.randomUUID === "function" ? crypto.randomUUID() : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+export function normalizeAdminInput(value: unknown, maxLength: number, allowEmpty: boolean): string {
+  if (typeof value !== "string") throw new Error("VALIDATION_FAILED");
+  const normalized = value.normalize("NFKC").trim();
+  if (!allowEmpty && !normalized) throw new Error("REASON_REQUIRED");
+  if (normalized.length > maxLength) throw new Error("INPUT_TOO_LONG");
+  return normalized;
+}
 const grade = (score: number): Grade => score < .3 ? "NORMAL" : score < .6 ? "CAUTION" : score < .8 ? "WARNING" : "DANGER";
 const baseMetric = (score: number, temp: number, soc: number | null) => ({ voltageV: 11.9, currentA: -2.4, powerW: -28.56, representativeTempC: temp, representativeTempSource: "CONTACT" as const, tempContact: temp, tempIrSurface: temp - 1.6, socPct: soc, socBasis: "ABSOLUTE_GAUGE" as const, score, grade: grade(score), measuredAt: now() });
 const metricStatus = (value: number | null) => value == null ? null : value >= 60 ? "CRIT" : value >= 55 ? "WARN" : "OK";
@@ -12,6 +19,8 @@ const batteries: Battery[] = [
   { id: "b_pack_003", label: "PACK-003", chemistry: "LI_ION", seriesCount: 3, maker: "CellGuard Lab", model: "3S bench pack", targetMode: 1, capacityWh: null, ratedOutputCurrentA: null, opsStatus: "NORMAL", latest: null, health: null, diagnosisCapability: { executionAllowed: false, reasonCode: "MODE_NOT_SUPPORTED" } },
   { id: "b_pack_004", label: "PACK-004", chemistry: "LI_PO", seriesCount: null, maker: "CellGuard Lab", model: "Validated Mode 2", targetMode: 2, capacityWh: 37, ratedOutputCurrentA: 2, opsStatus: "NORMAL", latest: { ...baseMetric(.24, 42, null), voltageV: 5.05, currentA: -1, powerW: -5.05, representativeTempSource: "IR_SURFACE", tempContact: null, tempIrSurface: 42, socBasis: "RELATIVE_SESSION_START" }, health: null, diagnosisCapability: { executionAllowed: true, reasonCode: null } },
 ];
+batteries[0].adminMemo = "기존 관리자 메모";
+batteries.forEach((battery) => { battery.adminMemo ??= ""; });
 const demoUser: NonNullable<MeResponse["user"]> = { id: "u_hong", loginId: "hong", name: "홍길동", email: "hong@cellguard.io", phone: "010-1234-5678", role: "USER", status: "ACTIVE" };
 let currentUser: MeResponse["user"] = null;
 let session: MeResponse["activeSession"] = null;
@@ -44,6 +53,30 @@ const startDiagnosis = async (kind: "quick" | "capacity", request: Request) => {
   return HttpResponse.json(diagnosis, { status: 202 });
 };
 const users = [demoUser, { id: "u_admin", loginId: "lee", name: "이연구", email: "lee@lab.io", role: "ADMIN" as const, status: "ACTIVE" as const, phone: "010-3456-7890" }, { id: "u_park", loginId: "parktest", name: "박테스트", email: "park@test.io", role: "USER" as const, status: "SUSPENDED" as const, phone: "010-4567-8901" }];
+const batteryOwner = (battery: Battery) => battery.id === "b_pack_002" ? { id: users[2].id, name: users[2].name } : battery.id === "b_pack_003" ? { id: users[1].id, name: users[1].name } : { id: demoUser.id, name: demoUser.name };
+const adminBatteryListItem = (battery: Battery): AdminBatteryListItem => ({
+  id: battery.id,
+  label: battery.label,
+  owner: batteryOwner(battery),
+  maker: battery.maker,
+  model: battery.model,
+  chemistry: battery.chemistry,
+  seriesCount: battery.seriesCount,
+  mode: battery.targetMode,
+  score: battery.latest?.score ?? null,
+  grade: battery.latest?.grade ?? null,
+  opsStatus: battery.opsStatus,
+  latest: battery.latest ? { tempC: battery.latest.representativeTempC, voltageV: battery.latest.voltageV, socPct: battery.latest.socPct, measuredAt: battery.latest.measuredAt } : null,
+});
+const adminBatteryDetail = (battery: Battery): AdminBatteryDetail => ({
+  ...adminBatteryListItem(battery),
+  info: {
+    seriesConfig: battery.seriesCount ? `${battery.seriesCount}S · ${(battery.seriesCount * 3.7).toFixed(1)}V` : "—",
+    device: session?.batteryId === battery.id ? { id: "d_demo", label: "진단기 A", status: "ONLINE" } : null,
+    adminMemo: battery.adminMemo ?? "",
+  },
+  opsLogs: [],
+});
 
 export const handlers = [
   http.post("/api/auth/sign-in/email", async ({ request }) => { const body = await request.json() as { email?: string }; const email = body.email?.toLowerCase(); if (email === "lee@lab.io") currentUser = users[1]; else if (email === "hong@cellguard.io") currentUser = users[0]; else return bad(401, "UNAUTHENTICATED"); return HttpResponse.json({ user: currentUser }); }),
@@ -88,9 +121,10 @@ export const handlers = [
   http.get("/api/admin/event-trend", () => HttpResponse.json({ buckets: ["월", "화", "수", "목", "금", "토", "일"], series: [{ grade: "CAUTION", values: [2, 3, 1, 4, 2, 1, 3] }, { grade: "WARNING", values: [1, 2, 1, 2, 1, 0, 2] }, { grade: "DANGER", values: [0, 1, 0, 1, 0, 0, 1] }] })),
   http.get("/api/admin/users", () => HttpResponse.json(page(users.map((user) => ({ ...user, batteryCount: user.id === "u_hong" ? 2 : 0 }))))),
   http.patch("/api/admin/users/:id", async ({ params, request }) => { const body = await request.json() as { status: "ACTIVE" | "SUSPENDED" }; const user = users.find((item) => item.id === params.id); if (!user) return bad(404, "NOT_FOUND"); user.status = body.status; return HttpResponse.json(user); }),
-  http.get("/api/admin/batteries", () => HttpResponse.json(page(batteries.map((item) => ({ ...item, owner: currentUser }))))),
-  http.patch("/api/admin/batteries/:id/ops-status", () => HttpResponse.json({ opsStatus: "WATCH", version: 1, updatedAt: now(), updatedBy: currentUser?.name })),
-  http.patch("/api/admin/batteries/:id/memo", () => HttpResponse.json({ memo: "저장된 메모", version: 1, updatedAt: now(), updatedBy: currentUser?.name })),
+  http.get("/api/admin/batteries", ({ request }) => { const query = new URL(request.url).searchParams; const q = query.get("q")?.normalize("NFKC").trim().toLocaleLowerCase() ?? ""; const opsStatus = query.get("opsStatus"); const items = batteries.filter((battery) => { const owner = batteryOwner(battery); return (!q || battery.label.toLocaleLowerCase().includes(q) || owner.name.toLocaleLowerCase().includes(q)) && (!opsStatus || battery.opsStatus === opsStatus); }).map(adminBatteryListItem); return HttpResponse.json(page(items)); }),
+  http.get("/api/admin/batteries/:id", ({ params }) => { const battery = batteries.find((item) => item.id === params.id); return battery ? HttpResponse.json(adminBatteryDetail(battery)) : bad(404, "NOT_FOUND"); }),
+  http.patch("/api/admin/batteries/:id/ops-status", async ({ params, request }) => { const battery = batteries.find((item) => item.id === params.id); if (!battery) return bad(404, "NOT_FOUND"); const body = await request.json() as { opsStatus?: unknown; reason?: unknown }; if (!body.opsStatus || !["NORMAL", "WATCH", "BLOCKED"].includes(String(body.opsStatus))) return bad(400, "VALIDATION_FAILED"); try { normalizeAdminInput(body.reason, 500, false); } catch (error) { return bad(422, (error as Error).message); } if (body.opsStatus === battery.opsStatus) return bad(409, "NO_STATUS_CHANGE"); battery.opsStatus = body.opsStatus as Battery["opsStatus"]; return HttpResponse.json({ opsStatus: battery.opsStatus, updatedAt: now(), updatedBy: currentUser?.name }); }),
+  http.patch("/api/admin/batteries/:id/memo", async ({ params, request }) => { const battery = batteries.find((item) => item.id === params.id); if (!battery) return bad(404, "NOT_FOUND"); const body = await request.json() as { memo?: unknown }; try { battery.adminMemo = normalizeAdminInput(body.memo, 2_000, true); } catch (error) { return bad(422, (error as Error).message); } return HttpResponse.json({ memo: battery.adminMemo, updatedAt: now(), updatedBy: currentUser?.name }); }),
   http.get("/api/admin/audit-logs", () => HttpResponse.json(page([]))),
   http.get("/api/admin/notices", () => HttpResponse.json({ items: [] })),
 ];
