@@ -1,5 +1,5 @@
 import { useEffect, useRef, type ReactNode } from "react";
-import { Check, ChevronLeft, ChevronRight, CircleAlert, LoaderCircle, X } from "lucide-react";
+import { Check, ChevronLeft, ChevronRight, CircleAlert, LoaderCircle, X, Zap } from "lucide-react";
 import { format, formatDistanceToNowStrict, isValid, parseISO } from "date-fns";
 import { ko } from "date-fns/locale";
 import type { Grade, MetricStatus } from "../types";
@@ -46,7 +46,7 @@ export function MetricStatusBadge({ status }: { status: MetricStatus }) {
 }
 
 export function Logo({ inverse = false }: { inverse?: boolean }) {
-  return <div className={`logo ${inverse ? "logo-inverse" : ""}`}><span className="logo-mark" aria-hidden="true">⌁</span><span>셀가드</span></div>;
+  return <div className={`logo ${inverse ? "logo-inverse" : ""}`}><span className="logo-mark" aria-hidden="true"><Zap size={17} strokeWidth={2.5} /></span><span>셀가드</span></div>;
 }
 
 export function Button({ children, variant = "secondary", type = "button", disabled, loading, onClick, className = "", title }: {

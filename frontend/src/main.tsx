@@ -3,6 +3,7 @@ import ReactDOM from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
 import App from "./App";
 import "./styles.css";
+import "./styles-v3.css";
 
 async function start() {
   const mockRequested = import.meta.env.VITE_USE_MOCKS === "true"
