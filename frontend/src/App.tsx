@@ -104,6 +104,9 @@ function AppContent() {
   const meQuery = useMe();
   const navigate = useNavigate();
   const qc = useQueryClient();
+  const demoMode = __CELLGUARD_DEV_SERVER__ && import.meta.env.VITE_DEMO_MODE === "true";
+  const demoLoginStarted = useRef(false);
+  const [demoLoginPending, setDemoLoginPending] = useState(demoMode);
   const [autoCut, setAutoCut] = useState<Record<string, unknown> | null>(null);
   const me = meQuery.data;
   const meRef = useRef(me);
@@ -120,9 +123,17 @@ function AppContent() {
   const realtime = useRealtime({ sessionKey: me?.activeSession?.id, enabled: Boolean(me?.activeSession), onAutoCut: (payload) => setAutoCut((payload ?? {}) as Record<string, unknown>), onSessionEnded: () => { void meQuery.refetch(); navigate("/battery"); }, onAuthFailure: handleAuthFailure });
   const theme = me?.preferences?.theme ?? "light";
   useEffect(() => { const root = document.documentElement; const systemDark = window.matchMedia?.("(prefers-color-scheme: dark)").matches; root.dataset.theme = theme === "system" ? (systemDark ? "dark" : "light") : theme; }, [theme]);
+  useEffect(() => {
+    if (!demoMode || demoLoginStarted.current || meQuery.isPending || me?.user) return;
+    demoLoginStarted.current = true;
+    void api.signIn("hong@cellguard.io", "demo-password")
+      .then((signedIn) => { qc.setQueryData<MeResponse>(["me"], signedIn); })
+      .catch(() => undefined)
+      .finally(() => setDemoLoginPending(false));
+  }, [demoMode, me?.user, meQuery.isPending, qc]);
   const signInComplete = async () => { const result = await meQuery.refetch(); if (result.data?.user) navigate(authenticatedLandingPath(result.data)); };
   const signOut = async () => { try { await api.signOut(); } finally { qc.clear(); navigate("/"); } };
-  if (meQuery.isPending) return <div className="boot-screen"><div className="boot-mark">⌁</div><p>셀가드 관제를 준비하는 중입니다.</p></div>;
+  if (meQuery.isPending || demoLoginPending) return <div className="boot-screen"><div className="boot-mark">⌁</div><p>셀가드 관제를 준비하는 중입니다.</p></div>;
   if (!me?.user) return <PublicRoutes onSignedIn={signInComplete} />;
   return <><AppShell me={me} onLogout={signOut} onTheme={async (next) => { try { const preferences = await api.updatePreferences({ ...(me.preferences ?? { theme: "light", lang: "ko" }), theme: next }); qc.setQueryData<MeResponse>(["me"], (current) => current ? { ...current, preferences } : current); } catch { /* settings page exposes the failure */ } }}><ProtectedRoutes me={me} realtime={realtime} /></AppShell>{autoCut && <Modal title="서버 Fail-Safe · 자동 릴레이 차단" description="서버가 독립 안전 조건을 확정하여 릴레이를 자동으로 차단했습니다." onClose={() => setAutoCut(null)}><div className="auto-cut-panel"><div className="auto-cut-icon"><ShieldAlertIcon /></div><div><strong>대상 배터리</strong><span>{String(autoCut.batteryLabel ?? "—")}</span></div><div><strong>감지 온도</strong><span className="mono">{autoCut.representativeTempC == null ? "—" : `${String(autoCut.representativeTempC)} °C`}</span></div><div><strong>트리거</strong><span className="mono">{String(autoCut.triggerCode ?? "—")}</span></div></div><div className="modal-actions"><button className="button button-primary" onClick={() => setAutoCut(null)}>확인</button></div></Modal>}</>;
 }
