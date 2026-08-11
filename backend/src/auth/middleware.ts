@@ -5,6 +5,7 @@ import { auth, type AuthSession } from "../auth.js";
 import { db } from "../db.js";
 import { writeAuditLog } from "./audit.js";
 import { env } from "../config/env.js";
+import { recordAudit, userById } from "../store.js";
 
 export type AppRole = "USER" | "ADMIN";
 
@@ -16,7 +17,7 @@ export type AppUser = {
   status: "ACTIVE" | "SUSPENDED";
 };
 
-const demoTokens = new Map<string, AppUser>();
+const demoTokens = new Map<string, string>();
 const DEMO_PASSWORD = "demo-password";
 const demoPasswords = new Map<string, string>();
 
@@ -40,15 +41,15 @@ async function getUserProfile(userId: string): Promise<{ role: AppRole; status: 
 
 export function issueDemoToken(user: AppUser): string {
   const token = `demo_${randomUUID()}`;
-  demoTokens.set(token, { ...user });
+  demoTokens.set(token, user.id);
   return token;
 }
 
 export function demoUserForToken(token: string | null | undefined): AppUser | null {
   if (!env.DEMO_MODE || !token) return null;
-  const issued = demoTokens.get(token);
-  if (issued) return { ...issued };
-  return null;
+  const userId = demoTokens.get(token);
+  const user = userId ? userById(userId) : undefined;
+  return user ? { id: user.id, email: user.email, name: user.name, role: user.role, status: user.status } : null;
 }
 
 export function revokeDemoToken(token: string | null | undefined): void {
@@ -78,6 +79,11 @@ async function getSessionFromRequest(req: Request): Promise<AuthSession> {
 export async function requireSession(req: Request, res: Response, next: NextFunction): Promise<void> {
   const demoUser = demoUserFromRequest(req);
   if (demoUser) {
+    if (demoUser.status === "SUSPENDED") {
+      recordAudit({ actorId: demoUser.id, action: "SUSPENDED_ACCESS_DENIED", resource: req.originalUrl, result: "DENIED", reason: "account suspended" });
+      res.status(403).json({ error: { code: "ACCOUNT_SUSPENDED", message: "The account is suspended." } });
+      return;
+    }
     req.appUser = demoUser;
     req.userRole = demoUser.role;
     next();
@@ -90,7 +96,7 @@ export async function requireSession(req: Request, res: Response, next: NextFunc
   const session = await getSessionFromRequest(req);
 
   if (!session) {
-    res.status(401).json({ error: "UNAUTHENTICATED" });
+    res.status(401).json({ error: { code: "UNAUTHENTICATED", message: "Authentication is required." } });
     return;
   }
 
@@ -116,17 +122,15 @@ export function requireRole(role: AppRole) {
   return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     const demoUser = demoUserFromRequest(req);
     if (demoUser) {
+      if (demoUser.status === "SUSPENDED") {
+        recordAudit({ actorId: demoUser.id, action: "SUSPENDED_ACCESS_DENIED", resource: req.originalUrl, result: "DENIED", reason: "account suspended" });
+        res.status(403).json({ error: { code: "ACCOUNT_SUSPENDED", message: "The account is suspended." } });
+        return;
+      }
       req.appUser = demoUser;
       req.userRole = demoUser.role;
       if (demoUser.role !== role) {
-        await writeAuditLog({
-          req,
-          actorUserId: demoUser.id,
-          action: "ADMIN_ACCESS_DENIED",
-          resource: req.originalUrl,
-          result: "DENIED",
-          reason: `required role ${role}`
-        });
+        recordAudit({ actorId: demoUser.id, action: "ADMIN_ACCESS_DENIED", resource: req.originalUrl, result: "DENIED", reason: `required role ${role}` });
         res.status(403).json({ error: { code: "FORBIDDEN", message: "Required role is not present." } });
         return;
       }
@@ -147,7 +151,7 @@ export function requireRole(role: AppRole) {
         result: "DENIED",
         reason: "unauthenticated"
       });
-      res.status(401).json({ error: "UNAUTHENTICATED" });
+      res.status(401).json({ error: { code: "UNAUTHENTICATED", message: "Authentication is required." } });
       return;
     }
 
@@ -176,7 +180,7 @@ export function requireRole(role: AppRole) {
         result: "DENIED",
         reason: `required role ${role}`
       });
-      res.status(403).json({ error: "FORBIDDEN" });
+      res.status(403).json({ error: { code: "FORBIDDEN", message: "Required role is not present." } });
       return;
     }
 

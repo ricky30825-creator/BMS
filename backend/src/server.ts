@@ -6,7 +6,7 @@ import express, { type NextFunction, type Request, type Response } from "express
 import { fromNodeHeaders, toNodeHandler } from "better-auth/node";
 import { auth } from "./auth.js";
 import { corsOrigins, env } from "./config/env.js";
-import { demoPasswordMatches, demoUserForToken, issueDemoToken, requireRole, requireSession, setDemoPassword } from "./auth/middleware.js";
+import { demoPasswordMatches, demoUserForToken, issueDemoToken, requireRole, requireSession, revokeDemoToken, setDemoPassword } from "./auth/middleware.js";
 import { writeAuditLog } from "./auth/audit.js";
 import {
   F21_THRESHOLDS,
@@ -310,6 +310,20 @@ app.post("/api/demo/login", (req, res) => {
   const token = issueDemoToken({ id: user.id, email: user.email, name: user.name, role: user.role, status: user.status });
   recordAudit({ actorId: user.id, action: "ADMIN_LOGIN", resource: "/api/demo/login", result: "SUCCESS", reason: null });
   res.json({ token, user: { id: user.id, name: user.name, email: user.email, role: user.role, status: user.status } });
+});
+
+app.post("/api/demo/logout", (req, res) => {
+  if (!env.DEMO_MODE) {
+    apiError(res, 404, "NOT_FOUND", "Demo authentication is disabled.");
+    return;
+  }
+  const token = req.get("authorization")?.match(/^Demo\s+(.+)$/i)?.[1];
+  if (!demoUserForToken(token)) {
+    apiError(res, 401, "UNAUTHENTICATED", "The demo token is invalid.");
+    return;
+  }
+  revokeDemoToken(token);
+  res.status(204).send();
 });
 
 // The repository-backed demo store is intentionally explicit.  A production
@@ -919,7 +933,7 @@ httpServer.on("upgrade", async (req: IncomingMessage, socket: Socket) => {
   let role: "USER" | "ADMIN";
   if (env.DEMO_MODE) {
     const demoUser = demoUserForToken(url.searchParams.get("access_token"));
-    if (!demoUser) { closeUnauthenticated(socket, 401, "Unauthorized"); return; }
+    if (!demoUser || demoUser.status === "SUSPENDED") { closeUnauthenticated(socket, demoUser ? 403 : 401, demoUser ? "Forbidden" : "Unauthorized"); return; }
     userId = demoUser.id;
     role = demoUser.role;
   } else {

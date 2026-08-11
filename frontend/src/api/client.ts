@@ -25,7 +25,7 @@ export class ApiError extends Error {
 type AuthFailureListener = (error: ApiError) => void;
 const authFailureListeners = new Set<AuthFailureListener>();
 const globalAuthFailureCodes = new Set<string>(["UNAUTHENTICATED", "ACCOUNT_SUSPENDED", "SESSION_EXPIRED", "AUTH_EXPIRED"]);
-const credentialEntryPaths = new Set(["/api/auth/sign-in/email", "/api/demo/login"]);
+const credentialEntryPaths = new Set(["/api/auth/sign-in/email", "/api/demo/login", "/api/demo/logout"]);
 
 export function subscribeAuthFailure(listener: AuthFailureListener): () => void {
   authFailureListeners.add(listener);
@@ -52,6 +52,10 @@ function toApiPath(path: string): string {
 export function demoAuthorization(path: string, token: string | null, enabled = demoTransportEnabled()): string | null {
   if (!enabled || !token || path.startsWith("/api/auth/") || path === "/api/demo/login") return null;
   return `Demo ${token}`;
+}
+
+export function signOutPath(demoEnabled = demoTransportEnabled()): string {
+  return demoEnabled ? "/api/demo/logout" : "/api/auth/sign-out";
 }
 
 function withDemoAuthorization(path: string, headers: Headers): void {
@@ -100,7 +104,7 @@ export const api = {
   me: () => request<MeResponse>("/api/me"),
   signOut: async () => {
     try {
-      await request<void>("/api/auth/sign-out", { method: "POST" });
+      await request<void>(signOutPath(), { method: "POST" });
     } finally {
       demoToken = null;
     }

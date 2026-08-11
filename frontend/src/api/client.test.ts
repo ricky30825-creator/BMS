@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { api, demoAuthorization, isGlobalAuthFailure, subscribeAuthFailure } from "./client";
+import { api, demoAuthorization, isGlobalAuthFailure, signOutPath, subscribeAuthFailure } from "./client";
 
 function failedResponse(status: number, code: string): Response {
   return new Response(JSON.stringify({ error: { code, message: code } }), {
@@ -55,6 +55,7 @@ describe("global REST authentication failures", () => {
   it("keeps role denial separate from authentication expiry", () => {
     expect(isGlobalAuthFailure("/api/admin/overview", "FORBIDDEN")).toBe(false);
     expect(isGlobalAuthFailure("/api/batteries", "SESSION_EXPIRED")).toBe(true);
+    expect(isGlobalAuthFailure("/api/demo/logout", "UNAUTHENTICATED")).toBe(false);
   });
 
   it("omits demo authorization from Better Auth and production requests", async () => {
@@ -78,6 +79,9 @@ describe("global REST authentication failures", () => {
     expect(demoAuthorization("/api/metrics/export.csv", "demo-token", true)).toBe("Demo demo-token");
     expect(demoAuthorization("/api/auth/sign-in/email", "demo-token", true)).toBeNull();
     expect(demoAuthorization("/api/demo/login", "demo-token", true)).toBeNull();
+    expect(demoAuthorization("/api/demo/logout", "demo-token", true)).toBe("Demo demo-token");
     expect(demoAuthorization("/api/me", "demo-token", false)).toBeNull();
+    expect(signOutPath(true)).toBe("/api/demo/logout");
+    expect(signOutPath(false)).toBe("/api/auth/sign-out");
   });
 });
