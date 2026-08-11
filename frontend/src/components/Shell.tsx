@@ -1,8 +1,9 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { Link, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { Bell, Battery, ChartLine, ClipboardList, Gauge, Globe2, LayoutDashboard, LogOut, Menu, Moon, Settings, ShieldCheck, Siren, Sun, Users, X } from "lucide-react";
-import type { MeResponse } from "../types";
-import { Logo } from "./ui";
+import { useAlerts } from "../api/hooks";
+import type { Alert, MeResponse } from "../types";
+import { formatDateTime, Logo } from "./ui";
 
 type NavItem = { path: string; label: string; icon: typeof LayoutDashboard; badge?: number };
 const userNav: NavItem[] = [
@@ -27,7 +28,7 @@ const adminNav: NavItem[] = [
 ];
 
 const pageMeta: Record<string, [string, string]> = {
-  "/dashboard": ["실시간 관제", "PACK-001 · 세션 진행 중"],
+  "/dashboard": ["실시간 관제", ""],
   "/battery": ["배터리 관리", "저장된 배터리 선택 · 새 배터리 등록"],
   "/anomaly": ["이상 탐지 관리", "AI 이상점수 · 위험도 분포"],
   "/trend": ["추세 차트", "기간·지표별 시계열 조회"],
@@ -45,6 +46,16 @@ const pageMeta: Record<string, [string, string]> = {
   "/adminAudit": ["감사 로그", "관리자 조작과 안전 제어 기록"],
 };
 
+function pageMetaFor(pathname: string, me: MeResponse, isAdmin: boolean): [string, string] {
+  const meta = pageMeta[pathname] ?? [isAdmin ? "운영 콘솔" : "배터리 안전 관제", ""];
+  if (pathname === "/dashboard") return [meta[0], me.activeSession ? `${me.activeSession.batteryLabel} · 세션 진행 중` : "활성 측정 세션 없음"];
+  return meta;
+}
+
+function notificationTitle(alert: Alert): string {
+  return ({ TEMP_THRESHOLD_EXCEEDED: "온도 임계값 초과", CURRENT_CHANGE_SPIKE: "전류 변화량 급상승", SOC_DROP: "SOC 급락 감지", DEVICE_HEARTBEAT_MISSED: "디바이스 하트비트 미수신" } as Record<string, string>)[alert.titleCode] ?? alert.titleCode;
+}
+
 export function AppShell({ me, onLogout, onTheme, children }: { me: MeResponse; onLogout: () => Promise<void>; onTheme: (theme: "light" | "dark" | "system") => void; children?: ReactNode }) {
   const location = useLocation();
   const navigate = useNavigate();
@@ -59,6 +70,7 @@ export function AppShell({ me, onLogout, onTheme, children }: { me: MeResponse; 
     badge: item.path === "/alertHistory" ? me.unreadAlertCount : item.path === "/anomaly" ? me.activeAnomalyCount : undefined,
   }));
   const locked = !isAdmin && !connected;
+  const notifications = useAlerts(new URLSearchParams({ page: "1", size: "3" }), notificationOpen);
   const isActive = (path: string) => location.pathname === path || (path === "/battery" && location.pathname.startsWith("/battery/"));
   const showNotice = (message: string) => { setNotice(message); window.setTimeout(() => setNotice(""), 3200); };
 
@@ -82,12 +94,12 @@ export function AppShell({ me, onLogout, onTheme, children }: { me: MeResponse; 
     </div>
   </>;
 
-  const [pageTitle, pageSub] = pageMeta[location.pathname] ?? [isAdmin ? "운영 콘솔" : "배터리 안전 관제", ""];
+  const [pageTitle, pageSub] = pageMetaFor(location.pathname, me, isAdmin);
 
   return <div className="app-shell">
     <aside className={`sidebar ${collapsed ? "collapsed" : ""} ${mobileOpen ? "mobile-open" : ""}`}>{navContent}<button className="collapse-button" onClick={() => setCollapsed((value) => !value)} aria-label={collapsed ? "사이드바 펼치기" : "사이드바 접기"}>{collapsed ? <Menu size={18} /> : <X size={18} />}</button></aside>
     {mobileOpen && <button className="mobile-scrim" aria-label="메뉴 닫기" onClick={() => setMobileOpen(false)} />}
-    <main className="main-column"><header className="topbar"><button className="mobile-menu-button icon-button" onClick={() => setMobileOpen(true)} aria-label="메뉴 열기"><Menu size={20} /></button><div className="topbar-context"><strong className="topbar-title">{pageTitle}</strong><span className="topbar-subtitle">{pageSub}</span></div><div className="topbar-actions"><span className="connection-pill"><span className={`connection-dot ${connected ? "online" : "offline"}`} />{connected ? "연결됨 · 측정 중" : "배터리 미연결"}</span><div className="notification-control"><button className="icon-button" onClick={() => setNotificationOpen((value) => !value)} aria-label="알림 열기" aria-expanded={notificationOpen}><Bell size={18} />{me.unreadAlertCount > 0 && <span className="notification-dot" />}</button>{notificationOpen && <div className="notification-popover"><div className="notification-head"><strong>알림 센터</strong><span>{me.unreadAlertCount} 미확인</span></div><div className="notification-item danger"><span className="notification-icon"><Siren size={15} /></span><span><strong>온도 임계값 초과</strong><small>PACK-001 · 방금 전</small></span></div><div className="notification-item warning"><span className="notification-icon"><Gauge size={15} /></span><span><strong>이상점수 상승</strong><small>PACK-004 · 8분 전</small></span></div><button className="notification-more" onClick={() => navigate("/alertHistory")}>알림 센터 전체 보기</button></div>}</div><button className="language-button" onClick={() => showNotice("언어 전환은 준비 중입니다.")} aria-label="언어 전환"><Globe2 size={15} />한</button><button className="icon-button theme-button" onClick={() => onTheme(preferences.theme === "dark" ? "light" : "dark")} aria-label="테마 전환">{preferences.theme === "dark" ? <Sun size={18} /> : <Moon size={18} />}</button><Link className="icon-button" to="/settings" aria-label="설정"><Settings size={18} /></Link><button className="topbar-logout" onClick={() => { void onLogout(); }}>로그아웃</button></div></header><div className="content-area">{children ?? <Outlet />}</div></main>
+    <main className="main-column"><header className="topbar"><button className="mobile-menu-button icon-button" onClick={() => setMobileOpen(true)} aria-label="메뉴 열기"><Menu size={20} /></button><div className="topbar-context"><strong className="topbar-title">{pageTitle}</strong><span className="topbar-subtitle">{pageSub}</span></div><div className="topbar-actions"><span className="connection-pill"><span className={`connection-dot ${connected ? "online" : "offline"}`} />{connected ? "연결됨 · 측정 중" : "배터리 미연결"}</span><div className="notification-control"><button className="icon-button" onClick={() => setNotificationOpen((value) => !value)} aria-label="알림 열기" aria-expanded={notificationOpen}><Bell size={18} />{me.unreadAlertCount > 0 && <span className="notification-dot" />}</button>{notificationOpen && <div className="notification-popover"><div className="notification-head"><strong>알림 센터</strong><span>{me.unreadAlertCount} 미확인</span></div>{notifications.isPending ? <div className="notification-empty">알림을 불러오는 중입니다.</div> : notifications.isError ? <div className="notification-empty">알림을 불러오지 못했습니다.</div> : notifications.data?.items.length ? notifications.data.items.map((alert) => <div className={`notification-item ${alert.severity === "DANGER" ? "danger" : "warning"}`} key={alert.id}><span className="notification-icon">{alert.severity === "DANGER" ? <Siren size={15} /> : <Gauge size={15} />}</span><span><strong>{notificationTitle(alert)}</strong><small>{alert.batteryLabel ?? "디바이스"} · {formatDateTime(alert.occurredAt, true)}</small></span></div>) : <div className="notification-empty">새 알림이 없습니다.</div>}<button className="notification-more" onClick={() => navigate("/alertHistory")}>알림 센터 전체 보기</button></div>}</div><button className="language-button" onClick={() => showNotice("언어 전환은 준비 중입니다.")} aria-label="언어 전환"><Globe2 size={15} />한</button><button className="icon-button theme-button" onClick={() => onTheme(preferences.theme === "dark" ? "light" : "dark")} aria-label="테마 전환">{preferences.theme === "dark" ? <Sun size={18} /> : <Moon size={18} />}</button><Link className="icon-button" to="/settings" aria-label="설정"><Settings size={18} /></Link><button className="topbar-logout" onClick={() => { void onLogout(); }}>로그아웃</button></div></header><div className="content-area">{children ?? <Outlet />}</div></main>
     <nav className="mobile-nav" aria-label="모바일 메뉴">{nav.slice(0, 5).map((item) => { const Icon = item.icon; return <button key={item.path} className={isActive(item.path) ? "active" : ""} onClick={() => go(item)}><Icon size={18} /><span>{item.label}</span></button>; })}</nav>
     {notice && <div className="toast" role="status">{notice}</div>}
   </div>;

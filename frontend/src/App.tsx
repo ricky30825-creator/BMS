@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { lazy, Suspense, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { QueryClientProvider, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { AppShell } from "./components/Shell";
@@ -6,11 +6,30 @@ import { Modal } from "./components/ui";
 import { api, subscribeAuthFailure } from "./api/client";
 import { useMe } from "./api/hooks";
 import { useRealtime } from "./realtime/useRealtime";
-import { AdminAuditPage, AdminBatteryPage, AdminEventTrendPage, AdminNoticePage, AdminOverviewPage, AdminUsersPage } from "./pages/AdminPages";
-import { AlertsPage, AnomalyPage, BatteryDetailPage, BatteryPage, DashboardPage, EventsPage, NoticesPage, PowerbankDiagnosisPage, RelayPage, SettingsPage, TrendPage } from "./pages/UserPages";
-import { FindPage, LandingPage, LoginPage, SignupPage } from "./pages/PublicPages";
 import type { MeResponse } from "./types";
 import { queryClient } from "./queryClient";
+
+const AdminAuditPage = lazy(() => import("./pages/AdminPages").then(({ AdminAuditPage: Page }) => ({ default: Page })));
+const AdminBatteryPage = lazy(() => import("./pages/AdminPages").then(({ AdminBatteryPage: Page }) => ({ default: Page })));
+const AdminEventTrendPage = lazy(() => import("./pages/AdminPages").then(({ AdminEventTrendPage: Page }) => ({ default: Page })));
+const AdminNoticePage = lazy(() => import("./pages/AdminPages").then(({ AdminNoticePage: Page }) => ({ default: Page })));
+const AdminOverviewPage = lazy(() => import("./pages/AdminPages").then(({ AdminOverviewPage: Page }) => ({ default: Page })));
+const AdminUsersPage = lazy(() => import("./pages/AdminPages").then(({ AdminUsersPage: Page }) => ({ default: Page })));
+const AlertsPage = lazy(() => import("./pages/UserPages").then(({ AlertsPage: Page }) => ({ default: Page })));
+const AnomalyPage = lazy(() => import("./pages/UserPages").then(({ AnomalyPage: Page }) => ({ default: Page })));
+const BatteryDetailPage = lazy(() => import("./pages/UserPages").then(({ BatteryDetailPage: Page }) => ({ default: Page })));
+const BatteryPage = lazy(() => import("./pages/UserPages").then(({ BatteryPage: Page }) => ({ default: Page })));
+const DashboardPage = lazy(() => import("./pages/UserPages").then(({ DashboardPage: Page }) => ({ default: Page })));
+const EventsPage = lazy(() => import("./pages/UserPages").then(({ EventsPage: Page }) => ({ default: Page })));
+const NoticesPage = lazy(() => import("./pages/UserPages").then(({ NoticesPage: Page }) => ({ default: Page })));
+const PowerbankDiagnosisPage = lazy(() => import("./pages/UserPages").then(({ PowerbankDiagnosisPage: Page }) => ({ default: Page })));
+const RelayPage = lazy(() => import("./pages/UserPages").then(({ RelayPage: Page }) => ({ default: Page })));
+const SettingsPage = lazy(() => import("./pages/UserPages").then(({ SettingsPage: Page }) => ({ default: Page })));
+const TrendPage = lazy(() => import("./pages/UserPages").then(({ TrendPage: Page }) => ({ default: Page })));
+const FindPage = lazy(() => import("./pages/PublicPages").then(({ FindPage: Page }) => ({ default: Page })));
+const LandingPage = lazy(() => import("./pages/PublicPages").then(({ LandingPage: Page }) => ({ default: Page })));
+const LoginPage = lazy(() => import("./pages/PublicPages").then(({ LoginPage: Page }) => ({ default: Page })));
+const SignupPage = lazy(() => import("./pages/PublicPages").then(({ SignupPage: Page }) => ({ default: Page })));
 
 const sessionRequiredPaths = new Set(["/dashboard", "/anomaly", "/trend", "/events", "/alertHistory", "/notices", "/powerbankDiag", "/relay", "/settings"]);
 
@@ -43,7 +62,7 @@ function ProtectedRoutes({ me, realtime }: { me: MeResponse; realtime: ReturnTyp
   const sessionRoute = (path: string, element: ReactNode) => (
     <Route path={path} element={!isAdmin && requiresActiveSession(path) ? <ActiveSessionRoute>{element}</ActiveSessionRoute> : element} />
   );
-  return <Routes>
+  return <Suspense fallback={<RouteLoading />}><Routes>
     <Route path="/login" element={<Navigate to={landingPath} replace />} />
     {sessionRoute("/dashboard", <DashboardPage realtime={realtime} me={me} />)}
     <Route path="/battery" element={<BatteryPage />} />
@@ -65,7 +84,11 @@ function ProtectedRoutes({ me, realtime }: { me: MeResponse; realtime: ReturnTyp
       <Route path="/adminEventTrend" element={<AdminEventTrendPage />} />
     </>}
     <Route path="*" element={<Navigate to={landingPath} replace />} />
-  </Routes>;
+  </Routes></Suspense>;
+}
+
+function RouteLoading() {
+  return <div className="boot-screen"><div className="boot-mark">⌁</div><p>화면을 불러오는 중입니다.</p></div>;
 }
 
 function ActiveSessionRoute({ children }: { children: ReactNode }) {
@@ -91,20 +114,20 @@ function RouteWithBatteryId({ me }: { me: MeResponse }) {
 }
 
 function PublicRoutes({ onSignedIn }: { onSignedIn: () => Promise<void> }) {
-  return <Routes>
+  return <Suspense fallback={<RouteLoading />}><Routes>
     <Route path="/" element={<LandingPage />} />
     <Route path="/login" element={<LoginPage onSuccess={onSignedIn} />} />
     <Route path="/signup" element={<SignupPage />} />
     <Route path="/find" element={<FindPage />} />
     <Route path="*" element={<Navigate to="/" replace />} />
-  </Routes>;
+  </Routes></Suspense>;
 }
 
 function AppContent() {
   const meQuery = useMe();
   const navigate = useNavigate();
   const qc = useQueryClient();
-  const demoMode = __CELLGUARD_DEV_SERVER__ && import.meta.env.VITE_DEMO_MODE === "true";
+  const demoMode = typeof __CELLGUARD_DEV_SERVER__ !== "undefined" && __CELLGUARD_DEV_SERVER__ && import.meta.env.VITE_DEMO_MODE === "true";
   const demoLoginStarted = useRef(false);
   const [demoLoginPending, setDemoLoginPending] = useState(demoMode);
   const [autoCut, setAutoCut] = useState<Record<string, unknown> | null>(null);
@@ -126,7 +149,7 @@ function AppContent() {
   useEffect(() => {
     if (!demoMode || demoLoginStarted.current || meQuery.isPending || me?.user) return;
     demoLoginStarted.current = true;
-    void api.signIn("hong@cellguard.io", "demo-password")
+    void import("./mocks/localDemoAuth").then(({ localDemoCredentials }) => api.signIn(localDemoCredentials.user.email, localDemoCredentials.user.password))
       .then((signedIn) => { qc.setQueryData<MeResponse>(["me"], signedIn); })
       .catch(() => undefined)
       .finally(() => setDemoLoginPending(false));

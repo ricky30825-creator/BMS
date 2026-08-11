@@ -13,7 +13,7 @@ function listFiles(directory: string): string[] {
 function expectBuildExcludesMocks(mode: "production" | "development") {
   execFileSync(process.execPath, [join(process.cwd(), "node_modules", "vite", "bin", "vite.js"), "build", "--mode", mode], {
     cwd: process.cwd(),
-    env: { ...process.env, NODE_ENV: "development", VITE_USE_MOCKS: "true" },
+    env: { ...process.env, NODE_ENV: "development", VITE_USE_MOCKS: "true", VITE_DEMO_MODE: "false" },
     stdio: "pipe",
   });
 
@@ -28,6 +28,13 @@ function expectBuildExcludesMocks(mode: "production" | "development") {
   expect(buildContents).not.toContain("Validated Mode 2");
   expect(buildContents).not.toContain("Mock Service Worker");
   expect(buildContents).not.toContain("setupWorker");
+  expect(buildContents).not.toContain("lee@lab.io");
+  expect(buildContents).not.toContain("hong@cellguard.io");
+  expect(buildContents).not.toContain("demo-password");
+  expect(buildContents).not.toContain("관리자 로그인");
+  expect(buildFiles.some((path) => /(?:^|[/\\])AdminPages-[^/\\]+\.js$/.test(path))).toBe(true);
+  expect(buildFiles.some((path) => /(?:^|[/\\])UserPages-[^/\\]+\.js$/.test(path))).toBe(true);
+  expect(buildFiles.some((path) => /(?:^|[/\\])PublicPages-[^/\\]+\.js$/.test(path))).toBe(true);
 }
 
 test("development mocks reject unhandled API requests", async ({ page }) => {

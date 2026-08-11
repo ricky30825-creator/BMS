@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { QueryClient, useQueryClient } from "@tanstack/react-query";
 import { api, apiBaseUrl } from "../api/client";
-import { normalizeDashboard } from "../api/normalize";
-import type { Dashboard, Diagnosis, MeResponse, Relay, WsEnvelope } from "../types";
+import { normalizeDashboard, normalizeDashboardAnomaly, normalizeDashboardMetrics, normalizeRelay } from "../api/normalize";
+import type { Alert, BatteryEvent, Dashboard, Diagnosis, Grade, MeResponse, Relay, WsEnvelope } from "../types";
 
 export type RealtimeState = "idle" | "loading" | "connecting" | "live" | "reconnecting" | "offline" | "expired" | "resyncing";
 export type ReconnectIntent = "initial" | "resume" | "resync";
@@ -40,6 +40,79 @@ export function applyDiagnosisEvent(current: Diagnosis | null | undefined, type:
   if (type === "diagnosis.progress") return current ? { ...current, ...(payload as Partial<Diagnosis>), status: "RUNNING" } : current;
   if (type === "diagnosis.aborted") return current ? { ...current, ...(payload as Partial<Diagnosis>), status: "ABORTED" } : current;
   return current;
+}
+
+type AlertListCache = { items: Alert[]; page: { number: number; size: number; total: number; totalPages: number } };
+type AlertSummaryCache = { unacknowledgedCount: number; today: { DANGER: number; WARNING: number; NORMAL_OR_CHECK: number } };
+type GradeChangedPayload = { from: Grade; to: Grade; score: number; batteryId: string; batteryLabel: string };
+
+function isGrade(value: unknown): value is Grade {
+  return value === "NORMAL" || value === "CAUTION" || value === "WARNING" || value === "DANGER";
+}
+
+function isAlertPayload(value: unknown): value is Alert {
+  const alert = value as Partial<Alert> | null;
+  return Boolean(alert && typeof alert.id === "string" && typeof alert.titleCode === "string" && (alert.severity === "DANGER" || alert.severity === "WARNING" || alert.severity === "NORMAL" || alert.severity === "CHECK") && (alert.subjectType === "BATTERY" || alert.subjectType === "DEVICE") && typeof alert.occurredAt === "string" && (alert.acknowledgedAt === null || typeof alert.acknowledgedAt === "string") && Array.isArray(alert.channels));
+}
+
+function isEventPayload(value: unknown): value is BatteryEvent {
+  const event = value as Partial<BatteryEvent> | null;
+  return Boolean(event && typeof event.id === "string" && typeof event.occurredAt === "string" && typeof event.type === "string" && (event.batteryId === null || typeof event.batteryId === "string") && (event.batteryLabel === null || typeof event.batteryLabel === "string") && (event.score === null || typeof event.score === "number") && (event.grade === null || isGrade(event.grade)) && typeof event.severity === "string" && typeof event.source === "string");
+}
+
+function isGradeChangedPayload(value: unknown): value is GradeChangedPayload {
+  const payload = value as Partial<GradeChangedPayload> | null;
+  return Boolean(payload && isGrade(payload.from) && isGrade(payload.to) && typeof payload.score === "number" && Number.isFinite(payload.score) && payload.score >= 0 && payload.score <= 1 && typeof payload.batteryId === "string" && typeof payload.batteryLabel === "string");
+}
+
+function isActiveAnomalyGrade(grade: Grade): boolean {
+  return grade !== "NORMAL";
+}
+
+function alertSummaryDelta(alert: Alert): keyof AlertSummaryCache["today"] {
+  return alert.severity === "DANGER" ? "DANGER" : alert.severity === "WARNING" ? "WARNING" : "NORMAL_OR_CHECK";
+}
+
+export function applyAlertCreated(queryClient: QueryClient, alert: Alert): void {
+  queryClient.setQueriesData<AlertListCache>({ queryKey: ["alerts"] }, (current) => {
+    if (!current) return current;
+    return { ...current, items: [alert, ...current.items.filter((item) => item.id !== alert.id)].slice(0, current.page.size) };
+  });
+  void queryClient.invalidateQueries({ queryKey: ["alerts"] });
+  const summary = queryClient.getQueryData<AlertSummaryCache>(["alert-summary"]);
+  if (summary) {
+    const key = alertSummaryDelta(alert);
+    queryClient.setQueryData<AlertSummaryCache>(["alert-summary"], { ...summary, unacknowledgedCount: summary.unacknowledgedCount + (alert.acknowledgedAt ? 0 : 1), today: { ...summary.today, [key]: summary.today[key] + 1 } });
+  } else void queryClient.invalidateQueries({ queryKey: ["alert-summary"] });
+  const me = queryClient.getQueryData<MeResponse>(["me"]);
+  if (me) queryClient.setQueryData<MeResponse>(["me"], { ...me, unreadAlertCount: me.unreadAlertCount + (alert.acknowledgedAt ? 0 : 1) });
+  else void queryClient.invalidateQueries({ queryKey: ["me"] });
+}
+
+export function applyEventCreated(queryClient: QueryClient, _event: BatteryEvent): void {
+  void queryClient.invalidateQueries({ queryKey: ["events"] });
+  void queryClient.invalidateQueries({ queryKey: ["anomaly-summary"] });
+  void queryClient.invalidateQueries({ queryKey: ["evidence"] });
+  void queryClient.invalidateQueries({ queryKey: ["me"] });
+}
+
+export function applyAnomalyGradeChanged(queryClient: QueryClient, payload: GradeChangedPayload): void {
+  queryClient.setQueryData<Dashboard>(["dashboard"], (current) => {
+    if (!current || current.battery.id !== payload.batteryId) return current;
+    return { ...current, anomaly: { ...current.anomaly, score: payload.score, grade: payload.to } };
+  });
+  void queryClient.invalidateQueries({ queryKey: ["dashboard"] });
+  void queryClient.invalidateQueries({ queryKey: ["anomaly-summary"] });
+  void queryClient.invalidateQueries({ queryKey: ["evidence"] });
+  const me = queryClient.getQueryData<MeResponse>(["me"]);
+  if (me) {
+    const delta = Number(isActiveAnomalyGrade(payload.to)) - Number(isActiveAnomalyGrade(payload.from));
+    queryClient.setQueryData<MeResponse>(["me"], { ...me, activeAnomalyCount: Math.max(0, me.activeAnomalyCount + delta) });
+  } else void queryClient.invalidateQueries({ queryKey: ["me"] });
+}
+
+function updateDashboardCache(queryClient: QueryClient, update: (current: Dashboard) => Dashboard): void {
+  queryClient.setQueryData<Dashboard>(["dashboard"], (current) => current ? update(current) : current);
 }
 
 function socketUrl(): string {
@@ -164,11 +237,57 @@ export function useRealtime({ enabled, sessionKey, onAutoCut, onSessionEnded, on
             if (pongDeadlineRef.current) window.clearTimeout(pongDeadlineRef.current);
             return;
           }
-          if (envelope.type === "metrics.tick") setDashboard((current) => current ? { ...current, metrics: envelope.payload as Dashboard["metrics"] } : current);
-          else if (envelope.type === "anomaly.score") setDashboard((current) => current ? { ...current, anomaly: envelope.payload as Dashboard["anomaly"] } : current);
-          else if (envelope.type === "relay.changed") setDashboard((current) => current ? { ...current, relay: envelope.payload as Relay } : current);
-          else if (envelope.type === "relay.autoCut") callbacks.current.onAutoCut(envelope.payload);
-          else if (envelope.type === "session.ended") callbacks.current.onSessionEnded();
+          if (envelope.type === "metrics.tick") {
+            try {
+              const metrics = normalizeDashboardMetrics(envelope.payload);
+              setDashboard((current) => current ? { ...current, metrics } : current);
+              updateDashboardCache(queryClient, (current) => ({ ...current, metrics }));
+            } catch {
+              // Ignore malformed live frames and retain the last known snapshot.
+            }
+          }
+          else if (envelope.type === "anomaly.score") {
+            try {
+              const anomaly = normalizeDashboardAnomaly(envelope.payload);
+              setDashboard((current) => current ? { ...current, anomaly } : current);
+              updateDashboardCache(queryClient, (current) => ({ ...current, anomaly }));
+              void queryClient.invalidateQueries({ queryKey: ["anomaly-summary"] });
+              void queryClient.invalidateQueries({ queryKey: ["evidence"] });
+            } catch {
+              // Ignore malformed live frames and retain the last known snapshot.
+            }
+          }
+          else if (envelope.type === "anomaly.gradeChanged" && isGradeChangedPayload(envelope.payload)) {
+            const gradeChanged = envelope.payload;
+            applyAnomalyGradeChanged(queryClient, gradeChanged);
+            setDashboard((current) => current && current.battery.id === gradeChanged.batteryId ? { ...current, anomaly: { ...current.anomaly, score: gradeChanged.score, grade: gradeChanged.to } } : current);
+          }
+          else if (envelope.type === "relay.changed") {
+            const current = queryClient.getQueryData<Dashboard>(["dashboard"]);
+            if (current) {
+              try {
+                const relay = normalizeRelay({ ...current.relay, ...(envelope.payload as Partial<Relay>), batteryId: current.relay.batteryId });
+                setDashboard((dashboard) => dashboard ? { ...dashboard, relay } : dashboard);
+                updateDashboardCache(queryClient, (dashboard) => ({ ...dashboard, relay }));
+                queryClient.setQueryData(["relay"], relay);
+                void queryClient.invalidateQueries({ queryKey: ["relay-history"] });
+              } catch {
+                void queryClient.invalidateQueries({ queryKey: ["relay"] });
+              }
+            } else void queryClient.invalidateQueries({ queryKey: ["relay"] });
+          }
+          else if (envelope.type === "relay.autoCut") {
+            callbacks.current.onAutoCut(envelope.payload);
+            void queryClient.invalidateQueries({ queryKey: ["relay"] });
+            void queryClient.invalidateQueries({ queryKey: ["relay-history"] });
+          }
+          else if (envelope.type === "alert.created" && isAlertPayload(envelope.payload)) applyAlertCreated(queryClient, envelope.payload);
+          else if (envelope.type === "event.created" && isEventPayload(envelope.payload)) applyEventCreated(queryClient, envelope.payload);
+          else if (envelope.type === "session.ended") {
+            void queryClient.invalidateQueries({ queryKey: ["me"] });
+            void queryClient.invalidateQueries({ queryKey: ["dashboard"] });
+            callbacks.current.onSessionEnded();
+          }
           else if (envelope.type === "diagnosis.progress" || envelope.type === "diagnosis.done" || envelope.type === "diagnosis.aborted") {
             const payload = envelope.payload as Partial<Diagnosis>;
             const current = queryClient.getQueryData<Diagnosis | null>(["diagnosis"]);

@@ -29,6 +29,23 @@ describe("settings alert UI", () => {
     expect(document.body).toHaveTextContent("알림 설정을 저장하지 못했습니다.");
   });
 
+  it("does not PATCH after the canonical GET fails and exposes retry", async () => {
+    const get = vi.spyOn(api, "getAlertSettings")
+      .mockRejectedValueOnce(new Error("offline"))
+      .mockResolvedValueOnce({ channels: { KAKAO: true, EMAIL: false, SMS: false, WEBPUSH: false }, policy: {} });
+    const update = vi.spyOn(api, "updateAlertSettings").mockResolvedValue({ channels: { KAKAO: false, EMAIL: false, SMS: false, WEBPUSH: false }, policy: {} });
+    const user = userEvent.setup();
+    const { container } = render(<SettingsPage me={me} onProfileSaved={() => undefined} onPreferencesSaved={() => undefined} />);
+    const toggles = () => [...container.querySelectorAll<HTMLInputElement>(".toggle-row input")];
+    await waitFor(() => expect(get).toHaveBeenCalledTimes(1));
+    await expect(screen.findByText("알림 설정을 불러오지 못했습니다.", { exact: false })).resolves.toBeInTheDocument();
+    expect(toggles()[0]).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: "다시 시도" }));
+    await waitFor(() => expect(toggles()[0]).toBeEnabled());
+    await user.click(toggles()[0]);
+    await waitFor(() => expect(update).toHaveBeenCalledTimes(1));
+  });
+
   it("validates the confirmation locally and sends only current and new passwords", async () => {
     vi.spyOn(api, "getAlertSettings").mockResolvedValue({ channels: { KAKAO: true, EMAIL: true, SMS: false, WEBPUSH: false }, policy: {} });
     const changePassword = vi.spyOn(api, "changePassword").mockResolvedValue(undefined);

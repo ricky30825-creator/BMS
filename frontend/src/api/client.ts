@@ -82,8 +82,9 @@ export const api = {
     try {
       await request("/api/auth/sign-in/email", { method: "POST", body: JSON.stringify({ email, password }) });
     } catch (error) {
-      if (import.meta.env.VITE_DEMO_MODE !== "true") throw error;
-      const role = email.trim().toLowerCase() === "lee@lab.io" ? "ADMIN" : "USER";
+      if (!(typeof __CELLGUARD_DEV_SERVER__ !== "undefined" && __CELLGUARD_DEV_SERVER__ && import.meta.env.VITE_DEMO_MODE === "true")) throw error;
+      const { demoRoleForEmail } = await import("../mocks/localDemoAuth");
+      const role = demoRoleForEmail(email);
       await request("/api/demo/login", { method: "POST", body: JSON.stringify({ email, password, role }) });
     }
     return api.me();

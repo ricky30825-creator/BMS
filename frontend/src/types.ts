@@ -44,7 +44,9 @@ export type MeResponse = {
 
 export type Scored = { score: number; grade: Grade };
 
-export type LatestMetric = Scored & {
+export type LatestMetric = {
+  score: number | null;
+  grade: Grade | null;
   voltageV: number | null;
   currentA: number | null;
   powerW?: number | null;
@@ -141,7 +143,7 @@ export type DashboardMetrics = {
   representativeTempC: MetricValue & { source?: "CONTACT" | "IR_SURFACE" | null };
   socPct: MetricValue;
   socBasis?: "ABSOLUTE_GAUGE" | "RELATIVE_SESSION_START" | null;
-  measuredAt: string;
+  measuredAt: string | null;
 };
 
 export type NoticeSummary = { id: string; category: NoticeCategory; title: string; summary: string; publishedAt: string };
@@ -151,7 +153,7 @@ export type Dashboard = {
   session: ActiveSession;
   battery: Battery;
   metrics: DashboardMetrics;
-  anomaly: Scored & { aeScore?: number | null; informerScore?: number | null; evaluatedAt?: string };
+  anomaly: { score: number | null; grade: Grade | null; aeScore?: number | null; informerScore?: number | null; evaluatedAt?: string };
   relay: Relay;
   notices: NoticeSummary[];
   quickTrend?: { metric: "volt" | "curr" | "temp" | "soc"; points: Array<{ at: string; value: number | null }> };
