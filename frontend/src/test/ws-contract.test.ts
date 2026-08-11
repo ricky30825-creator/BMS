@@ -1,10 +1,20 @@
 import { QueryClient } from "@tanstack/react-query";
 import { describe, expect, it } from "vitest";
-import { applyDiagnosisEvent, buildPingMessage, buildResumeMessage, buildSubscribeMessage, sequenceIsNew } from "../realtime/useRealtime";
+import { applyDiagnosisEvent, buildPingMessage, buildResumeMessage, buildSubscribeMessage, sequenceIsNew, socketUrlFor } from "../realtime/useRealtime";
 import { applyAlertCreated, applyAnomalyGradeChanged, applyEventCreated } from "../realtime/useRealtime";
 import type { Alert, BatteryEvent, Dashboard, Diagnosis, MeResponse } from "../types";
 
 describe("WebSocket client contract", () => {
+  it("URL-encodes the demo token only in the explicit demo transport", () => {
+    const demoUrl = socketUrlFor("http://127.0.0.1:5173", "demo/token?one", true);
+    expect(new URL(demoUrl).protocol).toBe("ws:");
+    expect(new URL(demoUrl).searchParams.get("access_token")).toBe("demo/token?one");
+
+    const productionUrl = socketUrlFor("https://cellguard.example", "demo/token?one", false);
+    expect(new URL(productionUrl).protocol).toBe("wss:");
+    expect(new URL(productionUrl).searchParams.has("access_token")).toBe(false);
+  });
+
   it("wraps subscribe and resume fields inside the v1 payload envelope", () => {
     expect(buildSubscribeMessage("cursor-1042", "initial-1")).toEqual({
       v: 1,

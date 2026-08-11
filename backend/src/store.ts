@@ -27,6 +27,7 @@ export type DemoBattery = {
   capacityWh: number | null;
   ratedOutputCurrentA: number | null;
   opsStatus: OpsStatus;
+  memo: string;
   adminMemo: string;
   version: number;
   latest: {
@@ -123,8 +124,8 @@ function isoNow(): string {
   return new Date().toISOString();
 }
 
-function makeBattery(input: Omit<DemoBattery, "version" | "adminMemo">): DemoBattery {
-  return { ...input, version: 0, adminMemo: "" };
+function makeBattery(input: Omit<DemoBattery, "version" | "adminMemo" | "memo"> & { memo?: string }): DemoBattery {
+  return { ...input, memo: input.memo ?? "", version: 0, adminMemo: "" };
 }
 
 export const demoUsers: DemoUser[] = [
@@ -139,7 +140,8 @@ const demoBatteries: DemoBattery[] = [
   makeBattery({ id: "PACK-002", ownerId: "leelab", label: "PACK-002", model: "18650 Li-ion · 3S", maker: "Samsung SDI", chemistry: "LI_ION", targetMode: 1, seriesCount: 3, capacityWh: null, ratedOutputCurrentA: null, opsStatus: "NORMAL", latest: { voltageV: 11.4, currentA: -1.6, powerW: -18.24, tempContact: 29, tempIrSurface: 30.2, socPct: 91, score: 0.18, measuredAt: "2026-08-06T01:30:00.000Z" }, mode1Health: { designCapacityMah: 3000, fullChargeCapacityMah: 2820, cycleCount: 88, rulCycles: 560, internalResistanceMohm: 16.2, calculatedAt: "2026-08-06T00:00:00.000Z" } }),
   makeBattery({ id: "PACK-003", ownerId: "leelab", label: "PACK-003", model: "USB 보조배터리 · 37Wh", maker: null, chemistry: "LI_PO", targetMode: 2, seriesCount: null, capacityWh: 37, ratedOutputCurrentA: 2, opsStatus: "WATCH", latest: { voltageV: 5.1, currentA: -1.2, powerW: -6.12, tempContact: null, tempIrSurface: 34, socPct: 64, score: 0.33, measuredAt: "2026-08-06T01:29:00.000Z" } }),
   makeBattery({ id: "PACK-004", ownerId: "kimeng", label: "PACK-004", model: "USB 보조배터리 · 37Wh", maker: null, chemistry: "LI_PO", targetMode: 2, seriesCount: null, capacityWh: 37, ratedOutputCurrentA: 2, opsStatus: "WATCH", latest: { voltageV: 5, currentA: -1.9, powerW: -9.5, tempContact: null, tempIrSurface: 47, socPct: 47, score: 0.58, measuredAt: "2026-08-06T01:28:00.000Z" } }),
-  makeBattery({ id: "PACK-005", ownerId: "parktest", label: "PACK-005", model: "USB 보조배터리 · 10Wh", maker: null, chemistry: "LI_PO", targetMode: 2, seriesCount: null, capacityWh: 10, ratedOutputCurrentA: 1, opsStatus: "NORMAL", latest: { voltageV: 5.1, currentA: 0.8, powerW: 4.08, tempContact: null, tempIrSurface: 31, socPct: 82, score: 0.24, measuredAt: "2026-08-06T01:27:00.000Z" } })
+  makeBattery({ id: "PACK-005", ownerId: "parktest", label: "PACK-005", model: "USB 보조배터리 · 10Wh", maker: null, chemistry: "LI_PO", targetMode: 2, seriesCount: null, capacityWh: 10, ratedOutputCurrentA: 1, opsStatus: "NORMAL", latest: { voltageV: 5.1, currentA: 0.8, powerW: 4.08, tempContact: null, tempIrSurface: 31, socPct: 82, score: 0.24, measuredAt: "2026-08-06T01:27:00.000Z" } }),
+  makeBattery({ id: "DEMO-PACK-001", ownerId: "hong", label: "DEMO-PACK-001", model: "Demo bench pack · safe fixture", maker: "CellGuard Lab", chemistry: "LI_ION", targetMode: 1, seriesCount: 3, capacityWh: null, ratedOutputCurrentA: null, opsStatus: "NORMAL", latest: { voltageV: 11.9, currentA: -2.4, powerW: -28.56, tempContact: 31.2, tempIrSurface: 30.4, socPct: 78, score: 0.18, measuredAt: "2026-08-06T01:31:00.000Z" }, mode1Health: { designCapacityMah: 3000, fullChargeCapacityMah: 2760, cycleCount: 12, rulCycles: 900, internalResistanceMohm: 18.4, calculatedAt: "2026-08-06T01:30:00.000Z" } })
 ];
 
 const demoSessions = new Map<string, DemoSession>();
@@ -166,7 +168,10 @@ export function batteryById(id: string): DemoBattery | undefined { return demoBa
 export function users(): DemoUser[] { return demoUsers.map((user) => ({ ...user })); }
 export function batteries(ownerId?: string): DemoBattery[] { return demoBatteries.filter((battery) => !ownerId || battery.ownerId === ownerId).map((battery) => ({ ...battery })); }
 export function activeSession(ownerId?: string): DemoSession | null { return [...demoSessions.values()].find((session) => session.status === "ACTIVE" && (!ownerId || session.ownerId === ownerId)) ?? null; }
+export function sessionsForBattery(batteryId: string): DemoSession[] { return [...demoSessions.values()].filter((session) => session.batteryId === batteryId).map((session) => ({ ...session })); }
 export function activeDiagnosis(batteryId?: string): DemoDiagnosis | null { return [...demoDiagnoses.values()].find((diagnosis) => diagnosis.status === "RUNNING" && (!batteryId || diagnosis.batteryId === batteryId)) ?? null; }
+export function diagnosesForBattery(batteryId: string): DemoDiagnosis[] { return [...demoDiagnoses.values()].filter((diagnosis) => diagnosis.batteryId === batteryId).map((diagnosis) => ({ ...diagnosis })); }
+export function diagnosisById(id: string): DemoDiagnosis | undefined { const diagnosis = demoDiagnoses.get(id); return diagnosis ? { ...diagnosis } : undefined; }
 export function relayByBattery(id: string): DemoRelay { return { ...(demoRelays.get(id) ?? { batteryId: id, state: "CLOSED", interlockEngaged: false, interlockCondition: null, reasonCode: null, reason: null, changedAt: isoNow(), changedBy: "SYSTEM" }) }; }
 export function audits(): DemoAudit[] { return demoAudits.map((audit) => ({ ...audit })); }
 
@@ -188,10 +193,27 @@ export function createBattery(ownerId: string, input: { label: string; maker?: s
     capacityWh: input.capacityWh ?? null,
     ratedOutputCurrentA: input.ratedOutputCurrentA ?? null,
     opsStatus: "NORMAL",
+    memo: "",
     latest: { voltageV: 0, currentA: 0, powerW: 0, tempContact: null, tempIrSurface: null, socPct: null, score: 0, measuredAt: isoNow() }
   });
   demoBatteries.push(battery);
   demoRelays.set(battery.id, { batteryId: battery.id, state: "CLOSED", interlockEngaged: false, interlockCondition: null, reasonCode: null, reason: null, changedAt: battery.latest.measuredAt, changedBy: "SYSTEM" });
+  return { ...battery };
+}
+
+export function updateBattery(ownerId: string, batteryId: string, input: { label?: string; maker?: string | null; model?: string | null; seriesCount?: number | null; memo?: string }): DemoBattery {
+  const battery = demoBatteries.find((item) => item.id === batteryId && item.ownerId === ownerId);
+  if (!battery) throw new Error("NOT_FOUND");
+  if (input.label !== undefined) {
+    const label = input.label.normalize("NFKC").trim();
+    if (!label) throw new Error("BATTERY_NAME_REQUIRED");
+    if (label.length > 120) throw new Error("INPUT_TOO_LONG");
+    battery.label = label;
+  }
+  if (input.maker !== undefined) battery.maker = input.maker?.normalize("NFKC").trim() || null;
+  if (input.model !== undefined) battery.model = input.model?.normalize("NFKC").trim() || "";
+  if (input.seriesCount !== undefined) battery.seriesCount = input.seriesCount;
+  if (input.memo !== undefined) battery.memo = normalizeMemo(input.memo);
   return { ...battery };
 }
 
@@ -333,6 +355,6 @@ export function csvForBattery(batteryId: string, sessionId: string | null): stri
   const battery = batteryById(batteryId);
   if (!battery) throw new Error("NOT_FOUND");
   const now = battery.latest.measuredAt;
-  const row = [now, sessionId ?? "", battery.id, "demo-device-01", battery.latest.voltageV, battery.latest.currentA, battery.latest.powerW, battery.latest.tempContact ?? "", battery.latest.tempIrSurface ?? "", battery.targetMode === 1 ? "" : "", "", "", battery.latest.socPct ?? "", "", ""].join(",");
-  return "timestamp,session_id,battery_id,device_id,voltage_v,current_a,power_w,temp_contact,temp_ir_surface,gas_raw,pressure_raw,acoustic_raw,soc_pct,diag_phase,load_target_a\n" + row + "\n";
+  const row = [now, "demo-device-01", battery.id, sessionId ?? "", battery.targetMode, battery.latest.voltageV, battery.latest.currentA, battery.latest.powerW, battery.latest.tempContact ?? "", battery.latest.tempIrSurface ?? "", battery.targetMode === 2 ? "" : battery.latest.socPct, battery.targetMode === 2 ? "" : "ABSOLUTE_GAUGE", "", "", "", ""].join(",");
+  return "measured_at,device_id,battery_id,session_id,mode,voltage_v,current_a,power_w,temp_contact,temp_ir_surface,soc_pct,soc_basis,gas_raw,pressure_raw,acoustic_raw,age_ms\n" + row + "\n";
 }

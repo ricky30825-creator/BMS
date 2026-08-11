@@ -1,6 +1,6 @@
 # 구현 상태 및 문서 지도
 
-> 기준일: 2026-08-06
+> 기준일: 2026-08-11
 
 이 문서는 설계 문서의 요구사항과 현재 저장소에 실제로 존재하는 구현을 구분하기 위한 실행용 지도다. 요구사항의 정본이 아니며, 상세 계약은 아래 링크의 원본 문서를 따른다.
 
@@ -17,11 +17,11 @@
 |---|---|---|
 | 요구사항·제품 계약 | [`PLAN.md`](../PLAN.md), [`docs/product_contract.md`](product_contract.md), 기능정의서·유저플로우 | 구현 기준 문서 있음 |
 | 백엔드 인증 골격 | `backend/src/auth.ts`, 세션 미들웨어, 감사 로그, DB 연결, Better Auth `/api/auth/*` | 부분 구현 |
-| 백엔드 데모 도메인 API | `backend/src/server.ts`, `backend/src/store.ts`: 로그인, 자산/세션, 대시보드, F21 fail-closed, 릴레이 승인·멱등성, 관리자 상태·메모·계정 사유 게이트, Raw CSV, WS sync | **데모 런타임 구현·브라우저 검증 완료** |
+| 백엔드 데모 도메인 API | `backend/src/server.ts`, `backend/src/store.ts`: 발급 토큰 인증, 핵심 사용자·관리자 REST, 계약형 대시보드, F21 fail-closed, 릴레이 승인·멱등성, Raw CSV, 세션 스코프 WS | **데모 런타임 구현·실 REST/WS 브라우저 검증 완료** |
 | 백엔드 DB 도메인 provider·Consumer·TimescaleDB | `backend/migrations/001_app_auth.sql`에 자산/세션/릴레이/텔레메트리/진단/멱등성 스키마가 있으나 production repository·Kafka Consumer·시계열 적재는 없음. `DEMO_MODE=false`에서는 `RUNTIME_NOT_READY`로 fail-closed | 부분 구현 / production 미착수 |
 | 에지 소프트웨어 | 하드웨어 계약서는 있으나 `edge/` 디렉터리와 센서·릴레이·Kafka 프로듀서 구현은 없음 | 미착수 |
 | AI 소프트웨어 | 모델 설계는 있으나 `ai/` 디렉터리, Colab 노트북, 학습·추론·Kafka 연동 구현은 없음 | 미착수 |
-| 프론트엔드 | [`frontend/src/`](../frontend/src/)의 Vite + React + TypeScript strict 앱, v3 사용자·관리자 라우트, 계약형 API/WS 계층, MSW 시나리오 | 부분 구현 / 실백엔드 통합 전 |
+| 프론트엔드 | [`frontend/src/`](../frontend/src/)의 Vite + React + TypeScript strict 앱, v3 사용자·관리자 라우트, 계약형 API/WS 계층, MSW 시나리오, `npm run dev:real` 데모 경로 | 부분 구현 / production provider 미착수 |
 | 프론트엔드 실행 기반 | `frontend/package.json`, React Router, Query, RHF/Zod, 토큰 CSS, 공용 UI, Vitest/RTL/Playwright 실행 설정 | 구현됨 / 계약·실행 검증 범위는 하단 참고 |
 | 모드 1 하드웨어 | KiCad 회로 파일, [`docs/hardware/mode1_backend_spec.md`](hardware/mode1_backend_spec.md), 조립 안내서 | 문서·설계 있음, 실물 검증 전 |
 | 모드 2 하드웨어 | [`docs/hardware/mode2_powerbank_diagnosis_spec.md`](hardware/mode2_powerbank_diagnosis_spec.md) | 설계 계약 있음, 구현 전 |
@@ -30,11 +30,11 @@
 
 ### 2026-08-06 계약 동기화 주의
 
-v3 프로토타입과 정본 문서에는 모드 1/2, 대표 온도 최댓값, signed 전류, 모드 2 상대 SOC, F21 `0=미설정` fail-closed, 서버 승인 릴레이, Raw CSV, WS envelope, 관리자 상태·메모·계정 사유 게이트가 반영됐다. 데모 provider의 REST/WS와 브라우저 클릭 검증은 완료했지만, 실제 PostgreSQL transaction provider·Kafka/Timescale 적재·물리 Fail-Safe 판정·하드웨어 릴레이는 아직 구현/실측 전이다.
+v3 프로토타입과 정본 문서에는 모드 1/2, 대표 온도 최댓값, signed 전류, 모드 2 상대 SOC, F21 `0=미설정` fail-closed, 서버 승인 릴레이, Raw CSV, WS envelope, 관리자 상태·메모·계정 사유 게이트가 반영됐다. 데모 provider의 REST/WS와 실제 Chromium 클릭 검증은 완료했지만, 실제 PostgreSQL transaction provider·Kafka/Timescale 적재·물리 Fail-Safe 판정·하드웨어 릴레이는 아직 구현/실측 전이다. `DEMO_MODE=false`는 이 provider가 생길 때까지 `RUNTIME_NOT_READY`로 닫힌다.
 
 `backend/dist/`는 TypeScript 빌드 산출물이며 소스 구현의 근거로 세지 않는다. `PLAN.md`의 예정 폴더 구조도 실제 디렉터리 존재를 의미하지 않는다.
 
-같은 날짜에 프론트엔드 실행 기반과 v3 도달 화면을 추가했다. `/api/me` 부트, 자산·세션 게이트, 대시보드 snapshot/WS 재연결, 릴레이 서버 승인, F21 fail-closed, 관리자 상태·메모 분리 UI를 계약형 클라이언트와 MSW로 연결했다. 알림 설정은 GET canonical 조회와 `{ channels: { KAKAO, EMAIL, SMS, WEBPUSH } }` PATCH 응답 반영·실패 rollback을 사용하며, 비밀번호 변경은 현재/새/새 확인 입력을 검증한 뒤 확인 필드를 제외하고 POST한다. F21은 기본 `SAFETY_PROFILE_NOT_READY` 자산을 계속 잠그고, capability=true 모드 2는 MSW 전용 검증 시나리오에서만 요청·진행·중단·이력·상세를 확인한다. 실제 백엔드에 아직 없는 일부 목록·추세·공지 엔드포인트는 UI에서 빈 상태 또는 사용 불가 상태로 명시하며, 실백엔드 인증 쿠키·실WebSocket·운영 하드웨어와의 통합은 별도 게이트다.
+같은 날짜에 프론트엔드 실행 기반과 v3 도달 화면을 추가했다. `/api/me` 부트, 자산·세션 게이트, 대시보드 snapshot/WS 재연결, 릴레이 서버 승인, F21 fail-closed, 관리자 상태·메모 분리 UI를 계약형 클라이언트와 MSW로 연결했다. 2026-08-11에는 명시적 `dev:real` 경로를 추가하고 데모 로그인 토큰을 REST·다운로드·WS에만 전달하도록 연결했다. Better Auth 경로와 production/cookie 경로에는 Demo 헤더·쿼리 토큰을 넣지 않는다. 알림 설정은 GET canonical 조회와 `{ channels: { KAKAO, EMAIL, SMS, WEBPUSH } }` PATCH 응답 반영·실패 rollback을 사용하며, 비밀번호 변경은 현재/새/새 확인 입력을 검증한 뒤 확인 필드를 제외하고 POST한다. F21은 기본 `SAFETY_PROFILE_NOT_READY` 자산을 계속 잠그고, capability=true 모드 2는 MSW 전용 검증 시나리오에서만 요청·진행·중단·이력·상세를 확인한다. PDF aggregate export와 production domain provider는 아직 준비되지 않아 UI/API가 사용 불가 상태를 명시한다.
 
 2026-08-06 프론트엔드 계약 회귀: WebSocket 클라이언트 메시지는 `{ v: 1, type, payload }` 봉투를 사용하고, 일반 재연결은 마지막 cursor/eventId로 resume하며 snapshot을 재조회하지 않는다. `resync.required`/`4410`에서만 `/api/me`, dashboard, alert summary, relay, active diagnosis를 다시 조회한다. Vitest/RTL/MSW 계약 테스트는 이 동작과 알림·비밀번호·F21 요청 shape 및 안전 profile 시나리오를 검증한다.
 
@@ -46,7 +46,7 @@ v3 프로토타입과 정본 문서에는 모드 1/2, 대표 온도 최댓값, s
 | Phase 2 에지 수집 | 센서·100ms 폴링·릴레이·음성·프로듀서 | 미착수 |
 | Phase 3 스트리밍 | Consumer·세션 태깅·적재·오프셋 | 미착수 |
 | Phase 4 AI | 데이터셋·특징·AE·Informer·추론 | 미착수 |
-| Phase 5 웹 | React 초기화·라우팅·화면·관리자 | 부분 구현. v3 화면·계약 계층·mock/기본 QA 추가, 실백엔드 통합은 미완료 |
+| Phase 5 웹 | React 초기화·라우팅·화면·관리자 | 부분 구현. v3 화면·계약 계층·mock QA·localhost demo REST/WS 연결 완료, production provider 통합은 미완료 |
 | Phase 6 알림·차단 | 카카오·Fail-Safe·음성 설정 | 미착수 또는 스텁 |
 | Phase 7 통합·배포 | E2E·시나리오·운영 모니터링 | 미착수 |
 

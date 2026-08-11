@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { QueryClient, useQueryClient } from "@tanstack/react-query";
-import { api, apiBaseUrl } from "../api/client";
+import { api, apiBaseUrl, demoAuthToken } from "../api/client";
 import { normalizeDashboard, normalizeDashboardAnomaly, normalizeDashboardMetrics, normalizeRelay } from "../api/normalize";
 import type { Alert, BatteryEvent, Dashboard, Diagnosis, Grade, MeResponse, Relay, WsEnvelope } from "../types";
 
@@ -115,10 +115,16 @@ function updateDashboardCache(queryClient: QueryClient, update: (current: Dashbo
   queryClient.setQueryData<Dashboard>(["dashboard"], (current) => current ? update(current) : current);
 }
 
-function socketUrl(): string {
-  const url = new URL("/ws", apiBaseUrl());
+export function socketUrlFor(baseUrl: string, token: string | null, demoEnabled: boolean): string {
+  const url = new URL("/ws", baseUrl);
   url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+  if (demoEnabled && token) url.searchParams.set("access_token", token);
   return url.toString();
+}
+
+export function socketUrl(): string {
+  const token = demoAuthToken();
+  return socketUrlFor(apiBaseUrl(), token, token !== null);
 }
 
 export function useRealtime({ enabled, sessionKey, onAutoCut, onSessionEnded, onAuthFailure }: { enabled: boolean; sessionKey?: string; onAutoCut: (relay: unknown) => void; onSessionEnded: () => void; onAuthFailure: () => void }) {

@@ -3,10 +3,10 @@ import { createHash, randomUUID } from "node:crypto";
 import type { Socket } from "node:net";
 import cors from "cors";
 import express, { type NextFunction, type Request, type Response } from "express";
-import { toNodeHandler } from "better-auth/node";
+import { fromNodeHeaders, toNodeHandler } from "better-auth/node";
 import { auth } from "./auth.js";
 import { corsOrigins, env } from "./config/env.js";
-import { requireRole, requireSession } from "./auth/middleware.js";
+import { demoPasswordMatches, demoUserForToken, issueDemoToken, requireRole, requireSession, setDemoPassword } from "./auth/middleware.js";
 import { writeAuditLog } from "./auth/audit.js";
 import {
   F21_THRESHOLDS,
@@ -21,6 +21,8 @@ import {
   changeUserStatus,
   createBattery,
   csvForBattery,
+  diagnosisById,
+  diagnosesForBattery,
   demoUsers,
   idempotent,
   mode1Health,
@@ -30,14 +32,20 @@ import {
   saveMemo,
   startDiagnosis,
   startSession,
+  sessionsForBattery,
+  updateBattery,
   userById
 } from "./store.js";
 
 const app = express();
 const httpServer = createServer(app);
-const wsClients = new Set<{ socket: Socket; batteryId: string | null }>();
+type WsTopic = "metrics" | "anomaly" | "relay" | "alert" | "event" | "session" | "diagnosis";
+type WsClient = { socket: Socket; batteryId: string | null; userId: string; role: "USER" | "ADMIN"; topics: Set<WsTopic>; subscribed: boolean };
+const wsClients = new Set<WsClient>();
 let wsSequence = 0;
 const wsStreamId = "demo-stream";
+const demoPreferences = new Map<string, { theme: "light" | "dark" | "system"; lang: "ko" | "en" }>();
+const demoAlertChannels = new Map<string, { KAKAO: boolean; EMAIL: boolean; SMS: boolean; WEBPUSH: boolean }>();
 
 app.use(
   cors({
@@ -61,6 +69,31 @@ function actorName(req: Request): string {
   return req.appUser?.name ?? req.authSession?.user.name ?? "Unknown";
 }
 
+function gradeForScore(score: number | null): "NORMAL" | "CAUTION" | "WARNING" | "DANGER" | null {
+  if (score === null) return null;
+  if (score < 0.3) return "NORMAL";
+  if (score < 0.6) return "CAUTION";
+  if (score < 0.8) return "WARNING";
+  return "DANGER";
+}
+
+function temperatureStatus(value: number | null): "OK" | "WARN" | "CRIT" | null {
+  if (value === null) return null;
+  if (value >= 60) return "CRIT";
+  if (value >= 55) return "WARN";
+  return "OK";
+}
+
+function metric(value: number | null, status: "OK" | "WARN" | "CRIT" | null): { value: number | null; status: "OK" | "WARN" | "CRIT" | null } {
+  return { value, status };
+}
+
+function maskEmail(email: string): string {
+  const [local, domain] = email.split("@", 2);
+  if (!local || !domain) return "";
+  return `${local.slice(0, 2)}${"*".repeat(Math.max(2, local.length - 2))}@${domain}`;
+}
+
 function relayJson(batteryId: string) {
   const relay = relayByBattery(batteryId);
   const changedBy = relay.changedBy === "SYSTEM"
@@ -73,6 +106,7 @@ function relayJson(batteryId: string) {
     reasonCode: relay.reasonCode,
     changedAt: relay.changedAt,
     changedBy,
+    reasonParams: null,
     interlock: {
       engaged: relay.interlockEngaged,
       condition: relay.interlockCondition,
@@ -113,12 +147,101 @@ function batteryJson(battery: ReturnType<typeof batteryById>) {
       socPct: battery.targetMode === 2 && !mode2ProfileReady ? null : battery.latest.socPct,
       socBasis: battery.targetMode === 2 ? (mode2ProfileReady ? "RELATIVE_SESSION_START" : null) : "ABSOLUTE_GAUGE",
       score: battery.latest.score,
+      grade: gradeForScore(battery.latest.score),
       measuredAt: battery.latest.measuredAt
     },
+    memo: battery.memo,
     health: mode1Health(battery),
     diagnosisCapability: battery.targetMode === 2
       ? { executionAllowed: false, reasonCode: "SAFETY_PROFILE_NOT_READY" }
       : { executionAllowed: false, reasonCode: "MODE_NOT_SUPPORTED" }
+  };
+}
+
+const demoNotices = [
+  { id: "notice-maintenance", category: "MAINTENANCE", title: "7월 정기 서버 점검 (무중단)", summary: "WebSocket 순단이 발생할 수 있으나 자동 재연결됩니다.", body: "7/7 00:00~04:00 인프라 점검이 진행됩니다. WebSocket 순단이 발생할 수 있으나 자동 재연결되며, 측정 데이터는 버퍼링 후 복원됩니다.", publishedAt: "2026-07-01T00:00:00.000Z", status: "PUBLISHED", views: 892 },
+  { id: "notice-feature", category: "FEATURE", title: "이상 근거(XAI) 패널 정식 오픈", summary: "이상점수 상승에 기여한 특징을 확인할 수 있습니다.", body: "이상 탐지 화면에서 서버가 제공하는 기여 요인을 확인할 수 있습니다.", publishedAt: "2026-06-28T00:00:00.000Z", status: "PUBLISHED", views: 614 },
+  { id: "notice-info", category: "INFO", title: "모드 2 진단 안전 프로필 안내", summary: "실측 전까지 보조배터리 진단은 실행 잠금 상태입니다.", body: "현재 연결 부품 프로필은 안전 문턱과 연속 감시가 준비되지 않아 F21 진단을 실행할 수 없습니다.", publishedAt: "2026-06-20T00:00:00.000Z", status: "PUBLISHED", views: 431 }
+] as const;
+
+function sessionJson(session: NonNullable<ReturnType<typeof activeSession>>) {
+  const battery = batteryById(session.batteryId);
+  return { ...session, batteryLabel: battery?.label ?? session.batteryId, mode: session.targetMode, targetMode: session.targetMode };
+}
+
+function dashboardMetrics(battery: NonNullable<ReturnType<typeof batteryById>>) {
+  const payload = batteryJson(battery)!;
+  const latest = payload.latest;
+  return {
+    voltageV: metric(latest.voltageV, null),
+    currentA: metric(latest.currentA, null),
+    powerW: metric(latest.powerW, null),
+    tempContact: metric(latest.tempContact, temperatureStatus(latest.tempContact)),
+    tempIrSurface: metric(latest.tempIrSurface, temperatureStatus(latest.tempIrSurface)),
+    representativeTempC: { ...metric(latest.representativeTempC, temperatureStatus(latest.representativeTempC)), source: latest.representativeTempSource },
+    socPct: metric(latest.socPct, null),
+    socBasis: latest.socBasis,
+    measuredAt: latest.measuredAt
+  };
+}
+
+function quickTrend(battery: NonNullable<ReturnType<typeof batteryById>>, metricName: string) {
+  const latest = batteryJson(battery)!.latest;
+  const values: Record<string, number | null> = { volt: latest.voltageV, curr: latest.currentA, temp: latest.representativeTempC, soc: latest.socPct };
+  const metricKey = metricName === "volt" || metricName === "curr" || metricName === "temp" || metricName === "soc" ? metricName : "temp";
+  return { metric: metricKey, points: [{ at: latest.measuredAt, value: values[metricKey] ?? null }] };
+}
+
+function dashboardJson(session: NonNullable<ReturnType<typeof activeSession>>, battery: NonNullable<ReturnType<typeof batteryById>>, metricName: string) {
+  const payload = batteryJson(battery)!;
+  const score = payload.latest.score;
+  const snapshotCursor = String(Date.now());
+  return {
+    session: sessionJson(session),
+    battery: payload,
+    metrics: dashboardMetrics(battery),
+    anomaly: { score, grade: gradeForScore(score), aeScore: null, informerScore: null, evaluatedAt: payload.latest.measuredAt },
+    relay: relayJson(battery.id),
+    notices: demoNotices.slice(0, 3).map(({ body: _body, status: _status, views: _views, ...notice }) => notice),
+    quickTrend: quickTrend(battery, metricName),
+    sync: { streamId: wsStreamId, snapshotCursor, asOf: new Date().toISOString() },
+    snapshotCursor
+  };
+}
+
+function pageEnvelope<T>(items: T[], page = 1, size = 20) {
+  const offset = Math.max(0, (page - 1) * size);
+  const paged = items.slice(offset, offset + size);
+  return { items: paged, page: { number: page, size, total: items.length, totalPages: items.length ? Math.ceil(items.length / size) : 0 } };
+}
+
+function ownerBatteries(req: Request): ReturnType<typeof batteries> {
+  return batteries(req.userRole === "ADMIN" ? undefined : actorId(req));
+}
+
+function diagnosisJson(diagnosis: NonNullable<ReturnType<typeof diagnosisById>>) {
+  const battery = batteryById(diagnosis.batteryId);
+  const input = diagnosis.input;
+  return {
+    id: diagnosis.id,
+    batteryId: diagnosis.batteryId,
+    batteryLabel: battery?.label,
+    sessionId: diagnosis.sessionId,
+    kind: diagnosis.kind,
+    status: diagnosis.status,
+    phase: diagnosis.phase,
+    confidence: diagnosis.kind === "QUICK" ? "LOW" : diagnosis.status === "COMPLETED" ? "HIGH" : undefined,
+    startedAt: diagnosis.startedAt,
+    estimatedEndAt: diagnosis.estimatedEndAt,
+    measuredAt: diagnosis.status === "COMPLETED" ? diagnosis.estimatedEndAt : undefined,
+    loadTargetA: typeof input.loadTargetA === "number" ? input.loadTargetA : null,
+    loadActualA: typeof input.loadActualA === "number" ? input.loadActualA : null,
+    socHintLevel: typeof input.socHintLevel === "number" ? input.socHintLevel : null,
+    abortReason: diagnosis.result && typeof diagnosis.result.abortReason === "string" ? diagnosis.result.abortReason : null,
+    partialMetrics: diagnosis.result?.partialMetrics ?? null,
+    result: diagnosis.result,
+    quick: null,
+    capacity: null
   };
 }
 
@@ -175,14 +298,16 @@ app.post("/api/demo/login", (req, res) => {
   }
   const email = typeof req.body?.email === "string" ? req.body.email.trim().toLowerCase() : "";
   const password = typeof req.body?.password === "string" ? req.body.password : "";
-  const role = req.body?.role === "ADMIN" ? "ADMIN" : "USER";
-  const expectedEmail = role === "ADMIN" ? "lee@lab.io" : "hong@cellguard.io";
-  if (email !== expectedEmail || !password) {
+  const user = demoUsers.find((candidate) => candidate.email === email);
+  if (!user || !demoPasswordMatches(user.id, password)) {
     apiError(res, 401, "UNAUTHENTICATED", "Demo credentials are invalid.");
     return;
   }
-  const user = role === "ADMIN" ? userById("leelab")! : userById("hong")!;
-  const token = role === "ADMIN" ? "demo-admin" : "demo-user";
+  if (user.status !== "ACTIVE") {
+    apiError(res, 403, "ACCOUNT_SUSPENDED", "The demo account is suspended.");
+    return;
+  }
+  const token = issueDemoToken({ id: user.id, email: user.email, name: user.name, role: user.role, status: user.status });
   recordAudit({ actorId: user.id, action: "ADMIN_LOGIN", resource: "/api/demo/login", result: "SUCCESS", reason: null });
   res.json({ token, user: { id: user.id, name: user.name, email: user.email, role: user.role, status: user.status } });
 });
@@ -197,27 +322,90 @@ app.use("/api", (_req, res, next) => {
   apiError(res, 503, "RUNTIME_NOT_READY", "The database-backed domain provider is not enabled in this build.");
 });
 
+app.post("/api/account/email-lookup", (req, res) => {
+  const name = typeof req.body?.name === "string" ? req.body.name.normalize("NFKC").trim() : "";
+  const phone = typeof req.body?.phone === "string" ? req.body.phone.trim() : "";
+  const user = demoUsers.find((candidate) => candidate.name === name && candidate.phone === phone);
+  res.json({ email: user ? maskEmail(user.email) : null });
+});
+
 app.get("/api/me", requireSession, (req, res) => {
   const user = req.appUser;
   if (!user) {
     res.json({ user: req.authSession?.user ?? null, activeSession: null, preferences: { theme: "light", lang: "ko" } });
     return;
   }
+  const storedUser = userById(user.id);
   const session = activeSession(user.id);
   const sessionBattery = session ? batteryById(session.batteryId) : null;
+  const owned = batteries(user.id);
   res.json({
-    user: { ...user, loginId: user.id, phone: user.id === "hong" ? "010-1234-5678" : "010-3456-7890" },
-    activeSession: session && sessionBattery ? { ...session, batteryLabel: sessionBattery.label } : null,
+    user: { ...user, ...(storedUser ? { name: storedUser.name, email: storedUser.email, phone: storedUser.phone, role: storedUser.role, status: storedUser.status, joinedAt: storedUser.joinedAt } : {}), loginId: user.id },
+    activeSession: session && sessionBattery ? sessionJson(session) : null,
     unreadAlertCount: 0,
-    activeAnomalyCount: 0,
-    preferences: { theme: "light", lang: "ko" }
+    activeAnomalyCount: owned.filter((battery) => (gradeForScore(battery.latest.score) ?? "NORMAL") !== "NORMAL").length,
+    preferences: demoPreferences.get(user.id) ?? { theme: "light", lang: "ko" }
   });
+});
+
+app.patch("/api/me", requireSession, (req, res) => {
+  const user = userById(actorId(req));
+  if (!user) { apiError(res, 404, "NOT_FOUND", "User was not found."); return; }
+  const allowed = new Set(["name", "email", "phone"]);
+  const unknown = Object.keys(req.body ?? {}).filter((key) => !allowed.has(key));
+  if (unknown.length) { apiError(res, 400, "VALIDATION_FAILED", "Only profile fields may be changed.", { fields: unknown.map((name) => ({ name, reason: "not_allowed" })) }); return; }
+  const name = req.body?.name === undefined ? user.name : typeof req.body.name === "string" ? req.body.name.normalize("NFKC").trim() : "";
+  const email = req.body?.email === undefined ? user.email : typeof req.body.email === "string" ? req.body.email.trim().toLowerCase() : "";
+  const phone = req.body?.phone === undefined ? user.phone : typeof req.body.phone === "string" ? req.body.phone.trim() : "";
+  if (!name || !email.includes("@") || !phone) { apiError(res, 400, "VALIDATION_FAILED", "Profile fields are invalid."); return; }
+  user.name = name;
+  user.email = email;
+  user.phone = phone;
+  recordAudit({ actorId: actorId(req), action: "USER_UPDATE", resource: user.id, result: "SUCCESS", reason: null });
+  res.json({ id: user.id, name: user.name, loginId: user.id, email: user.email, phone: user.phone, role: user.role, status: user.status, joinedAt: user.joinedAt });
+});
+
+app.post("/api/me/password", requireSession, (req, res) => {
+  const userId = actorId(req);
+  const currentPassword = typeof req.body?.currentPassword === "string" ? req.body.currentPassword : "";
+  const newPassword = typeof req.body?.newPassword === "string" ? req.body.newPassword : "";
+  if (!demoPasswordMatches(userId, currentPassword)) { apiError(res, 401, "REAUTH_REQUIRED", "Current password is invalid."); return; }
+  if (!/^(?=.*[A-Za-z])(?=.*\d)(?=.*[^A-Za-z\d]).{8,}$/.test(newPassword)) { apiError(res, 422, "VALIDATION_FAILED", "New password does not meet policy."); return; }
+  setDemoPassword(userId, newPassword);
+  res.status(204).send();
+});
+
+app.get("/api/settings/preferences", requireSession, (req, res) => {
+  res.json(demoPreferences.get(actorId(req)) ?? { theme: "light", lang: "ko" });
+});
+
+app.patch("/api/settings/preferences", requireSession, (req, res) => {
+  const theme = req.body?.theme;
+  const lang = req.body?.lang;
+  if (!["light", "dark", "system"].includes(theme) || !["ko", "en"].includes(lang)) { apiError(res, 400, "VALIDATION_FAILED", "Unsupported preferences."); return; }
+  const preferences = { theme: theme as "light" | "dark" | "system", lang: lang as "ko" | "en" };
+  demoPreferences.set(actorId(req), preferences);
+  res.json(preferences);
+});
+
+app.get("/api/settings/alerts", requireSession, (req, res) => {
+  res.json({ channels: demoAlertChannels.get(actorId(req)) ?? { KAKAO: true, EMAIL: true, SMS: false, WEBPUSH: true }, policy: { sendOn: ["DANGER", "WARNING"], smsOnlyDanger: true, dedupeWindowMinutes: 5 } });
+});
+
+app.patch("/api/settings/alerts", requireSession, (req, res) => {
+  const channels = req.body?.channels;
+  const keys = ["KAKAO", "EMAIL", "SMS", "WEBPUSH"] as const;
+  if (!channels || keys.some((key) => typeof channels[key] !== "boolean")) { apiError(res, 400, "VALIDATION_FAILED", "All alert channels are required."); return; }
+  const next = Object.fromEntries(keys.map((key) => [key, channels[key]])) as { KAKAO: boolean; EMAIL: boolean; SMS: boolean; WEBPUSH: boolean };
+  demoAlertChannels.set(actorId(req), next);
+  res.json({ channels: next, policy: { sendOn: ["DANGER", "WARNING"], smsOnlyDanger: true, dedupeWindowMinutes: 5 } });
 });
 
 app.get("/api/batteries", requireSession, (req, res) => {
   const mode = req.query.mode === "1" || req.query.mode === "2" ? Number(req.query.mode) : null;
   const list = batteries(req.userRole === "ADMIN" ? undefined : actorId(req)).filter((battery) => !mode || battery.targetMode === mode);
-  res.json({ items: list.map((battery) => batteryJson(battery)), page: { number: 1, size: list.length || 20, total: list.length, totalPages: list.length ? 1 : 0 } });
+  const connectedBatteryId = activeSession(actorId(req))?.batteryId;
+  res.json({ items: list.map((battery) => ({ ...batteryJson(battery), isConnected: battery.id === connectedBatteryId })), page: { number: 1, size: list.length || 20, total: list.length, totalPages: list.length ? 1 : 0 } });
 });
 
 app.post("/api/batteries", requireSession, (req, res) => {
@@ -231,13 +419,46 @@ app.post("/api/batteries", requireSession, (req, res) => {
   } catch (error) { errorFromDomain(res, error); }
 });
 
+app.patch("/api/batteries/:id", requireSession, (req, res) => {
+  const current = ensureOwner(req, req.params.id);
+  if (!current) { apiError(res, 404, "NOT_FOUND", "Battery was not found."); return; }
+  const allowed = new Set(["label", "maker", "model", "seriesCount", "memo"]);
+  const unknown = Object.keys(req.body ?? {}).filter((key) => !allowed.has(key));
+  if (unknown.length) { apiError(res, 400, "VALIDATION_FAILED", "Battery identity and mode cannot be changed."); return; }
+  try {
+    const updated = updateBattery(current.ownerId, current.id, {
+      label: req.body?.label,
+      maker: req.body?.maker,
+      model: req.body?.model,
+      seriesCount: req.body?.seriesCount == null ? req.body?.seriesCount : Number(req.body.seriesCount),
+      memo: req.body?.memo
+    });
+    res.json(batteryJson(updated));
+  } catch (error) { errorFromDomain(res, error); }
+});
+
 app.get("/api/batteries/:id", requireSession, (req, res) => {
   const battery = ensureOwner(req, req.params.id);
   if (!battery) {
     apiError(res, 404, "NOT_FOUND", "Battery was not found.");
     return;
   }
-  res.json(batteryJson(battery));
+  res.json({ ...batteryJson(battery), isConnected: activeSession(actorId(req))?.batteryId === battery.id });
+});
+
+app.get("/api/batteries/:id/sessions", requireSession, (req, res) => {
+  const battery = ensureOwner(req, req.params.id);
+  if (!battery) { apiError(res, 404, "NOT_FOUND", "Battery was not found."); return; }
+  const items = sessionsForBattery(battery.id).map((session) => ({
+    id: session.id,
+    label: battery.label,
+    startedAt: session.startedAt,
+    endedAt: session.endedAt,
+    peakScore: battery.latest.score,
+    peakGrade: gradeForScore(battery.latest.score),
+    status: session.status
+  }));
+  res.json(pageEnvelope(items, Number(req.query.page) || 1, Number(req.query.size) || 20));
 });
 
 app.post("/api/sessions", requireSession, (req, res) => {
@@ -246,7 +467,7 @@ app.post("/api/sessions", requireSession, (req, res) => {
     if (!battery) throw new Error("NOT_FOUND");
     const session = startSession(actorId(req), battery.id);
     recordAudit({ actorId: actorId(req), action: "SESSION_START", resource: session.id, result: "SUCCESS", reason: null });
-    res.status(201).json({ ...session, batteryLabel: battery.label });
+    res.status(201).json(sessionJson(session));
   } catch (error) {
     errorFromDomain(res, error);
   }
@@ -259,14 +480,14 @@ app.get("/api/dashboard", requireSession, (req, res) => {
     apiError(res, 409, "NO_ACTIVE_SESSION", "An active session is required.");
     return;
   }
-  const payload = batteryJson(battery);
-  res.json({ session, battery: payload, metrics: payload?.latest ?? null, snapshotCursor: `${Date.now()}` });
+  res.json(dashboardJson(session, battery, typeof req.query.metric === "string" ? req.query.metric : "temp"));
 });
 
 app.get("/api/relay", requireSession, (req, res) => {
   const session = activeSession(actorId(req));
-  const batteryId = typeof req.query.batteryId === "string" ? req.query.batteryId : session?.batteryId;
-  if (!batteryId || !ensureOwner(req, batteryId)) {
+  const requestedBatteryId = typeof req.query.batteryId === "string" ? req.query.batteryId : null;
+  const batteryId = session?.batteryId;
+  if (!batteryId || (requestedBatteryId && requestedBatteryId !== batteryId) || !ensureOwner(req, batteryId)) {
     apiError(res, 409, "NO_ACTIVE_SESSION", "An active session is required.");
     return;
   }
@@ -283,7 +504,7 @@ async function relayMutation(req: Request, res: Response, action: "cut" | "resto
   const password = typeof req.body?.password === "string" ? req.body.password : "";
   if (!battery || !session || session.batteryId !== battery.id) { apiError(res, 409, "NO_ACTIVE_SESSION", "An active session is required."); return; }
   if (!reason) { apiError(res, 422, "REASON_REQUIRED", "A reason is required."); return; }
-  if (!password) { apiError(res, 401, "REAUTH_REQUIRED", "Password re-authentication is required."); return; }
+  if (!demoPasswordMatches(actorId(req), password)) { apiError(res, 401, "REAUTH_REQUIRED", "Password re-authentication is required."); return; }
   const requestBody = { batteryId, reason, password, action };
   const prior = idempotent(actorId(req), key, requestBody);
   if (prior.kind === "conflict") { apiError(res, 409, "IDEMPOTENCY_CONFLICT", "The idempotency key was reused with a different request."); return; }
@@ -292,7 +513,7 @@ async function relayMutation(req: Request, res: Response, action: "cut" | "resto
     const relay = changeRelay(actorId(req), battery.id, action, reason);
     const response = { decision: "APPROVED", requestId: `relay_${randomUUID()}`, relay: relayJson(battery.id) };
     rememberIdempotency(actorId(req), key, requestBody, 200, response);
-    broadcast("relay.changed", relayJson(battery.id), response.requestId);
+    broadcast("relay.changed", relayJson(battery.id), response.requestId, battery.id);
     res.json(response);
   } catch (error) {
     errorFromDomain(res, error);
@@ -301,6 +522,137 @@ async function relayMutation(req: Request, res: Response, action: "cut" | "resto
 
 app.post("/api/relay/cut", requireSession, async (req, res) => relayMutation(req, res, "cut"));
 app.post("/api/relay/restore", requireSession, async (req, res) => relayMutation(req, res, "restore"));
+
+function sessionBattery(req: Request): { session: NonNullable<ReturnType<typeof activeSession>>; battery: NonNullable<ReturnType<typeof batteryById>> } | null {
+  const session = activeSession(actorId(req));
+  const battery = session ? batteryById(session.batteryId) : undefined;
+  return session && battery ? { session, battery } : null;
+}
+
+function eventItems(req: Request) {
+  const owned = new Set(ownerBatteries(req).map((battery) => battery.id));
+  return audits()
+    .filter((audit) => ["RELAY_CUT", "RELAY_RESTORE", "RELAY_AUTO_CUT"].includes(audit.action) && owned.has(audit.resource))
+    .map((audit) => {
+      const battery = batteryById(audit.resource);
+      const autoCut = audit.action === "RELAY_AUTO_CUT";
+      return {
+        id: audit.id,
+        occurredAt: audit.at,
+        type: autoCut ? "RELAY_AUTO_CUT" : audit.action,
+        batteryId: battery?.id ?? null,
+        batteryLabel: battery?.label ?? null,
+        score: null,
+        grade: null,
+        severity: autoCut ? "CUT" : "CUT",
+        source: autoCut ? "SYSTEM" : "USER",
+        causeCode: autoCut ? audit.reason : undefined,
+        causeParams: undefined,
+        actionCode: autoCut ? "AUTO_CUT_AND_NOTIFY" : audit.action,
+        actionParams: {}
+      } as const;
+    });
+}
+
+app.get("/api/anomaly/summary", requireSession, (req, res) => {
+  const scoped = sessionBattery(req);
+  if (!scoped) { apiError(res, 409, "NO_ACTIVE_SESSION", "An active session is required."); return; }
+  const owned = ownerBatteries(req);
+  const distribution = { NORMAL: 0, CAUTION: 0, WARNING: 0, DANGER: 0 };
+  for (const battery of owned) distribution[gradeForScore(battery.latest.score) ?? "NORMAL"] += 1;
+  res.json({ activeCount: owned.filter((battery) => (gradeForScore(battery.latest.score) ?? "NORMAL") !== "NORMAL").length, todayCount: 0, peakScore: scoped.battery.latest.score, peakAt: scoped.battery.latest.measuredAt, model: { status: "DEGRADED", lastInferenceAt: scoped.battery.latest.measuredAt, version: "demo-fixture-no-provider" }, riskDistribution: distribution });
+});
+
+app.get("/api/anomaly/evidence", requireSession, (req, res) => {
+  const scoped = sessionBattery(req);
+  if (!scoped) { apiError(res, 409, "NO_ACTIVE_SESSION", "An active session is required."); return; }
+  if (typeof req.query.batteryId === "string" && req.query.batteryId !== scoped.battery.id) { apiError(res, 404, "NOT_FOUND", "Battery was not found."); return; }
+  res.json({ batteryId: scoped.battery.id, score: scoped.battery.latest.score, evaluatedAt: scoped.battery.latest.measuredAt, contributions: [] });
+});
+
+app.get("/api/anomaly/events", requireSession, (req, res) => {
+  const scoped = sessionBattery(req);
+  if (!scoped) { apiError(res, 409, "NO_ACTIVE_SESSION", "An active session is required."); return; }
+  res.json(pageEnvelope(eventItems(req), Number(req.query.page) || 1, Number(req.query.size) || 20));
+});
+
+app.get("/api/events", requireSession, (req, res) => {
+  const severity = typeof req.query.severity === "string" ? req.query.severity.split(",") : [];
+  const q = typeof req.query.q === "string" ? req.query.q.toLowerCase() : "";
+  const batteryId = typeof req.query.batteryId === "string" ? req.query.batteryId : null;
+  const items = eventItems(req).filter((event) => (!severity.length || severity.includes(event.severity)) && (!batteryId || event.batteryId === batteryId) && (!q || (event.batteryLabel ?? "").toLowerCase().includes(q)));
+  res.json(pageEnvelope(items, Number(req.query.page) || 1, Number(req.query.size) || 20));
+});
+
+function trendForBattery(battery: NonNullable<ReturnType<typeof batteryById>>, period: "24h" | "7d" | "30d") {
+  const count = period === "24h" ? 25 : period === "30d" ? 30 : 7;
+  const stepMs = period === "24h" ? 60 * 60 * 1000 : 24 * 60 * 60 * 1000;
+  const end = new Date(battery.latest.measuredAt).getTime();
+  const buckets = Array.from({ length: count }, (_, index) => new Date(end - (count - index - 1) * stepMs).toISOString());
+  const point = (value: number | null) => [...Array<number | null>(count - 1).fill(null), value];
+  return { buckets, series: [
+    { batteryId: battery.id, batteryLabel: battery.label, metric: "volt", unit: "V", points: point(battery.latest.voltageV) },
+    { batteryId: battery.id, batteryLabel: battery.label, metric: "curr", unit: "A", points: point(battery.latest.currentA) },
+    { batteryId: battery.id, batteryLabel: battery.label, metric: "temp", unit: "°C", points: point(Math.max(battery.latest.tempContact ?? -Infinity, battery.latest.tempIrSurface ?? -Infinity) === -Infinity ? null : Math.max(battery.latest.tempContact ?? -Infinity, battery.latest.tempIrSurface ?? -Infinity)) },
+    { batteryId: battery.id, batteryLabel: battery.label, metric: "soc", unit: "%", points: point(battery.targetMode === 2 ? null : battery.latest.socPct) }
+  ] };
+}
+
+app.get("/api/trends", requireSession, (req, res) => {
+  const period = req.query.period === "24h" || req.query.period === "30d" ? req.query.period : "7d";
+  const requested = typeof req.query.batteryIds === "string" ? req.query.batteryIds.split(",").filter(Boolean).slice(0, 5) : [];
+  const candidates = requested.length ? requested.map((id) => ensureOwner(req, id)).filter((battery): battery is NonNullable<ReturnType<typeof batteryById>> => Boolean(battery)) : (() => { const scoped = sessionBattery(req); return scoped ? [scoped.battery] : []; })();
+  if (requested.length && candidates.length !== requested.length) { apiError(res, 404, "NOT_FOUND", "One or more batteries were not found."); return; }
+  const first = candidates[0];
+  if (!first) { res.json({ period, buckets: [], series: [] }); return; }
+  const base = trendForBattery(first, period);
+  const series = candidates.flatMap((battery) => trendForBattery(battery, period).series);
+  res.json({ period, buckets: base.buckets, series });
+});
+
+const demoAlerts: Array<Record<string, unknown>> = [];
+app.get("/api/alerts/summary", requireSession, (_req, res) => {
+  res.json({ unacknowledgedCount: demoAlerts.filter((alert) => alert.severity === "DANGER" && alert.acknowledgedAt === null).length, today: { DANGER: 0, WARNING: 0, NORMAL_OR_CHECK: 0 } });
+});
+
+app.get("/api/alerts", requireSession, (_req, res) => {
+  res.json(pageEnvelope(demoAlerts, Number(_req.query.page) || 1, Number(_req.query.size) || 20));
+});
+
+app.post("/api/alerts/ack-all", requireSession, (_req, res) => {
+  let acknowledgedCount = 0;
+  for (const alert of demoAlerts) {
+    if (alert.severity === "DANGER" && alert.acknowledgedAt === null) { alert.acknowledgedAt = new Date().toISOString(); acknowledgedCount += 1; }
+  }
+  res.json({ acknowledgedCount });
+});
+
+app.post("/api/alerts/:id/ack", requireSession, (req, res) => {
+  const alert = demoAlerts.find((item) => item.id === req.params.id);
+  if (!alert) { apiError(res, 404, "NOT_FOUND", "Alert was not found."); return; }
+  alert.acknowledgedAt = alert.acknowledgedAt ?? new Date().toISOString();
+  res.json(alert);
+});
+
+app.get("/api/notices", requireSession, (req, res) => {
+  const category = typeof req.query.category === "string" ? req.query.category : null;
+  const items = demoNotices.filter((notice) => !category || notice.category === category).map(({ body: _body, status: _status, views: _views, ...notice }) => notice);
+  res.json(pageEnvelope(items, Number(req.query.page) || 1, Number(req.query.size) || 20));
+});
+
+app.get("/api/notices/:id", requireSession, (req, res) => {
+  const notice = demoNotices.find((item) => item.id === req.params.id);
+  if (!notice) { apiError(res, 404, "NOT_FOUND", "Notice was not found."); return; }
+  res.json({ id: notice.id, category: notice.category, title: notice.title, body: notice.body, publishedAt: notice.publishedAt });
+});
+
+app.get("/api/admin/event-trend", requireRole("ADMIN"), (_req, res) => {
+  res.json({ buckets: ["월", "화", "수", "목", "금", "토", "일"], series: [{ grade: "CAUTION", values: [0, 0, 0, 0, 0, 0, 0] }, { grade: "WARNING", values: [0, 0, 0, 0, 0, 0, 0] }, { grade: "DANGER", values: [0, 0, 0, 0, 0, 0, 0] }] });
+});
+
+app.get("/api/admin/notices", requireRole("ADMIN"), (_req, res) => {
+  res.json({ items: demoNotices.map(({ id, category, title, status, views, publishedAt }) => ({ id, category, title, status, views, publishedAt })) });
+});
 
 app.get("/api/admin/users", requireRole("ADMIN"), (req, res) => {
   const q = typeof req.query.q === "string" ? req.query.q.toLowerCase() : "";
@@ -387,9 +739,17 @@ app.get("/api/admin/overview", requireRole("ADMIN"), (_req, res) => {
 });
 
 app.get("/api/relay/history", requireSession, (req, res) => {
-  const batteryId = typeof req.query.batteryId === "string" ? req.query.batteryId : activeSession(actorId(req))?.batteryId;
-  if (!batteryId || !ensureOwner(req, batteryId)) { apiError(res, 404, "NOT_FOUND", "Battery was not found."); return; }
-  res.json({ items: audits().filter((audit) => audit.resource === batteryId && audit.action.startsWith("RELAY_")) });
+  const session = activeSession(actorId(req));
+  const requestedBatteryId = typeof req.query.batteryId === "string" ? req.query.batteryId : null;
+  const batteryId = session?.batteryId;
+  if (!batteryId || (requestedBatteryId && requestedBatteryId !== batteryId) || !ensureOwner(req, batteryId)) { apiError(res, 404, "NOT_FOUND", "Battery was not found."); return; }
+  res.json({ items: audits().filter((audit) => audit.resource === batteryId && audit.action.startsWith("RELAY_")).map((audit) => ({
+    id: audit.id,
+    action: audit.action,
+    at: audit.at,
+    actor: audit.actorId && userById(audit.actorId) ? { type: "USER", id: audit.actorId, name: userById(audit.actorId)!.name } : { type: "SYSTEM", systemCode: "FAILSAFE" },
+    ...(audit.action === "RELAY_AUTO_CUT" ? { reasonCode: audit.reason ?? undefined } : { reason: audit.reason ?? undefined })
+  })) });
 });
 
 function diagnosisStart(req: Request, res: Response, kind: "QUICK" | "CAPACITY"): void {
@@ -402,36 +762,60 @@ function diagnosisStart(req: Request, res: Response, kind: "QUICK" | "CAPACITY")
   try {
     const diagnosis = startDiagnosis(actorId(req), kind, batteryId, body);
     recordAudit({ actorId: actorId(req), action: kind === "QUICK" ? "DIAGNOSIS_QUICK_START" : "DIAGNOSIS_CAPACITY_START", resource: diagnosis.id, result: "SUCCESS", reason: null });
-    res.status(202).json(diagnosis);
+    res.status(202).json(diagnosisJson(diagnosis));
   } catch (error) { errorFromDomain(res, error); }
 }
 
 app.post("/api/diagnosis/quick", requireSession, (req, res) => diagnosisStart(req, res, "QUICK"));
 app.post("/api/diagnosis/capacity", requireSession, (req, res) => diagnosisStart(req, res, "CAPACITY"));
-app.get("/api/diagnosis/active", requireSession, (req, res) => res.json(activeDiagnosis(activeSession(actorId(req))?.batteryId ?? undefined)));
+app.get("/api/diagnosis/active", requireSession, (req, res) => {
+  const diagnosis = activeDiagnosis(activeSession(actorId(req))?.batteryId ?? undefined);
+  res.json(diagnosis ? diagnosisJson(diagnosis) : null);
+});
 app.delete("/api/diagnosis/active", requireSession, (req, res) => {
   const batteryId = activeSession(actorId(req))?.batteryId;
   if (!batteryId) { apiError(res, 409, "NO_DIAGNOSIS_IN_PROGRESS", "No active diagnosis exists."); return; }
   try {
     const diagnosis = abortDiagnosis(actorId(req), batteryId);
     recordAudit({ actorId: actorId(req), action: "DIAGNOSIS_ABORT", resource: diagnosis.id, result: "SUCCESS", reason: "USER" });
-    res.json(diagnosis);
+    res.json(diagnosisJson(diagnosis));
   } catch (error) { errorFromDomain(res, error); }
 });
 
 app.get("/api/batteries/:id/diagnoses", requireSession, (req, res) => {
   const battery = ensureOwner(req, req.params.id);
   if (!battery) { apiError(res, 404, "NOT_FOUND", "Battery was not found."); return; }
-  const current = activeDiagnosis(battery.id);
-  res.json({ items: current ? [current] : [], page: { number: 1, size: current ? 1 : 20, total: current ? 1 : 0, totalPages: current ? 1 : 0 } });
+  const items = diagnosesForBattery(battery.id).map(diagnosisJson).map((diagnosis) => ({
+    id: diagnosis.id,
+    batteryId: diagnosis.batteryId,
+    batteryLabel: diagnosis.batteryLabel,
+    kind: diagnosis.kind,
+    status: diagnosis.status,
+    confidence: diagnosis.confidence,
+    measuredAt: diagnosis.measuredAt,
+    socHintLevel: diagnosis.socHintLevel,
+    summary: diagnosis.kind === "QUICK" ? { regulationKneeA: null, thermalSlopeCPerMin: null, grade: null } : { sohRelPct: null, deliveredWh: null }
+  }));
+  res.json(pageEnvelope(items, Number(req.query.page) || 1, Number(req.query.size) || 20));
+});
+
+app.get("/api/diagnoses/:id", requireSession, (req, res) => {
+  const diagnosis = diagnosisById(req.params.id);
+  if (!diagnosis || !ensureOwner(req, diagnosis.batteryId)) { apiError(res, 404, "NOT_FOUND", "Diagnosis was not found."); return; }
+  res.json(diagnosisJson(diagnosis));
 });
 
 app.get("/api/metrics/export.csv", requireSession, (req, res) => {
   const session = activeSession(actorId(req));
-  const batteryId = typeof req.query.batteryId === "string" ? req.query.batteryId : session?.batteryId;
-  if (!batteryId || !ensureOwner(req, batteryId)) { apiError(res, 409, "NO_ACTIVE_SESSION", "An active session is required."); return; }
+  const requestedBatteryId = typeof req.query.batteryId === "string" ? req.query.batteryId : null;
+  const batteryId = session?.batteryId;
+  if (!batteryId || (requestedBatteryId && requestedBatteryId !== batteryId) || !ensureOwner(req, batteryId)) { apiError(res, 409, "NO_ACTIVE_SESSION", "An active session is required."); return; }
   const csv = csvForBattery(batteryId, session?.id ?? null);
   res.status(200).type("text/csv").setHeader("Content-Disposition", `attachment; filename="${batteryId}-raw.csv"`).send(csv);
+});
+
+app.get("/api/trends/export.pdf", requireSession, (_req, res) => {
+  apiError(res, 503, "RUNTIME_NOT_READY", "PDF trend export is unavailable until the aggregate export provider is implemented.");
 });
 
 app.use((error: unknown, _req: Request, res: Response, _next: NextFunction) => {
@@ -467,12 +851,22 @@ function parseClientFrame(input: Buffer): { opcode: number; payload: Buffer } | 
   return { opcode, payload };
 }
 
+function topicForType(type: string): WsTopic {
+  if (type.startsWith("metrics")) return "metrics";
+  if (type.startsWith("anomaly")) return "anomaly";
+  if (type.startsWith("relay")) return "relay";
+  if (type.startsWith("alert")) return "alert";
+  if (type.startsWith("session")) return "session";
+  if (type.startsWith("diagnosis")) return "diagnosis";
+  return "event";
+}
+
 function wsEnvelope(type: string, payload: unknown, requestId: string | null = null) {
   const sequence = String(++wsSequence);
   return {
     v: 1,
     type,
-    topic: type.startsWith("metrics") ? "metrics" : "events",
+    topic: topicForType(type),
     eventId: `evt_${sequence}`,
     streamId: wsStreamId,
     sequence,
@@ -484,27 +878,68 @@ function wsEnvelope(type: string, payload: unknown, requestId: string | null = n
   };
 }
 
-function broadcast(type: string, payload: unknown, requestId: string | null = null): void {
+function broadcast(type: string, payload: unknown, requestId: string | null = null, batteryId: string | null = null): void {
   const frame = wsFrame(JSON.stringify(wsEnvelope(type, payload, requestId)));
+  const topic = topicForType(type);
+  const active = batteryId ? activeSession() : null;
   for (const client of wsClients) {
-    if (!client.socket.destroyed) client.socket.write(frame);
+    const canReceive = Boolean(batteryId && active && active.batteryId === batteryId && active.ownerId === client.userId && client.batteryId === batteryId);
+    if (client.subscribed && client.topics.has(topic) && canReceive && !client.socket.destroyed) client.socket.write(frame);
   }
 }
 
-httpServer.on("upgrade", (req: IncomingMessage, socket: Socket) => {
+function closeUnauthenticated(socket: Socket, code: number, reason: string): void {
+  if (socket.destroyed) return;
+  socket.end(`HTTP/1.1 ${code} ${reason}\r\nConnection: close\r\n\r\n`);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function clientControlMessage(value: unknown): { type: "subscribe" | "resume" | "ping"; requestId: string | null; topics: WsTopic[]; afterCursor: string | null } | null {
+  if (!isRecord(value) || value.v !== 1 || (value.type !== "subscribe" && value.type !== "resume" && value.type !== "ping") || !isRecord(value.payload)) return null;
+  const payload = value.payload;
+  if (value.type === "ping") return Object.keys(payload).length === 0 ? { type: "ping", requestId: null, topics: [], afterCursor: null } : null;
+  const topics = payload.topics;
+  if (!Array.isArray(topics) || topics.length === 0 || topics.some((topic) => typeof topic !== "string" || !["metrics", "anomaly", "relay", "alert", "event", "session", "diagnosis"].includes(topic))) return null;
+  if (typeof payload.requestId !== "string" || payload.requestId.length === 0 || typeof payload.afterCursor !== "string") return null;
+  if (value.type === "resume" && payload.lastEventId !== undefined && typeof payload.lastEventId !== "string") return null;
+  return { type: value.type, requestId: payload.requestId, topics: [...new Set(topics)] as WsTopic[], afterCursor: payload.afterCursor };
+}
+
+httpServer.on("upgrade", async (req: IncomingMessage, socket: Socket) => {
   const key = req.headers["sec-websocket-key"];
   const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
   if (!key || (url.pathname !== "/ws/telemetry" && url.pathname !== "/ws")) {
     socket.destroy();
     return;
   }
-  if (env.DEMO_MODE && !["demo-user", "demo-admin"].includes(url.searchParams.get("access_token") ?? "")) {
-    socket.destroy();
-    return;
+  let userId: string;
+  let role: "USER" | "ADMIN";
+  if (env.DEMO_MODE) {
+    const demoUser = demoUserForToken(url.searchParams.get("access_token"));
+    if (!demoUser) { closeUnauthenticated(socket, 401, "Unauthorized"); return; }
+    userId = demoUser.id;
+    role = demoUser.role;
+  } else {
+    // Production WebSockets use the Better Auth session cookie. A demo query
+    // token is never accepted outside the explicit demo runtime.
+    try {
+      const session = await auth.api.getSession({ headers: fromNodeHeaders(req.headers) });
+      if (!session) { closeUnauthenticated(socket, 401, "Unauthorized"); return; }
+      // The domain provider is intentionally unavailable while DEMO_MODE is
+      // false, so do not expose a fabricated stream in this fail-closed mode.
+      socket.destroy();
+      return;
+    } catch {
+      socket.destroy();
+      return;
+    }
   }
   const accept = createHash("sha1").update(`${key}258EAFA5-E914-47DA-95CA-C5AB0DC85B11`).digest("base64");
   socket.write(`HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${accept}\r\n\r\n`);
-  const client = { socket, batteryId: url.searchParams.get("batteryId") };
+  const client: WsClient = { socket, batteryId: activeSession(userId)?.batteryId ?? null, userId, role, topics: new Set<WsTopic>(), subscribed: false };
   wsClients.add(client);
   socket.write(wsFrame(JSON.stringify(wsEnvelope("sync", { snapshotCursor: "0", asOf: new Date().toISOString() }))));
   socket.on("data", (chunk) => {
@@ -514,16 +949,20 @@ httpServer.on("upgrade", (req: IncomingMessage, socket: Socket) => {
     if (frame.opcode === 0x9) { socket.write(Buffer.from([0x8a, 0])); return; }
     if (frame.opcode !== 0x1) return;
     try {
-      const message = JSON.parse(frame.payload.toString()) as { type?: string; requestId?: string; afterCursor?: string };
+      const message = clientControlMessage(JSON.parse(frame.payload.toString()) as unknown);
+      if (!message) { socket.destroy(); return; }
       if (message.type === "subscribe" || message.type === "resume") {
+        if (!client.batteryId) { socket.destroy(); return; }
+        client.topics = new Set(message.topics);
+        client.subscribed = true;
         socket.write(wsFrame(JSON.stringify(wsEnvelope(message.type === "subscribe" ? "subscribed" : "resumed", {
-          requestId: message.requestId ?? null,
+          requestId: message.requestId,
           streamId: wsStreamId,
-          replayFrom: message.afterCursor ?? "0",
+          replayFrom: message.afterCursor,
           currentCursor: String(wsSequence)
-        }, message.requestId ?? null))));
+        }, message.requestId))));
       } else if (message.type === "ping") {
-        socket.write(wsFrame(JSON.stringify(wsEnvelope("pong", {}, message.requestId ?? null))));
+        socket.write(wsFrame(JSON.stringify(wsEnvelope("pong", {}, null))));
       }
     } catch (_) {
       socket.destroy();

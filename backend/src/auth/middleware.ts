@@ -1,4 +1,5 @@
 import type { NextFunction, Request, Response } from "express";
+import { randomUUID } from "node:crypto";
 import { fromNodeHeaders } from "better-auth/node";
 import { auth, type AuthSession } from "../auth.js";
 import { db } from "../db.js";
@@ -14,6 +15,10 @@ export type AppUser = {
   role: AppRole;
   status: "ACTIVE" | "SUSPENDED";
 };
+
+const demoTokens = new Map<string, AppUser>();
+const DEMO_PASSWORD = "demo-password";
+const demoPasswords = new Map<string, string>();
 
 declare global {
   namespace Express {
@@ -33,12 +38,35 @@ async function getUserProfile(userId: string): Promise<{ role: AppRole; status: 
   return result.rows[0] ?? null;
 }
 
+export function issueDemoToken(user: AppUser): string {
+  const token = `demo_${randomUUID()}`;
+  demoTokens.set(token, { ...user });
+  return token;
+}
+
+export function demoUserForToken(token: string | null | undefined): AppUser | null {
+  if (!env.DEMO_MODE || !token) return null;
+  const issued = demoTokens.get(token);
+  if (issued) return { ...issued };
+  return null;
+}
+
+export function revokeDemoToken(token: string | null | undefined): void {
+  if (token) demoTokens.delete(token);
+}
+
+export function demoPasswordMatches(userId: string, password: string): boolean {
+  return env.DEMO_MODE && (demoPasswords.get(userId) ?? DEMO_PASSWORD) === password;
+}
+
+export function setDemoPassword(userId: string, password: string): void {
+  demoPasswords.set(userId, password);
+}
+
 function demoUserFromRequest(req: Request): AppUser | null {
   if (!env.DEMO_MODE) return null;
   const token = req.get("authorization")?.match(/^Demo\s+(.+)$/i)?.[1];
-  if (token === "demo-admin") return { id: "leelab", email: "lee@lab.io", name: "이연구", role: "ADMIN", status: "ACTIVE" };
-  if (token === "demo-user") return { id: "hong", email: "hong@cellguard.io", name: "홍길동", role: "USER", status: "ACTIVE" };
-  return null;
+  return demoUserForToken(token);
 }
 
 async function getSessionFromRequest(req: Request): Promise<AuthSession> {
@@ -53,6 +81,10 @@ export async function requireSession(req: Request, res: Response, next: NextFunc
     req.appUser = demoUser;
     req.userRole = demoUser.role;
     next();
+    return;
+  }
+  if (env.DEMO_MODE && /^Demo\s+/i.test(req.get("authorization") ?? "")) {
+    res.status(401).json({ error: { code: "UNAUTHENTICATED", message: "The demo token is invalid." } });
     return;
   }
   const session = await getSessionFromRequest(req);
@@ -99,6 +131,10 @@ export function requireRole(role: AppRole) {
         return;
       }
       next();
+      return;
+    }
+    if (env.DEMO_MODE && /^Demo\s+/i.test(req.get("authorization") ?? "")) {
+      res.status(401).json({ error: { code: "UNAUTHENTICATED", message: "The demo token is invalid." } });
       return;
     }
     const session = await getSessionFromRequest(req);

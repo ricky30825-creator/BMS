@@ -2,6 +2,12 @@ import type { AlertChannels, AlertSettings, ApiUser, ErrorCode, MeResponse, Pref
 
 const API_BASE = (import.meta.env.VITE_API_BASE ?? "").replace(/\/$/, "");
 
+function demoTransportEnabled(): boolean {
+  return typeof __CELLGUARD_DEV_SERVER__ !== "undefined" && __CELLGUARD_DEV_SERVER__ && import.meta.env.VITE_DEMO_MODE === "true";
+}
+
+let demoToken: string | null = null;
+
 export class ApiError extends Error {
   readonly status: number;
   readonly code: ErrorCode;
@@ -43,6 +49,18 @@ function toApiPath(path: string): string {
   return `${API_BASE}${path.startsWith("/") ? path : `/${path}`}`;
 }
 
+export function demoAuthorization(path: string, token: string | null, enabled = demoTransportEnabled()): string | null {
+  if (!enabled || !token || path.startsWith("/api/auth/") || path === "/api/demo/login") return null;
+  return `Demo ${token}`;
+}
+
+function withDemoAuthorization(path: string, headers: Headers): void {
+  // Demo tokens are an explicit development transport. Better Auth routes
+  // remain cookie-based and never receive this header.
+  const authorization = demoAuthorization(path, demoToken);
+  if (authorization) headers.set("Authorization", authorization);
+}
+
 async function readBody(response: Response): Promise<unknown> {
   const text = await response.text();
   if (!text) return null;
@@ -52,6 +70,7 @@ async function readBody(response: Response): Promise<unknown> {
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers);
   if (init.body && !headers.has("Content-Type")) headers.set("Content-Type", "application/json; charset=utf-8");
+  withDemoAuthorization(path, headers);
   const response = await fetch(toApiPath(path), { ...init, headers, credentials: "include" });
   const body = await readBody(response);
   if (!response.ok) {
@@ -70,23 +89,31 @@ export const api = {
   delete: <T>(path: string, body?: unknown) => request<T>(path, { method: "DELETE", body: body === undefined ? undefined : JSON.stringify(body) }),
   download: async (path: string, params?: URLSearchParams): Promise<Blob> => {
     const query = params?.toString() ? `?${params.toString()}` : "";
-    const response = await fetch(toApiPath(`${path}${query}`), { credentials: "include" });
+    const headers = new Headers();
+    withDemoAuthorization(path, headers);
+    const response = await fetch(toApiPath(`${path}${query}`), { headers, credentials: "include" });
     if (!response.ok) {
       throw apiError(response, await readBody(response), path);
     }
     return response.blob();
   },
   me: () => request<MeResponse>("/api/me"),
-  signOut: () => request<void>("/api/auth/sign-out", { method: "POST" }),
-  signIn: async (email: string, password: string): Promise<MeResponse> => {
+  signOut: async () => {
     try {
-      await request("/api/auth/sign-in/email", { method: "POST", body: JSON.stringify({ email, password }) });
-    } catch (error) {
-      if (!(typeof __CELLGUARD_DEV_SERVER__ !== "undefined" && __CELLGUARD_DEV_SERVER__ && import.meta.env.VITE_DEMO_MODE === "true")) throw error;
-      const { demoRoleForEmail } = await import("../mocks/localDemoAuth");
-      const role = demoRoleForEmail(email);
-      await request("/api/demo/login", { method: "POST", body: JSON.stringify({ email, password, role }) });
+      await request<void>("/api/auth/sign-out", { method: "POST" });
+    } finally {
+      demoToken = null;
     }
+  },
+  signIn: async (email: string, password: string): Promise<MeResponse> => {
+    if (demoTransportEnabled()) {
+      const { demoRoleForEmail } = await import("../mocks/localDemoAuth");
+      const result = await request<{ token?: unknown }>("/api/demo/login", { method: "POST", body: JSON.stringify({ email, password, role: demoRoleForEmail(email) }) });
+      if (typeof result.token !== "string" || result.token.length === 0) throw new ApiError(502, "UNKNOWN", "Demo authentication did not return a token.");
+      demoToken = result.token;
+      return api.me();
+    }
+    await request("/api/auth/sign-in/email", { method: "POST", body: JSON.stringify({ email, password }) });
     return api.me();
   },
   signUp: (body: { name: string; email: string; phone: string; password: string; termsVersion: string; privacyVersion: string; acceptedAt: string }) => request("/api/auth/sign-up/email", { method: "POST", body: JSON.stringify(body) }),
@@ -109,4 +136,8 @@ export function idempotencyKey(prefix: string): string {
 export function apiBaseUrl(): string {
   if (API_BASE) return API_BASE;
   return window.location.origin;
+}
+
+export function demoAuthToken(): string | null {
+  return demoTransportEnabled() ? demoToken : null;
 }

@@ -30,7 +30,7 @@
 | 인증·권한 | Better Auth 마이그레이션/세션으로 `/api/auth/*`, `/api/me`, `/api/admin/*` 확인 | 세션 검증과 `ADMIN` 재검증이 서버에서 동작 |
 | API 계약 변경 | [`docs/backend_contract.md`](backend_contract.md) 해당 절과 요청/응답·에러 코드 비교 | 계약서의 도메인 불변식·소유권·감사 로그를 만족 |
 
-현재 데모 런타임에는 인증 데모, 자산/세션/대시보드, 관리자 상태·메모·계정 사유 게이트, F21 fail-closed, 릴레이 승인·멱등성, Raw CSV, WS sync가 있다. `DEMO_MODE=false`의 PostgreSQL domain provider·Consumer·TimescaleDB·물리 Fail-Safe는 아직 구현/실측 전이며 `RUNTIME_NOT_READY`로 닫힌다.
+현재 데모 런타임에는 발급 토큰 인증, 자산/세션/계약형 대시보드, 핵심 사용자·관리자 REST, 관리자 상태·메모·계정 사유 게이트, F21 fail-closed, 릴레이 승인·멱등성, Raw CSV, 세션 스코프 WS가 있다. 프론트는 `npm --prefix frontend run dev:real`로 실제 REST/WS를 확인할 수 있고, 기본 `npm run e2e`는 MSW fixture 검증이다. `DEMO_MODE=false`의 PostgreSQL domain provider·Consumer·TimescaleDB·물리 Fail-Safe와 PDF aggregate export는 아직 구현/실측 전이며 각각 `RUNTIME_NOT_READY` 또는 연결 거부로 닫힌다.
 
 ## Python 도구
 
@@ -54,7 +54,7 @@ python3 -m unittest discover -s tools -p 'test_*.py'
 
 ## 프론트엔드·시각 검토
 
-- 현재 `frontend/`에는 실행 가능한 전체 React 프로젝트가 없으므로 `npm test`나 `npm run build`를 성공한 것으로 보고하지 않는다.
+- `frontend/`는 실행 가능한 전체 React 프로젝트이며 `npm run typecheck`, `npm test`, `npm run build`, `npm run e2e`로 정적·MSW 검증을 수행한다. 이 MSW 결과는 실제 REST/WS·production provider 통합의 증거로 대체하지 않는다.
 - 화면 변경은 [`docs/product_contract.md`](product_contract.md), [`docs/backend_contract.md`](backend_contract.md), [`design-system/cellguard/MASTER.md`](../design-system/cellguard/MASTER.md), 최신 권위 HTML을 함께 확인한다.
 - 반응형·접근성·WebSocket 재연결은 코드 리뷰만으로 끝내지 않고 실제 브라우저에서 데스크톱·태블릿·모바일 폭을 확인한다.
 - `anomaly_score`·등급 경계·원본 데이터 표시는 계약서의 스케일과 불변식에 맞는지 확인한다.
