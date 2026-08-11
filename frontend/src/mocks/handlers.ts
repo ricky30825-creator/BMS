@@ -79,7 +79,7 @@ const adminBatteryDetail = (battery: Battery): AdminBatteryDetail => ({
 });
 
 export const handlers = [
-  http.post("/api/auth/sign-in/email", async ({ request }) => { const body = await request.json() as { email?: string }; const email = body.email?.toLowerCase(); if (email === "lee@lab.io") currentUser = users[1]; else if (email === "hong@cellguard.io") currentUser = users[0]; else return bad(401, "UNAUTHENTICATED"); return HttpResponse.json({ user: currentUser }); }),
+  http.post("/api/auth/sign-in/email", async ({ request }) => { const body = await request.json() as { email?: string; password?: string }; const email = body.email?.trim().toLowerCase(); if (!email || !body.password) return bad(401, "UNAUTHENTICATED"); currentUser = email === "lee@lab.io" ? users[1] : users[0]; return HttpResponse.json({ user: currentUser }); }),
   http.post("/api/auth/sign-up/email", () => HttpResponse.json({ ok: true }, { status: 201 })),
   http.post("/api/auth/sign-out", () => { currentUser = null; session = null; return new HttpResponse(null, { status: 204 }); }),
   http.post("/api/account/email-lookup", () => HttpResponse.json({ email: "ho****@cellguard.io" })),

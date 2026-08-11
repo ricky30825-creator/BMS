@@ -31,10 +31,19 @@ async function stubColdApi(page: Page, role: "USER" | "ADMIN" = "USER") {
 }
 
 test.describe("authentication and cold route gates", () => {
+  test("local development login accepts arbitrary non-empty values with Enter", async ({ page }) => {
+    await page.goto("/login");
+    await page.getByLabel("이메일").fill("anything");
+    await page.getByLabel("비밀번호").fill("anything");
+    await page.getByLabel("비밀번호").press("Enter");
+    await expect(page).toHaveURL(/\/battery$/);
+    await expect(page.getByRole("heading", { name: "배터리 관리" })).toBeVisible();
+  });
+
   for (const path of ["/dashboard", "/anomaly", "/trend", "/events", "/alertHistory", "/notices", "/powerbankDiag", "/relay", "/settings"]) {
     test(`cold navigation redirects a sessionless user from ${path}`, async ({ page }) => {
       await stubColdApi(page);
-      await page.goto(path);
+      await page.goto(`${path}?mock=0`);
       await expect(page).toHaveURL(/\/battery$/);
       await expect(page.getByRole("heading", { name: "배터리 관리" })).toBeVisible();
     });
@@ -42,14 +51,14 @@ test.describe("authentication and cold route gates", () => {
 
   test("cold navigation keeps battery detail available without an active session", async ({ page }) => {
     await stubColdApi(page);
-    await page.goto("/battery/b_pack_001");
-    await expect(page).toHaveURL(/\/battery\/b_pack_001$/);
+    await page.goto("/battery/b_pack_001?mock=0");
+    await expect(page).toHaveURL(/\/battery\/b_pack_001(?:\?mock=0)?$/);
     await expect(page.getByRole("heading", { name: "PACK-001" })).toBeVisible();
   });
 
   test("cold authenticated login route lands an administrator on admin", async ({ page }) => {
     await stubColdApi(page, "ADMIN");
-    await page.goto("/login");
+    await page.goto("/login?mock=0");
     await expect(page).toHaveURL(/\/admin$/);
     await expect(page.getByRole("heading", { name: "관리자 대시보드" })).toBeVisible();
   });

@@ -6,8 +6,9 @@ import "./styles.css";
 import "./styles-v3.css";
 
 async function start() {
-  const mockRequested = import.meta.env.VITE_USE_MOCKS === "true"
-    || new URLSearchParams(window.location.search).get("mock") === "1";
+  const mockParam = new URLSearchParams(window.location.search).get("mock");
+  const mockRequested = mockParam === "1"
+    || (__CELLGUARD_DEV_SERVER__ && import.meta.env.VITE_USE_MOCKS !== "false" && mockParam !== "0");
 
   // Vite injects this as true only for `serve` in development mode. Every
   // `build` command removes this branch, regardless of mode or NODE_ENV.
