@@ -62,7 +62,11 @@ export function AppShell({ me, onLogout, onTheme, children }: { me: MeResponse; 
   const isActive = (path: string) => location.pathname === path || (path === "/battery" && location.pathname.startsWith("/battery/"));
   const showNotice = (message: string) => { setNotice(message); window.setTimeout(() => setNotice(""), 3200); };
 
-  useEffect(() => { setMobileOpen(false); setNotificationOpen(false); }, [location.pathname]);
+  useEffect(() => {
+    setMobileOpen(false);
+    setNotificationOpen(false);
+    window.scrollTo({ top: 0, left: 0, behavior: "auto" });
+  }, [location.pathname]);
 
   const go = (item: NavItem) => {
     if (locked && item.path !== "/battery") { showNotice("먼저 배터리를 연결하면 이 화면을 사용할 수 있습니다."); return; }
