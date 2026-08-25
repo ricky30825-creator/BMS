@@ -1,15 +1,11 @@
 import "dotenv/config";
 import { z } from "zod";
 
-const booleanFromEnv = z.preprocess((value) => {
-  if (typeof value === "string") return value.toLowerCase() === "true";
-  return value;
-}, z.boolean());
-
 const envSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   PORT: z.coerce.number().int().positive().default(3005),
-  DEMO_MODE: booleanFromEnv.default(false),
+  AUTH_MODE: z.enum(["demo", "betterauth"]).default("demo"),
+  DATA_MODE: z.enum(["memory", "postgres"]).default("memory"),
   DATABASE_URL: z.string().min(1),
   DATABASE_SSL: z.enum(["true", "false"]).default("false"),
   CORS_ORIGINS: z.string().default("http://localhost:5173,http://localhost:3000"),
