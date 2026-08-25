@@ -30,16 +30,16 @@
 | 백엔드 인증 골격 | `backend/src/auth.ts`, 세션 미들웨어, 감사 로그, DB 연결, Better Auth `/api/auth/*`. 데모 토큰 인증으로 RBAC·정지 계정 차단까지 실동작 | 골격 구현 / **실인증 전환은 보류(의도적)** |
 | 백엔드 데모 도메인 API | `backend/src/server.ts`(991줄): 발급 토큰 인증, 사용자·관리자 REST 56개 라우트(`/health`·`/api/demo/*` 포함), 계약형 대시보드, F21 fail-closed, 릴레이 승인·재인증·멱등성, Raw CSV. 게이트 실동작 확인(`409 BATTERY_BLOCKED`/`NO_ACTIVE_SESSION`, `401 REAUTH_REQUIRED`, `ACK_REQUIRED`, 관리자 `403`) | **데모 런타임 구현·실 REST 브라우저 검증 완료** |
 | 백엔드 도메인 데이터 저장 | `backend/src/store.ts`(360줄)가 **전부 인메모리 배열·Map**이며 SQL을 실행하지 않는다. `backend/src/db.ts`의 풀은 `auth.ts`(Better Auth)만 사용. 프로세스 재시작 시 데이터 소멸 | **미착수** (→ B1) |
-| 백엔드 실시간 스트림 (WS 발신) | 프론트가 이벤트 11종을 처리하는데 백엔드는 `relay.changed` 1종만 발신(`server.ts:530`). 주기 푸시 타이머 없음. `relay.autoCut`은 프론트 모달·핸들러만 있고 보내는 쪽이 없어 **서버 Fail-Safe가 도달 불가** | **미착수** (→ C1·B3) |
-| 백엔드 DB 도메인 provider·Consumer·TimescaleDB | `backend/migrations/001_app_auth.sql`에 자산/세션/릴레이/텔레메트리/진단/멱등성 스키마가 있고 컬럼이 `store.ts` 타입과 1:1로 맞으나, production repository·Kafka Consumer·시계열 적재는 없음. `DEMO_MODE=false`에서는 `/api/*` 전체가 `RUNTIME_NOT_READY`(503)로 fail-closed(`server.ts:331`), WS도 `socket.destroy()`(`:945`) | 스키마만 있음 / provider 미착수 |
+| 백엔드 실시간 스트림 (WS 발신) | **C1 완료(2026-08-25).** 프론트가 처리하는 11종 중 `metrics.tick`·`anomaly.score`·`anomaly.gradeChanged`·`relay.changed`·`alert.created`·`event.created`·`session.ended`·`resync.required` 8종이 실제로 발신되고, `subscribe`/`resume`이 1만 건 링버퍼로 실제 재전송을 수행한다. 단 `metrics.tick`·`anomaly.score`·`anomaly.gradeChanged`·`alert.created`는 이 저장소 안에 `battery.latest.score`를 사후에 바꾸는 코드가 아직 없어 **매초 같은 값을 반복 push하는 휴면 상태**다(AI 추론 연동 후 살아난다) — 이는 버그가 아니라 현재 범위의 자연스러운 결과다. `relay.autoCut`·`diagnosis.progress`/`.done`/`.aborted`는 여전히 미발신(§4 C1 참조) | **구현됨(부분 휴면)** — 잔여 `relay.autoCut`(→B3)·`diagnosis.*`(→ F21 안전 프로필) |
+| 백엔드 DB 도메인 provider·Consumer·TimescaleDB | `backend/migrations/001_app_auth.sql`에 자산/세션/릴레이/텔레메트리/진단/멱등성 스키마가 있고 컬럼이 `store.ts` 타입과 1:1로 맞으나, production repository·Kafka Consumer·시계열 적재는 없음. `DATA_MODE=postgres`에서는 `/api/*` 전체가 `RUNTIME_NOT_READY`(503)로 fail-closed(C2, 2026-08-25 실측), `AUTH_MODE=betterauth`에서는 WS도 `socket.destroy()`(C2b, 보류) — 단 WS upgrade는 `DATA_MODE`를 보지 않는 갭이 있다(§4 C2 참조) | 스키마만 있음 / provider 미착수 |
 | 알림 발송 (카카오·SMS·메일) | 채널 ON/OFF 토글과 policy 응답만 있고(`server.ts:405`·`:409`), **실제로 메시지를 보내는 코드는 `backend/src`에 없다** | **보류(의도적)** — 토글 현행 유지, 추가 작업 없음 |
 | AI 로컬 추론 프로세스 | 코드 없음. `ai/` 디렉터리도 없다. 학습(Colab)·체크포인트 반출 절차·추론 프로세스 모두 미착수 | 미착수 — **별도 담당자** |
 | 로컬 실행 패키징 | 프론트 production 빌드를 백엔드가 서빙하는 구성 없음(현재 5173↔3005 두 오리진), 프로세스 자동 시작 없음, 시드 데이터 절차 없음 | 미착수 (→ C8) |
 | 에지 소프트웨어 | `edge/bw150/`에 BW150 HID 로거·탐지·BLE 프로브(914줄)만 있고, 센서·릴레이·Kafka 프로듀서 구현은 없음 | 부분 구현 (BW150 한정) |
 | AI 소프트웨어 | 모델 설계는 있으나 `ai/` 디렉터리, Colab 노트북, 학습·추론·Kafka 연동 구현은 없음 | 미착수 |
-| 프론트엔드 | [`frontend/src/`](../frontend/src/)의 Vite + React + TypeScript strict 앱, v3 사용자 15·관리자 6 라우트, 계약형 API/WS 계층, MSW 시나리오, `npm run dev:real` 데모 경로. WS 이벤트 11종 핸들러가 **서버 발신을 기다리는 상태** | 부분 구현 / production provider 미착수 |
+| 프론트엔드 | [`frontend/src/`](../frontend/src/)의 Vite + React + TypeScript strict 앱, v3 사용자 15·관리자 6 라우트, 계약형 API/WS 계층, MSW 시나리오, `npm run dev:real` 데모 경로. WS 이벤트 11종 핸들러 중 **8종이 서버 발신을 실제로 수신**(C1), 잔여 `relay.autoCut`·`diagnosis.*` 3종은 여전히 대기 | 부분 구현 / production provider 미착수 |
 | 프론트엔드 실행 기반 | `frontend/package.json`, React Router, Query, RHF/Zod, 토큰 CSS, 공용 UI, Vitest/RTL/Playwright. **Vitest 44건·Playwright 28건·`tsc --noEmit` 통과**(2026-08-25 실행) | 구현됨 |
-| 미구현 REST·화면 | `POST /api/account/email-availability`, `POST /api/exports`+`GET /api/exports/{id}`, `GET /api/trends/export.pdf`(503 스텁), `GET`/`PATCH` `/api/settings/voice-alert`(백엔드·프론트 양쪽 없음) | 미착수 (→ C3·C4) |
+| 미구현 REST·화면 | **C3 완료(2026-08-25)**: `POST /api/account/email-availability`, `POST /api/exports`+`GET /api/exports/{id}`+`GET /api/exports/{id}/download`(QUEUED→READY 비동기 잡, 서명·시한부 다운로드 URL, 멱등성·소유권 검증까지 실측 완료). 남은 것은 `GET /api/trends/export.pdf`(503 스텁 — PDF 생성에 새 의존성이 필요해 이번 라운드는 범위 밖으로 확정), `GET`/`PATCH` `/api/settings/voice-alert`(백엔드·프론트 양쪽 없음) | 부분 구현 — 잔여 `export.pdf`(범위 밖 확정)·C4 |
 | 모드 1 하드웨어 | KiCad 회로 파일, [`docs/hardware/mode1_backend_spec.md`](hardware/mode1_backend_spec.md), 조립 안내서 | 문서·설계 있음, 실물 검증 전 |
 | 모드 2 하드웨어 | [`docs/hardware/mode2_powerbank_diagnosis_spec.md`](hardware/mode2_powerbank_diagnosis_spec.md) | 설계 계약 있음, 구현 전 |
 | 디자인·목업 | [`design-system/cellguard/MASTER.md`](../design-system/cellguard/MASTER.md), [`web/cellguard_mockup_v4.html`](../web/cellguard_mockup_v4.html) | 참고 산출물 있음 |
@@ -76,7 +76,7 @@ python3 tools/contract_lint.py docs/product_contract.md      # 인자 없이 부
 
 ### 2026-08-06 계약 동기화 주의
 
-v3 프로토타입과 정본 문서에는 모드 1/2, 대표 온도 최댓값, signed 전류, 모드 2 상대 SOC, F21 `0=미설정` fail-closed, 서버 승인 릴레이, Raw CSV, WS envelope, 관리자 상태·메모·계정 사유 게이트가 반영됐다. 데모 provider의 REST/WS와 실제 Chromium 클릭 검증은 완료했지만, 실제 PostgreSQL transaction provider·Kafka/Timescale 적재·물리 Fail-Safe 판정·하드웨어 릴레이는 아직 구현/실측 전이다. `DEMO_MODE=false`는 이 provider가 생길 때까지 `RUNTIME_NOT_READY`로 닫힌다.
+v3 프로토타입과 정본 문서에는 모드 1/2, 대표 온도 최댓값, signed 전류, 모드 2 상대 SOC, F21 `0=미설정` fail-closed, 서버 승인 릴레이, Raw CSV, WS envelope, 관리자 상태·메모·계정 사유 게이트가 반영됐다. 데모 provider의 REST/WS와 실제 Chromium 클릭 검증은 완료했지만, 실제 PostgreSQL transaction provider·Kafka/Timescale 적재·물리 Fail-Safe 판정·하드웨어 릴레이는 아직 구현/실측 전이다. `DATA_MODE=postgres`(과거 `DEMO_MODE=false`)는 이 provider가 생길 때까지 `RUNTIME_NOT_READY`로 닫힌다.
 
 `backend/dist/`는 TypeScript 빌드 산출물이며 소스 구현의 근거로 세지 않는다. `PLAN.md`의 예정 폴더 구조도 실제 디렉터리 존재를 의미하지 않는다.
 
@@ -92,7 +92,7 @@ v3 프로토타입과 정본 문서에는 모드 1/2, 대표 온도 최댓값, s
 | Phase 2 에지 수집 | 센서·100ms 폴링·릴레이·음성·프로듀서 | 미착수 (BW150 도구만 존재) |
 | Phase 3 스트리밍 | Consumer·세션 태깅·적재·오프셋 | 미착수 |
 | Phase 4 AI | 데이터셋·특징·AE·Informer·추론 | 미착수. **추론이 Colab에서 호스트 PC로 내려왔고 별도 담당자 몫** |
-| Phase 5 웹 | React 초기화·라우팅·화면·관리자 | 부분 구현. v3 화면·계약 계층·mock QA·localhost demo REST 연결 완료. **WS는 수신 측만 완성**이고 서버 발신은 1/11종, production provider 통합 미완료 |
+| Phase 5 웹 | React 초기화·라우팅·화면·관리자 | 부분 구현. v3 화면·계약 계층·mock QA·localhost demo REST 연결 완료. **WS 서버 발신이 1/11종 → 8/11종으로 확장**(C1, 2026-08-25)됐으나 잔여 2종은 각각 B3·F21 안전 프로필 선행. production DB provider 통합(B1)은 미완료 |
 | Phase 6 알림·차단 | 카카오·Fail-Safe·음성 설정 | **카카오는 보류(의도적).** Fail-Safe는 판정 코드 자체가 없고, 음성 설정은 API·화면 모두 없음 — 이 둘은 미착수 |
 | Phase 7 통합·**로컬 실행 패키징** | E2E·시나리오·실행 묶기 | 미착수. **AWS 배포 항목은 삭제**(클라우드 미사용). 단 프론트 단독 E2E(Playwright 28건)는 동작 |
 
@@ -119,6 +119,8 @@ v3 프로토타입과 정본 문서에는 모드 1/2, 대표 온도 최댓값, s
 ## 권장 다음 순서
 
 > 아래는 프로젝트 전체 순서다. **본인(프론트·백엔드) 몫의 구체적 착수 순서는 [「남은 작업과 담당 경계」 §6](#6-착수-순서-제안)에 있다.**
+>
+> **2026-08-25 업데이트**: §6의 C1(WebSocket 실시간 발신)·C2(`AUTH_MODE`/`DATA_MODE` 분리)·C3(REST 2건)가 완료됐다. 아래 4번 "프론트엔드 계약 계층을 실WebSocket에 연결"의 서버 측 절반은 이걸로 끝났고, 다음은 1번(B1 리포지토리 교체)과 B3(Fail-Safe) 순서다 — 상세는 §6.
 
 1. 백엔드의 `battery_asset`·`measurement_session`과 Kafka/DB 경계를 구현한다.
 2. 에지 수집 계약을 코드로 옮기고 모드 1 실물 게이트를 닫는다.
@@ -139,13 +141,14 @@ v3 프로토타입과 정본 문서에는 모드 1/2, 대표 온도 최댓값, s
 
 **판단과 구현을 구분한다.** 경계가 애매한 항목에서 *무엇을 언제 어떤 규칙으로* 정하는 것은 백엔드 담당(계약 문서를 읽는 사람)의 몫이고, *어디에 어떻게 적재·전달할지*는 인프라 담당의 몫이다. 판단을 인프라 담당에게 넘기면 안전 로직이 두 곳으로 쪼개진다 — CLAUDE.md가 릴레이 채널 매핑을 모드 1·2에서 통일해 둔 것과 같은 이유다(*"안전 로직에서 두 벌은 곧 버그다"*).
 
-## 1. 지금 실제로 돌아가는 것 (2026-08-25 실측)
+## 1. 지금 실제로 돌아가는 것 (2026-08-25 실측, C1/C2/C3 반영)
 
-- `backend`·`frontend` 타입체크 통과, Vitest 44건, Playwright 28건, `contract_lint.py` 위반 0건.
-- `DEMO_MODE=true` + `npm run dev:real`로 브라우저에서 로그인 → 자산 게이트 → 세션 시작 → 대시보드까지 실제 REST/WS로 동작. 콘솔 에러 없음.
+- `backend` 타입체크 통과 + Vitest **21건**(신규 — 이번 계획에서 처음 생긴 백엔드 테스트 하네스. `grade.ts`·`eventLog.ts`·`store.ts`(신규 `sessionById`)·`exports.ts`), `frontend` 타입체크 통과 + Vitest 44건 + Playwright 28건, `contract_lint.py` 위반 0건.
+- `AUTH_MODE=demo DATA_MODE=memory` + `npm run dev:real`로 브라우저에서 로그인 → 자산 게이트 → 세션 시작 → 대시보드까지 실제 REST/WS로 동작. 콘솔 에러 없음. (`DEMO_MODE`는 C2에서 완전히 제거됐다 — 아래 참조.)
 - 서버측 게이트 실동작 확인: `409 BATTERY_BLOCKED`, `409 NO_ACTIVE_SESSION`, `401 REAUTH_REQUIRED`, `ACK_REQUIRED`, USER의 관리자 API `403`.
+- **C1**: WebSocket이 `relay.changed` 1종에서 8종 발신으로 확장됐다(§4 C1). **C2**: `DEMO_MODE` → `AUTH_MODE`/`DATA_MODE` 분리 완료. **C3**: `email-availability`·`exports` 계열 REST 2건 신규 구현.
 
-**단, 도메인 데이터는 전부 인메모리다.** `backend/src/store.ts`(360줄)는 `node:crypto`만 import하며 어떤 SQL도 실행하지 않는다. `backend/src/db.ts`의 풀은 `auth.ts`(Better Auth)만 쓴다.
+**단, 도메인 데이터는 전부 인메모리다.** `backend/src/store.ts`는 `node:crypto`만 import하며 어떤 SQL도 실행하지 않는다. `backend/src/db.ts`의 풀은 `auth.ts`(Better Auth)만 쓴다. **이 문서의 C1/C2/C3 실측은 모두 인메모리 데이터 위에서 확인한 것이며, `DATA_MODE=postgres`(B1)는 여전히 미착수다.**
 
 ## 2. A군 — 타 담당자 몫
 
@@ -195,7 +198,7 @@ v3 프로토타입과 정본 문서에는 모드 1/2, 대표 온도 최댓값, s
 - **주의**: 함수들이 동기 시그니처다. SQL로 바꾸면 전부 `Promise`가 되어 **`server.ts`의 모든 호출부가 `await`로 바뀐다.** 이 변환이 이 작업 분량의 절반이다. 한 번에 다 바꾸지 말고 리포지토리 인터페이스를 먼저 정의하고 도메인별로 옮긴다.
 - **트랜잭션**: `backend/src/db.ts`의 `inTransaction()`이 이미 있다. `changeRelay`·`changeOpsStatus`·`startSession`처럼 감사로그를 같이 남기는 것은 반드시 한 트랜잭션에 넣는다.
 - **동시성**: `measurement_session`에 `unique (device_id) where status='ACTIVE'`, `diagnosis`에 `unique (battery_id) where status='RUNNING'` 부분 인덱스가 이미 있다. 애플리케이션 레벨 체크에 의존하지 말고 이 제약 위반을 잡아 `409`로 변환한다.
-- **완료 판정**: `DEMO_MODE=false`로 띄우고 브라우저 시나리오(로그인→자산→세션→대시보드→릴레이 차단)가 끝까지 동작. 프로세스 재시작 후 데이터 유지.
+- **완료 판정**: `AUTH_MODE=demo DATA_MODE=postgres`로 띄우고 브라우저 시나리오(로그인→자산→세션→대시보드→릴레이 차단)가 끝까지 동작. 프로세스 재시작 후 데이터 유지.
 
 ### B2. `battery_id` 세션 태깅 — **규칙은 백엔드, 실행은 Consumer**
 
@@ -226,60 +229,61 @@ v3 프로토타입과 정본 문서에는 모드 1/2, 대표 온도 최댓값, s
 
 ## 4. C군 — 백엔드·프론트 몫 (Kafka·DB 무관)
 
-### C1. WebSocket 실시간 발신 — **최우선**
+### C1. WebSocket 실시간 발신 — **완료(2026-08-25)**
 
-프론트엔드는 이벤트 **11종**을 처리하는데 백엔드가 보내는 건 **1종**(`relay.changed`, `backend/src/server.ts:530`)뿐이다. `broadcast()` 함수는 `:895`에 있고 호출부가 한 곳이며, 주기 푸시 타이머(`setInterval`)가 전혀 없다.
+프론트엔드가 처리하는 이벤트 **11종** 중 **8종을 실제로 발신한다.** `metrics.tick`·`anomaly.score`는 전역 활성 세션의 배터리에 대해 **매초** 실제 저장값을 push하고(현재 그 값을 사후에 바꾸는 코드가 저장소 어디에도 없어 지금은 정적값 반복이며, 이는 이번 계획의 범위 밖인 AI 추론 연동이 끝나야 움직인다 — 의도된 상태), `anomaly.gradeChanged`·`alert.created`는 등급 전이 감지와 `titleCode: "ANOMALY_GRADE_ESCALATED"` 알림 생성까지 배선은 맞았지만 같은 이유로 지금은 휴면이다. `event.created`는 릴레이 차단/복구 등 실제 액션에서 발신되고, `session.ended`는 세션이 상위 세션에 의해 대체되거나 관리자가 활성 배터리를 차단할 때 발신된다 — 이를 위해 `broadcast()`의 전달 게이트를 고쳤다(아래 참조). `subscribe`/`resume`은 더는 no-op ACK가 아니라 1만 건 링버퍼에서 실제로 누락 이벤트를 재전송하고, 커서가 버퍼에서 밀려났으면 `resync.required`를 정확히 반환한다.
 
 | 이벤트 | 프론트 핸들러 | 계약 | 상태 |
 |---|---|---|---|
-| `metrics.tick` | `useRealtime.ts:246` | `backend_contract.md:1597`·`:1624` | ✗ |
-| `anomaly.score` | `:255` | `:1625` | ✗ |
-| `anomaly.gradeChanged` | `:266` | `:1626` | ✗ |
-| `relay.changed` | `:271` | — | **✓ 유일** |
+| `metrics.tick` | `useRealtime.ts:246` | `backend_contract.md:1597`·`:1624` | ✓ (휴면 — 위 참조) |
+| `anomaly.score` | `:255` | `:1625` | ✓ (휴면 — 위 참조) |
+| `anomaly.gradeChanged` | `:266` | `:1626` | ✓ (휴면 — 위 참조) |
+| `relay.changed` | `:271` | — | ✓ |
 | `relay.autoCut` | `:285` | `:1628` (B3) | ✗ |
-| `alert.created` | `:290` | `:1629` | ✗ |
-| `event.created` | `:291` | `:1630` | ✗ |
-| `session.ended` | `:292` | `:1631` | ✗ |
+| `alert.created` | `:290` | `:1629` | ✓ (휴면 — 위 참조) |
+| `event.created` | `:291` | `:1630` | ✓ |
+| `session.ended` | `:292` | `:1631` | ✓ |
 | `diagnosis.progress`/`.done`/`.aborted` | `:297` | `:1633` | ✗ |
-| `resync.required` | `:309` | `:1638` | ✗ |
+| `resync.required` | `:309` | `:1638` | ✓ |
 
+- **`relay.autoCut`은 이번 계획에서 시도하지 않았다** — B3(Fail-Safe 판정 로직)가 저장소 어디에도 없어 이 이벤트를 트리거할 실행 경로 자체가 없다. B3을 먼저 구현할 것.
+- **`diagnosis.progress`/`.done`/`.aborted`도 시도하지 않았다** — `store.ts`의 `F21_THRESHOLDS.configured`가 하드코딩 `false`라 `startDiagnosis`가 항상 `409 SAFETY_PROFILE_NOT_READY`를 던지고, 진단 진행을 시뮬레이션할 도달 가능한 코드 경로가 없다. 이 플래그를 켜는 작업(§8 H2 등 안전 문턱 확정)이 선행돼야 한다.
 - **`metrics.tick`은 100ms 원본을 그대로 흘리지 않는다.** 서버가 **1초 단위로 다운샘플링**해 푸시한다(`:1643`). 페이로드는 `GET /api/dashboard`의 `metrics`와 **동일 구조**(각 지표 `{ value, status }` + `measuredAt`).
 - **`relay.autoCut`을 `relay.changed`에 섞지 않는다**(`:1646`) — 사용자 차단과 구분이 안 된다.
 - **`anomaly.gradeChanged`는 등급 전이에서만**(`:1647`), **`diagnosis.progress`는 단계 전환에서만**(`:1648`) 보낸다.
+- **`session.ended` 전달 게이트 수정**: `broadcast()`가 원래 "배터리가 여전히 현재 활성 상태"를 요구해 배달했는데, `session.ended`는 정의상 "방금 활성 상태를 벗어난 배터리"에 관한 이벤트라 이 조건으로는 영구히 배달 불가능이었다. `session.ended`에 한해 `client.batteryId === batteryId`만 요구하도록 특별 처리해 해결했다.
 - 봉투 형식과 `sequence`/`cursor`는 이미 `server.ts:878`(`wsEnvelope`)에 구현돼 있으니 재사용한다.
-- **완료 판정**: 대시보드를 열어둔 채 값이 1초마다 갱신되고, 등급 전이·알림·이벤트가 새로고침 없이 반영됨
+- **완료 판정**: 대시보드를 열어둔 채 값이 1초마다 갱신되고, 등급 전이·알림·이벤트가 새로고침 없이 반영됨 — **충족.** (단, 등급 전이·알림은 점수가 실제로 바뀌어야 관찰 가능하므로 AI 추론 연동 전까지는 육안 확인이 어렵다.)
 
-### C2. `DEMO_MODE` → `AUTH_MODE` + `DATA_MODE` 분리 — **B1의 선행 작업**
+### C2. `DEMO_MODE` → `AUTH_MODE` + `DATA_MODE` 분리 — **완료(2026-08-25)**
 
-지금 `DEMO_MODE` **한 개가 두 축을 동시에** 켜고 끈다. 그래서 "인증은 데모, 데이터는 PostgreSQL"이 불가능하고, 인증을 보류한 채로는 B1을 시작할 수 없다.
+`DEMO_MODE`는 저장소에서 완전히 제거됐다(`grep -rn "DEMO_MODE" backend/src`가 0건). 대신 서로 독립인 두 변수로 쪼갰다.
 
-- 인증 방식 — `backend/src/auth/middleware.ts:68`이 `!DEMO_MODE`면 데모 토큰을 아예 무시한다
-- 도메인 데이터 가용성 — `backend/src/server.ts:331`의 가드가 `!DEMO_MODE`면 `/api/*` 전부 503
+- `AUTH_MODE=demo|betterauth`(기본 `demo`), `DATA_MODE=memory|postgres`(기본 `memory`).
+- `GET /health`가 `{ status, auth, data }`를 반환하도록 바뀜 — 지금 어떤 조합으로 떠 있는지 즉시 보인다.
+- `/api/*` 도메인 게이트는 **`DATA_MODE`만 본다**: `memory`면 열려 인메모리 데모 스토어를 정직하게 서빙하고, `postgres`면 여전히 `503 RUNTIME_NOT_READY`다 — 실측으로 양방향 확인했다.
 
-**해야 할 일**
+**⚠️ 이 게이트는 의도된 것이지 미완성이 아니다.** `store.ts`를 대체할 실 PostgreSQL 리포지토리(B1)가 아직 없으므로, `DATA_MODE=postgres`가 게이트를 열면 "실 DB"라는 라벨을 달고 조작된 인메모리 데이터를 내보내게 된다. **B1이 끝나기 전까지 `DATA_MODE=postgres`는 계속 503이어야 정상이다.** "당면 목표 조합 `AUTH_MODE=demo` + `DATA_MODE=postgres`"는 이 문서가 세워질 때부터 B1 완료를 전제로 한 목표였고, 이번 계획(C1/C2/C3)은 B1을 건드리지 않았으므로 아직 도달하지 않았다.
 
-- `AUTH_MODE=demo|betterauth`, `DATA_MODE=memory|postgres` 두 변수로 쪼갠다 (`backend/src/config/env.ts`).
-- `server.ts:331`의 503 가드는 **`DATA_MODE`를 보게** 바꾼다. `middleware.ts:68`·`:92`와 WS upgrade 핸들러의 데모 분기(`server.ts:934`)는 **`AUTH_MODE`를 보게** 바꾼다.
-- `/health` 응답에 두 값을 함께 싣는다 — `{"status":"ok","auth":"demo","data":"postgres"}`. 지금 어떤 조합으로 돌고 있는지 로그·헬스체크로 즉시 보이게 하기 위해서다.
-- `.env.example`, `backend/README.md`, `frontend/package.json`의 `dev:real` 스크립트도 같이 고친다.
-- **당면 목표 조합은 `AUTH_MODE=demo` + `DATA_MODE=postgres`다.**
+**⚠️ 새로 발견된 실제 갭 — 이번 계획에서 고치지 않음**: WebSocket upgrade 핸들러의 데모/프로덕션 분기 선택이 **`AUTH_MODE`만 보고 `DATA_MODE`를 전혀 보지 않는다.** 즉 `AUTH_MODE=demo`로 데모 인증에 성공한 WS 연결은 `DATA_MODE=postgres`여도 그대로 성공해 (데모) 데이터를 계속 스트리밍한다 — REST가 갖는 "`DATA_MODE=postgres`면 fail-closed" 보장이 WebSocket에는 확장되지 않는다. `backend/README.md`에 이미 명시적으로 기록해뒀지만 **고치지는 않았다.** WS upgrade 경로에 `DATA_MODE` 체크를 추가하는 건 이번 계획 범위 밖의 실제 설계 과제이며, 아래 C2b(프로덕션 WebSocket 인증, 이 문서에 이미 별도로 보류 처리돼 있던 항목)와 묶어 다음에 처리하는 게 자연스럽다.
 
-**주의**: Better Auth 코드와 `/api/auth/*` 라우트는 **삭제하지 않는다**(2026-08-25 결정). `AUTH_MODE=betterauth`로 바꾸면 켜지는 상태로 남긴다. 데모 쿼리 토큰(`access_token`)은 `AUTH_MODE=betterauth`에서 **절대 허용하지 않는다**(`backend/README.md`).
+**주의**: Better Auth 코드와 `/api/auth/*` 라우트는 **삭제하지 않았다**(2026-08-25 결정 유지). `AUTH_MODE=betterauth`로 바꾸면 켜지는 상태로 남아 있다. 데모 쿼리 토큰(`access_token`)은 `AUTH_MODE=betterauth`에서 **절대 허용하지 않는다**(`backend/README.md`).
 
-**완료 판정**: `AUTH_MODE=demo DATA_MODE=postgres`로 띄워 브라우저 시나리오가 끝까지 동작하고, 재시작 후 데이터가 유지된다.
+**완료 판정**: 메커니즘(변수 분리·`/health`·REST 게이트)은 실측 완료. **`AUTH_MODE=demo DATA_MODE=postgres`로 브라우저 시나리오가 끝까지 도는 것은 B1이 끝나야 성립**하며 아직 아니다 — 이 완료 판정 문장은 B1 완료 시점의 기준으로 남겨둔다.
 
 ### C2b. production 인증 경로 (WebSocket) — **보류(의도적)**
 
-- **현재 상태**: `DEMO_MODE=false`이면 upgrade 핸들러가 Better Auth 세션을 확인한 **뒤에도 그냥 `socket.destroy()`** 한다(`backend/src/server.ts:945-948`).
+- **현재 상태**: `DEMO_MODE=false`이면 upgrade 핸들러가 Better Auth 세션을 확인한 **뒤에도 그냥 `socket.destroy()`** 한다(과거 `backend/src/server.ts:945-948`; C2에서 `DEMO_MODE`가 제거되며 이 분기는 `AUTH_MODE`를 보도록만 갱신됐고 실제 구독 경로 연결은 손대지 않았다).
 - Phase 1 인증 보류 결정에 따라 **지금 하지 않는다.** C2에서 `AUTH_MODE`로 분기만 정리해두고, 나중에 인증을 켤 때 이 분기를 실제 구독 경로로 연결한다.
+- **위 C2의 "새로 발견된 실제 갭"(WS가 `DATA_MODE`를 안 봄)을 되살릴 때 같이 처리하는 것을 권장한다** — 둘 다 WS upgrade 핸들러의 같은 분기 지점을 고치는 작업이라 따로 하면 두 번 건드리게 된다.
 
-### C3. REST 미구현 — 실제로 3건뿐
+### C3. REST 미구현 — **완료(2026-08-25), 잔여 1건은 범위 밖 확정**
 
 | 엔드포인트 | 계약 | 현재 |
 |---|---|---|
-| `POST /api/account/email-availability` | `backend_contract.md:467` | 404 — 회원가입 이메일 중복확인 |
-| `POST /api/exports` + `GET /api/exports/{id}` | `:904`·`:905` | 404 — 1시간 초과 CSV 비동기 작업. `export.ready` WS 이벤트 동반 |
-| `GET /api/trends/export.pdf` | `:907` | 503 스텁 (`server.ts:832`) |
+| `POST /api/account/email-availability` | `backend_contract.md:467` | **✓ 구현·실측 완료** — 회원가입 이메일 중복확인 |
+| `POST /api/exports` + `GET /api/exports/{id}` + `GET /api/exports/{id}/download` | `:904`·`:905` | **✓ 구현·실측 완료** — QUEUED→READY 비동기 잡 전체 생애주기를 서명·시한부 다운로드 URL과 함께 구현. 멱등성·소유권 검증까지 end-to-end 실측 |
+| `GET /api/trends/export.pdf` | `:907` | 503 스텁 (`server.ts:832`), **변경 없음** — PDF 생성이 새 의존성을 요구해 이번 라운드는 명시적으로 범위 밖 |
 
 ### C4. 음성 안내 설정 `/api/settings/voice-alert`
 
@@ -328,19 +332,21 @@ AWS 배포는 삭제됐지만, 호스트 PC 1대에서 **재현 가능하게 묶
 
 ## 6. 착수 순서 제안
 
-1. **B군 4건의 담당을 문서로 확정한다** — 코드보다 먼저. 특히 B3(Fail-Safe)는 넘기지 않는다.
-2. **C1 WebSocket 발신** — Kafka·DB 없이 지금 당장 가능하고, 프론트가 이미 기다리고 있어 효과가 즉시 보인다. 인메모리 스토어 기반으로 먼저 구현해도 된다.
-3. **C2 `AUTH_MODE`/`DATA_MODE` 분리** — 작지만 B1의 선행이다. 이걸 안 하면 인증 보류 상태로 DB를 붙일 수 없다.
-4. **B1 리포지토리 교체** — 분량이 가장 크다(360줄 + 동기→비동기 전환). A-1 담당자의 A2와 병렬 진행 가능.
-5. **B3·B4 안전 경로** — A2/A4가 데이터를 주기 시작한 뒤.
-6. **C8 로컬 실행 패키징** — 시연 리허설 전에 끝나야 한다. 단일 오리진 전환은 CORS·쿠키를 건드리므로 마지막에 몰아서 하지 말 것.
-7. **C3·C4·C6·C7** — 나머지. (C2b·C5는 보류)
+1. ~~**B군 4건의 담당을 문서로 확정한다**~~ — 코드보다 먼저. 특히 B3(Fail-Safe)는 넘기지 않는다.
+2. ~~**C1 WebSocket 발신**~~ — **완료(2026-08-25).** 8/11종 발신, 링버퍼 재전송 포함. 잔여는 `relay.autoCut`(B3 선행)·`diagnosis.*`(F21 안전 프로필 선행).
+3. ~~**C2 `AUTH_MODE`/`DATA_MODE` 분리**~~ — **완료(2026-08-25).** 단 `DATA_MODE=postgres`는 B1이 끝날 때까지 계속 503이 맞다. WS upgrade가 `DATA_MODE`를 안 보는 갭이 새로 발견됐다(§4 C2 참조, 미수정).
+4. **B1 리포지토리 교체** — **다음 우선순위.** 분량이 가장 크다(`store.ts` 전체 + 동기→비동기 전환). A-1 담당자의 A2와 병렬 진행 가능. C2가 끝나 `AUTH_MODE=demo DATA_MODE=postgres` 조합의 배선은 준비돼 있으니, B1이 끝나는 즉시 이 조합이 실제로 열린다.
+5. **B3·B4 안전 경로** — A2/A4가 데이터를 주기 시작한 뒤. B3이 끝나면 C1의 `relay.autoCut`도 같이 닫힌다.
+6. ~~**C3 REST 미구현**~~ — **완료(2026-08-25).** `email-availability`·`exports` 계열 구현·실측 완료. `export.pdf`는 범위 밖 확정으로 남김.
+7. **C8 로컬 실행 패키징** — 시연 리허설 전에 끝나야 한다. 단일 오리진 전환은 CORS·쿠키를 건드리므로 마지막에 몰아서 하지 말 것.
+8. **C4·C6·C7, 그리고 WS의 `DATA_MODE` 인지(C2 갭)** — 나머지. (C2b·C5는 보류)
 
 ### 지금 하지 않기로 한 것
 
 | 항목 | 이유 | 되살릴 때 |
 |---|---|---|
 | Better Auth 실인증 (C2b) | Phase 1 보류 결정 | `AUTH_MODE=betterauth`로 전환 + WS upgrade 분기 연결 |
+| WS upgrade의 `DATA_MODE` 인지 (C2 갭, 2026-08-25 신규 발견) | 이번 계획(C1/C2/C3) 범위 밖. `AUTH_MODE=demo`이면 `DATA_MODE=postgres`여도 WS가 열려 데모 데이터를 계속 스트리밍한다 — REST의 fail-closed가 WS에는 확장 안 됨 | WS upgrade 핸들러에 `DATA_MODE` 체크 추가. C2b(프로덕션 WS 인증)와 같은 지점을 고치므로 함께 처리 권장 |
 | 카카오톡 발송 (C5) | Phase 6 보류 결정 | 토글은 이미 있으니 발송 경로만 추가 |
 | AWS 배포 | 로컬 단일 PC 구성 | 해당 없음 |
 
