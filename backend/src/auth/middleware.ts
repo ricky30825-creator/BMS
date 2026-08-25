@@ -46,7 +46,7 @@ export function issueDemoToken(user: AppUser): string {
 }
 
 export function demoUserForToken(token: string | null | undefined): AppUser | null {
-  if (!env.DEMO_MODE || !token) return null;
+  if (env.AUTH_MODE !== "demo" || !token) return null;
   const userId = demoTokens.get(token);
   const user = userId ? userById(userId) : undefined;
   return user ? { id: user.id, email: user.email, name: user.name, role: user.role, status: user.status } : null;
@@ -57,7 +57,7 @@ export function revokeDemoToken(token: string | null | undefined): void {
 }
 
 export function demoPasswordMatches(userId: string, password: string): boolean {
-  return env.DEMO_MODE && (demoPasswords.get(userId) ?? DEMO_PASSWORD) === password;
+  return env.AUTH_MODE === "demo" && (demoPasswords.get(userId) ?? DEMO_PASSWORD) === password;
 }
 
 export function setDemoPassword(userId: string, password: string): void {
@@ -65,7 +65,7 @@ export function setDemoPassword(userId: string, password: string): void {
 }
 
 function demoUserFromRequest(req: Request): AppUser | null {
-  if (!env.DEMO_MODE) return null;
+  if (env.AUTH_MODE !== "demo") return null;
   const token = req.get("authorization")?.match(/^Demo\s+(.+)$/i)?.[1];
   return demoUserForToken(token);
 }
@@ -89,7 +89,7 @@ export async function requireSession(req: Request, res: Response, next: NextFunc
     next();
     return;
   }
-  if (env.DEMO_MODE && /^Demo\s+/i.test(req.get("authorization") ?? "")) {
+  if (env.AUTH_MODE === "demo" && /^Demo\s+/i.test(req.get("authorization") ?? "")) {
     res.status(401).json({ error: { code: "UNAUTHENTICATED", message: "The demo token is invalid." } });
     return;
   }
@@ -137,7 +137,7 @@ export function requireRole(role: AppRole) {
       next();
       return;
     }
-    if (env.DEMO_MODE && /^Demo\s+/i.test(req.get("authorization") ?? "")) {
+    if (env.AUTH_MODE === "demo" && /^Demo\s+/i.test(req.get("authorization") ?? "")) {
       res.status(401).json({ error: { code: "UNAUTHENTICATED", message: "The demo token is invalid." } });
       return;
     }
