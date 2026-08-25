@@ -9,6 +9,7 @@ import { corsOrigins, env } from "./config/env.js";
 import { demoPasswordMatches, demoUserForToken, issueDemoToken, requireRole, requireSession, revokeDemoToken, setDemoPassword } from "./auth/middleware.js";
 import { writeAuditLog } from "./auth/audit.js";
 import { detectGradeTransition, gradeForScore, type Grade } from "./realtime/grade.js";
+import { createEventLog } from "./realtime/eventLog.js";
 import {
   F21_THRESHOLDS,
   abortDiagnosis,
@@ -43,6 +44,7 @@ const httpServer = createServer(app);
 type WsTopic = "metrics" | "anomaly" | "relay" | "alert" | "event" | "session" | "diagnosis";
 type WsClient = { socket: Socket; batteryId: string | null; userId: string; role: "USER" | "ADMIN"; topics: Set<WsTopic>; subscribed: boolean };
 const wsClients = new Set<WsClient>();
+const eventLog = createEventLog(10_000);
 let wsSequence = 0;
 const wsStreamId = "demo-stream";
 const demoPreferences = new Map<string, { theme: "light" | "dark" | "system"; lang: "ko" | "en" }>();
@@ -886,8 +888,10 @@ function wsEnvelope(type: string, payload: unknown, requestId: string | null = n
 }
 
 function broadcast(type: string, payload: unknown, requestId: string | null = null, batteryId: string | null = null): void {
-  const frame = wsFrame(JSON.stringify(wsEnvelope(type, payload, requestId)));
+  const envelope = wsEnvelope(type, payload, requestId);
   const topic = topicForType(type);
+  eventLog.record({ sequence: BigInt(envelope.sequence), topic, batteryId, envelope });
+  const frame = wsFrame(JSON.stringify(envelope));
   const active = batteryId ? activeSession() : null;
   for (const client of wsClients) {
     const canReceive = Boolean(batteryId && active && active.batteryId === batteryId && active.ownerId === client.userId && client.batteryId === batteryId);
@@ -960,8 +964,18 @@ httpServer.on("upgrade", async (req: IncomingMessage, socket: Socket) => {
       if (!message) { socket.destroy(); return; }
       if (message.type === "subscribe" || message.type === "resume") {
         if (!client.batteryId) { socket.destroy(); return; }
+        const replay = eventLog.replay(message.afterCursor ?? "0");
+        if (replay.expired) {
+          socket.write(wsFrame(JSON.stringify(wsEnvelope("resync.required", { requestId: message.requestId, reason: "CURSOR_EXPIRED", latestCursor: String(wsSequence) }, message.requestId))));
+          return;
+        }
         client.topics = new Set(message.topics);
         client.subscribed = true;
+        for (const stored of replay.events) {
+          if (!client.topics.has(stored.topic)) continue;
+          if (stored.batteryId && stored.batteryId !== client.batteryId) continue;
+          socket.write(wsFrame(JSON.stringify(stored.envelope)));
+        }
         socket.write(wsFrame(JSON.stringify(wsEnvelope(message.type === "subscribe" ? "subscribed" : "resumed", {
           requestId: message.requestId,
           streamId: wsStreamId,
