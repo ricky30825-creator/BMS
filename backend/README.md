@@ -27,7 +27,12 @@ URL-encoded `access_token` only for the development WebSocket connection.
 Better Auth cookie transport remains unchanged for production paths.
 
 The demo provider is intentionally not a production substitute. With
-`DATA_MODE=postgres`, domain APIs and WebSocket streams fail closed until the
-PostgreSQL-backed provider (B1) is implemented.
+`DATA_MODE=postgres`, domain REST APIs (`/api/*`) fail closed until the
+PostgreSQL-backed provider (B1) is implemented. WebSocket sessions are a
+separate axis — the WS upgrade handler currently only checks `AUTH_MODE`,
+not `DATA_MODE`, so an `AUTH_MODE=demo` WebSocket connection still succeeds
+and streams live demo data even when `DATA_MODE=postgres`. This is a known
+gap (tracked alongside C2b, the deferred production WebSocket auth path),
+not yet closed.
 
 Run `migrations/001_app_auth.sql` after creating the Better Auth core tables. The Better Auth schema should be generated from the configured version with `npm run auth:generate` so it stays aligned with the library.

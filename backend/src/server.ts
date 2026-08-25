@@ -967,8 +967,9 @@ httpServer.on("upgrade", async (req: IncomingMessage, socket: Socket) => {
     try {
       const session = await auth.api.getSession({ headers: fromNodeHeaders(req.headers) });
       if (!session) { closeUnauthenticated(socket, 401, "Unauthorized"); return; }
-      // The domain provider is intentionally unavailable while AUTH_MODE is
-      // not "demo", so do not expose a fabricated stream in this fail-closed mode.
+      // The production WebSocket auth path is not wired up yet (C2b,
+      // deferred): even a valid Better Auth session gets no stream here.
+      // This is independent of DATA_MODE / domain-provider availability.
       socket.destroy();
       return;
     } catch {
