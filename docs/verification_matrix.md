@@ -30,7 +30,7 @@
 | 인증·권한 | Better Auth 마이그레이션/세션으로 `/api/auth/*`, `/api/me`, `/api/admin/*` 확인 | 세션 검증과 `ADMIN` 재검증이 서버에서 동작 |
 | API 계약 변경 | [`docs/backend_contract.md`](backend_contract.md) 해당 절과 요청/응답·에러 코드 비교 | 계약서의 도메인 불변식·소유권·감사 로그를 만족 |
 
-현재 데모 런타임에는 발급 토큰 인증, 자산/세션/계약형 대시보드, 핵심 사용자·관리자 REST, 관리자 상태·메모·계정 사유 게이트, F21 fail-closed, 릴레이 승인·멱등성, Raw CSV, 세션 스코프 WS가 있다. 프론트는 `npm --prefix frontend run dev:real`로 실제 REST/WS를 확인할 수 있고, 기본 `npm run e2e`는 MSW fixture 검증이다. `DEMO_MODE=false`의 PostgreSQL domain provider·Consumer·TimescaleDB·물리 Fail-Safe와 PDF aggregate export는 아직 구현/실측 전이며 각각 `RUNTIME_NOT_READY` 또는 연결 거부로 닫힌다.
+현재 데모 런타임에는 발급 토큰 인증, 자산/세션/계약형 대시보드, 핵심 사용자·관리자 REST, 관리자 상태·메모·계정 사유 게이트, F21 fail-closed, 릴레이 승인·멱등성, Raw CSV, 세션 스코프 WS가 있다. 프론트는 `npm --prefix frontend run dev:real`로 실제 REST/WS를 확인할 수 있고, 기본 `npm run e2e`는 MSW fixture 검증이다. `DATA_MODE=postgres`의 PostgreSQL domain provider·Consumer·TimescaleDB·물리 Fail-Safe와 PDF aggregate export는 아직 구현/실측 전이며 각각 `RUNTIME_NOT_READY` 또는 연결 거부로 닫힌다.
 
 ## Python 도구
 

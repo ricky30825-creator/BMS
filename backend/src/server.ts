@@ -293,11 +293,11 @@ function requireIdempotency(req: Request, res: Response): string | null {
 }
 
 app.get("/health", (_req, res) => {
-  res.json({ status: "ok", mode: env.DEMO_MODE ? "demo" : "database" });
+  res.json({ status: "ok", auth: env.AUTH_MODE, data: env.DATA_MODE });
 });
 
 app.post("/api/demo/login", (req, res) => {
-  if (!env.DEMO_MODE) {
+  if (env.AUTH_MODE !== "demo") {
     apiError(res, 404, "NOT_FOUND", "Demo authentication is disabled.");
     return;
   }
@@ -318,7 +318,7 @@ app.post("/api/demo/login", (req, res) => {
 });
 
 app.post("/api/demo/logout", (req, res) => {
-  if (!env.DEMO_MODE) {
+  if (env.AUTH_MODE !== "demo") {
     apiError(res, 404, "NOT_FOUND", "Demo authentication is disabled.");
     return;
   }
@@ -331,14 +331,16 @@ app.post("/api/demo/logout", (req, res) => {
   res.status(204).send();
 });
 
-// The repository-backed demo store is intentionally explicit.  A production
-// process must not silently serve fabricated telemetry or admin state.
+// DATA_MODE=memory serves the explicit in-memory demo store (store.ts).
+// DATA_MODE=postgres stays fail-closed until the real repository (B1) exists
+// — a process must never silently serve fabricated telemetry or admin state
+// under a "real database" label.
 app.use("/api", (_req, res, next) => {
-  if (env.DEMO_MODE) {
+  if (env.DATA_MODE === "memory") {
     next();
     return;
   }
-  apiError(res, 503, "RUNTIME_NOT_READY", "The database-backed domain provider is not enabled in this build.");
+  apiError(res, 503, "RUNTIME_NOT_READY", "The PostgreSQL-backed domain provider is not implemented yet.");
 });
 
 app.post("/api/account/email-lookup", (req, res) => {
@@ -954,7 +956,7 @@ httpServer.on("upgrade", async (req: IncomingMessage, socket: Socket) => {
   }
   let userId: string;
   let role: "USER" | "ADMIN";
-  if (env.DEMO_MODE) {
+  if (env.AUTH_MODE === "demo") {
     const demoUser = demoUserForToken(url.searchParams.get("access_token"));
     if (!demoUser || demoUser.status === "SUSPENDED") { closeUnauthenticated(socket, demoUser ? 403 : 401, demoUser ? "Forbidden" : "Unauthorized"); return; }
     userId = demoUser.id;
@@ -965,8 +967,8 @@ httpServer.on("upgrade", async (req: IncomingMessage, socket: Socket) => {
     try {
       const session = await auth.api.getSession({ headers: fromNodeHeaders(req.headers) });
       if (!session) { closeUnauthenticated(socket, 401, "Unauthorized"); return; }
-      // The domain provider is intentionally unavailable while DEMO_MODE is
-      // false, so do not expose a fabricated stream in this fail-closed mode.
+      // The domain provider is intentionally unavailable while AUTH_MODE is
+      // not "demo", so do not expose a fabricated stream in this fail-closed mode.
       socket.destroy();
       return;
     } catch {
@@ -1055,5 +1057,5 @@ function tickActiveBattery(): void {
 setInterval(tickActiveBattery, 1000);
 
 httpServer.listen(env.PORT, () => {
-  console.log(`CellGuard backend listening on ${env.PORT} (${env.DEMO_MODE ? "demo" : "database"})`);
+  console.log(`CellGuard backend listening on ${env.PORT} (auth=${env.AUTH_MODE} data=${env.DATA_MODE})`);
 });

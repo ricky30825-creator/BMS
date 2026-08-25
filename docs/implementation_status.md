@@ -47,11 +47,11 @@
 
 ### 이 표를 다시 확인하는 방법
 
-> 아래는 **C2(`AUTH_MODE`/`DATA_MODE` 분리) 착수 전** 기준이다. C2가 끝나면 `DEMO_MODE=true`는 `AUTH_MODE=demo DATA_MODE=memory`로 바뀌므로 이 블록도 같이 고친다.
+> **C2(`AUTH_MODE`/`DATA_MODE` 분리) 완료.** `DEMO_MODE=true`는 `AUTH_MODE=demo DATA_MODE=memory`로 바뀌었다.
 
 ```bash
 # 백엔드 데모 런타임 (PostgreSQL 없이 뜬다 — pg 풀이 lazy라 auth 경로를 안 밟으면 접속하지 않는다)
-cd backend && DEMO_MODE=true PORT=3005 \
+cd backend && AUTH_MODE=demo DATA_MODE=memory PORT=3005 \
   DATABASE_URL=postgres://x:x@127.0.0.1:5432/x \
   BETTER_AUTH_URL=http://localhost:3005 \
   BETTER_AUTH_SECRET=<32자 이상> npx tsx src/server.ts

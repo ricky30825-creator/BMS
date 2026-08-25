@@ -19,15 +19,15 @@ npm run build
 npm run dev
 ```
 
-For the repository-backed localhost demo, use `DEMO_MODE=true` with the
-required Better Auth configuration, then run the frontend with
+For the repository-backed localhost demo, use `AUTH_MODE=demo DATA_MODE=memory`
+with the required Better Auth configuration, then run the frontend with
 `npm run dev:real`. The frontend keeps the issued demo token in memory, sends
 it as `Authorization: Demo <token>` for REST/download requests, and uses the
 URL-encoded `access_token` only for the development WebSocket connection.
 Better Auth cookie transport remains unchanged for production paths.
 
 The demo provider is intentionally not a production substitute. With
-`DEMO_MODE=false`, domain APIs and WebSocket streams fail closed until the
-database-backed provider is implemented.
+`DATA_MODE=postgres`, domain APIs and WebSocket streams fail closed until the
+PostgreSQL-backed provider (B1) is implemented.
 
 Run `migrations/001_app_auth.sql` after creating the Better Auth core tables. The Better Auth schema should be generated from the configured version with `npm run auth:generate` so it stays aligned with the library.
