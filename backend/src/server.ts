@@ -484,7 +484,11 @@ app.post("/api/sessions", requireSession, (req, res) => {
   try {
     const battery = ensureOwner(req, req.body?.batteryId);
     if (!battery) throw new Error("NOT_FOUND");
+    const priorSession = activeSession();
     const session = startSession(actorId(req), battery.id);
+    if (priorSession && priorSession.id !== session.id) {
+      broadcast("session.ended", { sessionId: priorSession.id, endReason: "SUPERSEDED" }, null, priorSession.batteryId);
+    }
     recordAudit({ actorId: actorId(req), action: "SESSION_START", resource: session.id, result: "SUCCESS", reason: null });
     res.status(201).json(sessionJson(session));
   } catch (error) {
@@ -533,6 +537,8 @@ async function relayMutation(req: Request, res: Response, action: "cut" | "resto
     const response = { decision: "APPROVED", requestId: `relay_${randomUUID()}`, relay: relayJson(battery.id) };
     rememberIdempotency(actorId(req), key, requestBody, 200, response);
     broadcast("relay.changed", relayJson(battery.id), response.requestId, battery.id);
+    const latestAudit = audits().find((audit) => audit.resource === battery.id && audit.action === (action === "cut" ? "RELAY_CUT" : "RELAY_RESTORE"));
+    if (latestAudit) broadcast("event.created", auditToEvent(latestAudit), response.requestId, battery.id);
     res.json(response);
   } catch (error) {
     errorFromDomain(res, error);
@@ -548,29 +554,31 @@ function sessionBattery(req: Request): { session: NonNullable<ReturnType<typeof 
   return session && battery ? { session, battery } : null;
 }
 
+function auditToEvent(audit: ReturnType<typeof audits>[number]) {
+  const battery = batteryById(audit.resource);
+  const autoCut = audit.action === "RELAY_AUTO_CUT";
+  return {
+    id: audit.id,
+    occurredAt: audit.at,
+    type: autoCut ? "RELAY_AUTO_CUT" : audit.action,
+    batteryId: battery?.id ?? null,
+    batteryLabel: battery?.label ?? null,
+    score: null,
+    grade: null,
+    severity: autoCut ? "CUT" : "CUT",
+    source: autoCut ? "SYSTEM" : "USER",
+    causeCode: autoCut ? audit.reason : undefined,
+    causeParams: undefined,
+    actionCode: autoCut ? "AUTO_CUT_AND_NOTIFY" : audit.action,
+    actionParams: {}
+  } as const;
+}
+
 function eventItems(req: Request) {
   const owned = new Set(ownerBatteries(req).map((battery) => battery.id));
   return audits()
     .filter((audit) => ["RELAY_CUT", "RELAY_RESTORE", "RELAY_AUTO_CUT"].includes(audit.action) && owned.has(audit.resource))
-    .map((audit) => {
-      const battery = batteryById(audit.resource);
-      const autoCut = audit.action === "RELAY_AUTO_CUT";
-      return {
-        id: audit.id,
-        occurredAt: audit.at,
-        type: autoCut ? "RELAY_AUTO_CUT" : audit.action,
-        batteryId: battery?.id ?? null,
-        batteryLabel: battery?.label ?? null,
-        score: null,
-        grade: null,
-        severity: autoCut ? "CUT" : "CUT",
-        source: autoCut ? "SYSTEM" : "USER",
-        causeCode: autoCut ? audit.reason : undefined,
-        causeParams: undefined,
-        actionCode: autoCut ? "AUTO_CUT_AND_NOTIFY" : audit.action,
-        actionParams: {}
-      } as const;
-    });
+    .map(auditToEvent);
 }
 
 app.get("/api/anomaly/summary", requireSession, (req, res) => {
@@ -728,8 +736,13 @@ app.patch("/api/admin/batteries/:id/ops-status", requireRole("ADMIN"), (req, res
   const reason = typeof req.body?.reason === "string" ? req.body.reason : "";
   if (!["NORMAL", "WATCH", "BLOCKED"].includes(next)) { apiError(res, 400, "VALIDATION_FAILED", "Invalid ops status."); return; }
   try {
+    const targetBattery = batteryById(req.params.id);
+    const priorSession = targetBattery ? activeSession(targetBattery.ownerId) : null;
     const version = Number.isInteger(req.body?.version) ? req.body.version : undefined;
     const battery = changeOpsStatus(actorId(req), req.params.id, next as "NORMAL" | "WATCH" | "BLOCKED", reason, version);
+    if (next === "BLOCKED" && priorSession && priorSession.batteryId === req.params.id) {
+      broadcast("session.ended", { sessionId: priorSession.id, endReason: "BLOCKED" }, null, req.params.id);
+    }
     res.json({ opsStatus: battery.opsStatus, version: battery.version, updatedAt: battery.latest.measuredAt, updatedBy: actorName(req) });
   } catch (error) { errorFromDomain(res, error); }
 });
