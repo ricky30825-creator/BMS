@@ -1,8 +1,10 @@
 # 구현 상태 및 문서 지도
 
-> 기준일: 2026-08-11
+> 기준일: **2026-08-25** (직전 갱신 2026-08-11). 아래 표는 브라우저·curl·테스트 실제 실행으로 재확인했다.
 
 이 문서는 설계 문서의 요구사항과 현재 저장소에 실제로 존재하는 구현을 구분하기 위한 실행용 지도다. 요구사항의 정본이 아니며, 상세 계약은 아래 링크의 원본 문서를 따른다.
+
+> **남은 작업을 담당자별로 나눈 상세 목록은 이 문서 맨 아래 [「남은 작업과 담당 경계」](#남은-작업과-담당-경계)에 있다.** 아래 표는 현황 요약이고, 그쪽이 실행 목록이다.
 
 ## 읽는 법
 
@@ -17,16 +19,47 @@
 |---|---|---|
 | 요구사항·제품 계약 | [`PLAN.md`](../PLAN.md), [`docs/product_contract.md`](product_contract.md), 기능정의서·유저플로우 | 구현 기준 문서 있음 |
 | 백엔드 인증 골격 | `backend/src/auth.ts`, 세션 미들웨어, 감사 로그, DB 연결, Better Auth `/api/auth/*` | 부분 구현 |
-| 백엔드 데모 도메인 API | `backend/src/server.ts`, `backend/src/store.ts`: 발급 토큰 인증, 핵심 사용자·관리자 REST, 계약형 대시보드, F21 fail-closed, 릴레이 승인·멱등성, Raw CSV, 세션 스코프 WS | **데모 런타임 구현·실 REST/WS 브라우저 검증 완료** |
-| 백엔드 DB 도메인 provider·Consumer·TimescaleDB | `backend/migrations/001_app_auth.sql`에 자산/세션/릴레이/텔레메트리/진단/멱등성 스키마가 있으나 production repository·Kafka Consumer·시계열 적재는 없음. `DEMO_MODE=false`에서는 `RUNTIME_NOT_READY`로 fail-closed | 부분 구현 / production 미착수 |
+| 백엔드 데모 도메인 API | `backend/src/server.ts`(991줄): 발급 토큰 인증, 사용자·관리자 REST 56개 라우트(`/health`·`/api/demo/*` 포함), 계약형 대시보드, F21 fail-closed, 릴레이 승인·재인증·멱등성, Raw CSV. 게이트 실동작 확인(`409 BATTERY_BLOCKED`/`NO_ACTIVE_SESSION`, `401 REAUTH_REQUIRED`, `ACK_REQUIRED`, 관리자 `403`) | **데모 런타임 구현·실 REST 브라우저 검증 완료** |
+| 백엔드 도메인 데이터 저장 | `backend/src/store.ts`(360줄)가 **전부 인메모리 배열·Map**이며 SQL을 실행하지 않는다. `backend/src/db.ts`의 풀은 `auth.ts`(Better Auth)만 사용. 프로세스 재시작 시 데이터 소멸 | **미착수** (→ B1) |
+| 백엔드 실시간 스트림 (WS 발신) | 프론트가 이벤트 11종을 처리하는데 백엔드는 `relay.changed` 1종만 발신(`server.ts:530`). 주기 푸시 타이머 없음. `relay.autoCut`은 프론트 모달·핸들러만 있고 보내는 쪽이 없어 **서버 Fail-Safe가 도달 불가** | **미착수** (→ C1·B3) |
+| 백엔드 DB 도메인 provider·Consumer·TimescaleDB | `backend/migrations/001_app_auth.sql`에 자산/세션/릴레이/텔레메트리/진단/멱등성 스키마가 있고 컬럼이 `store.ts` 타입과 1:1로 맞으나, production repository·Kafka Consumer·시계열 적재는 없음. `DEMO_MODE=false`에서는 `/api/*` 전체가 `RUNTIME_NOT_READY`(503)로 fail-closed(`server.ts:331`), WS도 `socket.destroy()`(`:945`) | 스키마만 있음 / provider 미착수 |
+| 알림 발송 (카카오·SMS·메일) | 채널 ON/OFF 토글과 policy 응답만 있고(`server.ts:405`·`:409`), **실제로 메시지를 보내는 코드는 `backend/src`에 없다** | 미착수 (→ C5) |
 | 에지 소프트웨어 | `edge/bw150/`에 BW150 HID 로거·탐지·BLE 프로브(914줄)만 있고, 센서·릴레이·Kafka 프로듀서 구현은 없음 | 부분 구현 (BW150 한정) |
 | AI 소프트웨어 | 모델 설계는 있으나 `ai/` 디렉터리, Colab 노트북, 학습·추론·Kafka 연동 구현은 없음 | 미착수 |
-| 프론트엔드 | [`frontend/src/`](../frontend/src/)의 Vite + React + TypeScript strict 앱, v3 사용자·관리자 라우트, 계약형 API/WS 계층, MSW 시나리오, `npm run dev:real` 데모 경로 | 부분 구현 / production provider 미착수 |
-| 프론트엔드 실행 기반 | `frontend/package.json`, React Router, Query, RHF/Zod, 토큰 CSS, 공용 UI, Vitest/RTL/Playwright 실행 설정 | 구현됨 / 계약·실행 검증 범위는 하단 참고 |
+| 프론트엔드 | [`frontend/src/`](../frontend/src/)의 Vite + React + TypeScript strict 앱, v3 사용자 15·관리자 6 라우트, 계약형 API/WS 계층, MSW 시나리오, `npm run dev:real` 데모 경로. WS 이벤트 11종 핸들러가 **서버 발신을 기다리는 상태** | 부분 구현 / production provider 미착수 |
+| 프론트엔드 실행 기반 | `frontend/package.json`, React Router, Query, RHF/Zod, 토큰 CSS, 공용 UI, Vitest/RTL/Playwright. **Vitest 44건·Playwright 28건·`tsc --noEmit` 통과**(2026-08-25 실행) | 구현됨 |
+| 미구현 REST·화면 | `POST /api/account/email-availability`, `POST /api/exports`+`GET /api/exports/{id}`, `GET /api/trends/export.pdf`(503 스텁), `GET`/`PATCH` `/api/settings/voice-alert`(백엔드·프론트 양쪽 없음) | 미착수 (→ C3·C4) |
 | 모드 1 하드웨어 | KiCad 회로 파일, [`docs/hardware/mode1_backend_spec.md`](hardware/mode1_backend_spec.md), 조립 안내서 | 문서·설계 있음, 실물 검증 전 |
 | 모드 2 하드웨어 | [`docs/hardware/mode2_powerbank_diagnosis_spec.md`](hardware/mode2_powerbank_diagnosis_spec.md) | 설계 계약 있음, 구현 전 |
 | 디자인·목업 | [`design-system/cellguard/MASTER.md`](../design-system/cellguard/MASTER.md), [`web/cellguard_mockup_v4.html`](../web/cellguard_mockup_v4.html) | 참고 산출물 있음 |
-| 자동 검증 도구 | `tools/contract_lint.py`, `landing_lint.py`, `bundle_io.py` 및 단위 테스트 | 부분 구현 |
+| 자동 검증 도구 | `tools/contract_lint.py`(계약서 어휘·영역·REQ 인용 검증, 위반 0건), `landing_lint.py`, `bundle_io.py`, 회로 생성기 2종. 단위 테스트 **48건 통과** | 구현됨 |
+
+### 이 표를 다시 확인하는 방법
+
+```bash
+# 백엔드 데모 런타임 (PostgreSQL 없이 뜬다 — pg 풀이 lazy라 auth 경로를 안 밟으면 접속하지 않는다)
+cd backend && DEMO_MODE=true PORT=3005 \
+  DATABASE_URL=postgres://x:x@127.0.0.1:5432/x \
+  BETTER_AUTH_URL=http://localhost:3005 \
+  BETTER_AUTH_SECRET=<32자 이상> npx tsx src/server.ts
+
+# 프론트엔드를 실 백엔드에 붙여 띄우기 (기본 `npm run dev`는 MSW 목이다)
+cd frontend && npm run dev:real     # → http://localhost:5173
+
+cd frontend && npm run typecheck && npx vitest run && npx playwright test
+cd backend  && npm run typecheck
+cd tools    && python3 -m unittest discover -p "test_*.py"   # ⚠️ tools/ 안에서 실행해야 import가 풀린다
+python3 tools/contract_lint.py docs/product_contract.md      # 인자 없이 부르면 usage만 출력
+```
+
+데모 계정은 `backend/src/store.ts:132`~`135`에 있다 — `hong@cellguard.io`(USER) / `lee@lab.io`(ADMIN) / `park@test.io`(SUSPENDED), 비밀번호는 모두 `demo-password`. `PACK-001`은 `opsStatus: BLOCKED`라 세션을 시작할 수 없으니(의도된 게이트) 시연에는 `DEMO-PACK-001`을 쓴다.
+
+### 2026-08-25 재확인에서 정정된 것
+
+- **`/api/calibrations`·`/api/relay/kill-switch/confirm`·`/api/me/notification-preferences`가 404인 것은 정상이다.** 계약이 각각 "만들지 않는다"(`backend_contract.md:1145`), "`/api/relay/cut`으로 교체 확정"(`:1049`), "정본은 `/api/settings/alerts`"(`:1082`)로 정해둔 것이다. 미구현으로 세어 구현하면 계약 위반이다. 전체 목록은 아래 §5 D군.
+- **`/api/settings/voice-alert`(REQ-WEB-072)는 반대로 계약이 "포함"인데 백엔드·프론트 양쪽 모두 없다**(`:1086`·`:1113`·`:1134`).
+- 프론트엔드 대시보드의 전류 표시에서 부호를 제거했다(`magnitude()`) — 계약상 `current_a`는 부호를 살려 전송하되 표시할 때만 `abs()`하고 방향은 라벨로 낸다. 온도는 영하가 정상값이라 적용 대상이 아니다.
+- 빠른 추세 카드의 미니 스파크라인이 하드코딩 좌표였던 것을 실제 `quickTrend` 시리즈 기반으로 교체했다. 서버가 한 번에 지표 하나의 시리즈만 주므로 해당 지표 카드에만 그리고, 표본이 2개 미만이면 그리지 않는다.
 
 ### 2026-08-06 계약 동기화 주의
 
@@ -46,11 +79,11 @@ v3 프로토타입과 정본 문서에는 모드 1/2, 대표 온도 최댓값, s
 | Phase 2 에지 수집 | 센서·100ms 폴링·릴레이·음성·프로듀서 | 미착수 |
 | Phase 3 스트리밍 | Consumer·세션 태깅·적재·오프셋 | 미착수 |
 | Phase 4 AI | 데이터셋·특징·AE·Informer·추론 | 미착수 |
-| Phase 5 웹 | React 초기화·라우팅·화면·관리자 | 부분 구현. v3 화면·계약 계층·mock QA·localhost demo REST/WS 연결 완료, production provider 통합은 미완료 |
-| Phase 6 알림·차단 | 카카오·Fail-Safe·음성 설정 | 미착수 또는 스텁 |
-| Phase 7 통합·배포 | E2E·시나리오·운영 모니터링 | 미착수 |
+| Phase 5 웹 | React 초기화·라우팅·화면·관리자 | 부분 구현. v3 화면·계약 계층·mock QA·localhost demo REST 연결 완료. **WS는 수신 측만 완성**이고 서버 발신은 1/11종, production provider 통합 미완료 |
+| Phase 6 알림·차단 | 카카오·Fail-Safe·음성 설정 | **미착수.** 카카오는 채널 토글만, Fail-Safe는 판정 코드 자체가 없음, 음성 설정은 API·화면 모두 없음 |
+| Phase 7 통합·배포 | E2E·시나리오·운영 모니터링 | 미착수. 단 프론트 단독 E2E(Playwright 28건)는 동작 |
 
-세부 체크리스트는 [`PLAN.md` §8 개발 로드맵](../PLAN.md#8-개발-로드맵)을 기준으로 갱신한다.
+세부 체크리스트는 [`PLAN.md` §8 개발 로드맵](../PLAN.md#8-개발-로드맵)을 기준으로 갱신한다. **담당자별 실행 목록은 [「남은 작업과 담당 경계」](#남은-작업과-담당-경계)를 본다.**
 
 ## 정본 문서 지도
 
@@ -71,6 +104,8 @@ v3 프로토타입과 정본 문서에는 모드 1/2, 대표 온도 최댓값, s
 5. AI 구현에는 아직 데이터셋 위치·라벨 규칙·체크포인트 형식·특징 버전·추론 메시지 계약·Colab↔AWS 인증 절차가 없다. 이 정보 없이 모델 학습이나 실시간 추론 코드를 시작하지 않는다.
 
 ## 권장 다음 순서
+
+> 아래는 프로젝트 전체 순서다. **본인(프론트·백엔드) 몫의 구체적 착수 순서는 [「남은 작업과 담당 경계」 §6](#6-착수-순서-제안)에 있다.**
 
 1. 백엔드의 `battery_asset`·`measurement_session`과 Kafka/DB 경계를 구현한다.
 2. 에지 수집 계약을 코드로 옮기고 모드 1 실물 게이트를 닫는다.
