@@ -6,6 +6,8 @@
   "scripts": {
     "dev": "tsx watch src/server.ts",
     "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "build": "tsc",
     "start": "node dist/server.js",
     "auth:generate": "auth generate",
@@ -25,6 +27,7 @@
     "@types/node": "^24.0.10",
     "@types/pg": "^8.15.5",
     "tsx": "^4.20.3",
-    "typescript": "^5.8.3"
+    "typescript": "^5.8.3",
+    "vitest": "^4.1.10"
   }
 }
