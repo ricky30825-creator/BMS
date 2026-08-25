@@ -350,6 +350,13 @@ app.post("/api/account/email-lookup", (req, res) => {
   res.json({ email: user ? maskEmail(user.email) : null });
 });
 
+app.post("/api/account/email-availability", (req, res) => {
+  const email = typeof req.body?.email === "string" ? req.body.email.trim().toLowerCase() : "";
+  if (!email.includes("@")) { apiError(res, 422, "VALIDATION_FAILED", "A valid email is required."); return; }
+  const taken = demoUsers.some((user) => user.email === email);
+  res.json({ available: !taken });
+});
+
 app.get("/api/me", requireSession, (req, res) => {
   const user = req.appUser;
   if (!user) {
