@@ -10,6 +10,7 @@ import { demoPasswordMatches, demoUserForToken, issueDemoToken, requireRole, req
 import { writeAuditLog } from "./auth/audit.js";
 import { detectGradeTransition, gradeForScore, type Grade } from "./realtime/grade.js";
 import { createEventLog } from "./realtime/eventLog.js";
+import { createExportJob, exportJobById, scheduleExportCompletion, signDownload, verifyDownload } from "./exports.js";
 import {
   F21_THRESHOLDS,
   abortDiagnosis,
@@ -277,7 +278,8 @@ function errorFromDomain(res: Response, error: unknown): void {
     BATTERY_NAME_REQUIRED: [422, "BATTERY_NAME_REQUIRED"],
     CAPACITY_REQUIRED: [422, "CAPACITY_REQUIRED"],
     RATED_CURRENT_REQUIRED: [422, "RATED_CURRENT_REQUIRED"],
-    IDEMPOTENCY_CONFLICT: [409, "IDEMPOTENCY_CONFLICT"]
+    IDEMPOTENCY_CONFLICT: [409, "IDEMPOTENCY_CONFLICT"],
+    VALIDATION_FAILED: [422, "VALIDATION_FAILED"]
   };
   const [status, mapped] = mapping[code] ?? [500, "INTERNAL_ERROR"];
   apiError(res, status, mapped, code);
@@ -853,6 +855,56 @@ app.get("/api/metrics/export.csv", requireSession, (req, res) => {
   if (!batteryId || (requestedBatteryId && requestedBatteryId !== batteryId) || !ensureOwner(req, batteryId)) { apiError(res, 409, "NO_ACTIVE_SESSION", "An active session is required."); return; }
   const csv = csvForBattery(batteryId, session?.id ?? null);
   res.status(200).type("text/csv").setHeader("Content-Disposition", `attachment; filename="${batteryId}-raw.csv"`).send(csv);
+});
+
+app.post("/api/exports", requireSession, (req, res) => {
+  const key = requireIdempotency(req, res);
+  if (!key) return;
+  const kind = req.body?.kind;
+  const sessionId = typeof req.body?.sessionId === "string" ? req.body.sessionId : "";
+  const from = typeof req.body?.from === "string" ? req.body.from : "";
+  const to = typeof req.body?.to === "string" ? req.body.to : "";
+  if (kind !== "RAW_METRICS_CSV") { apiError(res, 400, "VALIDATION_FAILED", "Only RAW_METRICS_CSV export jobs are supported."); return; }
+  const requestBody = { kind, sessionId, from, to };
+  const prior = idempotent(actorId(req), key, requestBody);
+  if (prior.kind === "conflict") { apiError(res, 409, "IDEMPOTENCY_CONFLICT", "The idempotency key was reused with a different request."); return; }
+  if (prior.kind === "replay") { res.status(prior.status ?? 202).json(prior.body); return; }
+  try {
+    const job = createExportJob(actorId(req), sessionId, from, to);
+    const response = { id: job.id, status: job.status };
+    rememberIdempotency(actorId(req), key, requestBody, 202, response);
+    scheduleExportCompletion(job.id, (ready) => {
+      broadcast("export.ready", { exportId: ready.id, status: ready.status, expiresAt: ready.expiresAt }, null, ready.batteryId);
+    });
+    res.status(202).json(response);
+  } catch (error) {
+    errorFromDomain(res, error);
+  }
+});
+
+app.get("/api/exports/:id", requireSession, (req, res) => {
+  const job = exportJobById(req.params.id);
+  if (!job || job.ownerId !== actorId(req)) { apiError(res, 404, "NOT_FOUND", "Export job was not found."); return; }
+  if (job.status !== "READY") { res.json({ id: job.id, status: job.status }); return; }
+  const expiresAtMs = Date.parse(job.expiresAt!);
+  const token = signDownload(job.id, expiresAtMs);
+  res.json({
+    id: job.id,
+    status: job.status,
+    downloadUrl: `/api/exports/${job.id}/download?expires=${expiresAtMs}&token=${token}`,
+    expiresAt: job.expiresAt,
+    sha256: job.sha256,
+    rowCount: job.rowCount
+  });
+});
+
+app.get("/api/exports/:id/download", requireSession, (req, res) => {
+  const job = exportJobById(req.params.id);
+  if (!job || job.ownerId !== actorId(req) || job.status !== "READY" || !job.csv) { apiError(res, 404, "NOT_FOUND", "Export was not found."); return; }
+  const expiresAtMs = Number(req.query.expires);
+  const token = typeof req.query.token === "string" ? req.query.token : "";
+  if (!verifyDownload(job.id, expiresAtMs, token)) { apiError(res, 401, "UNAUTHENTICATED", "The download link is invalid or expired."); return; }
+  res.status(200).type("text/csv").setHeader("Content-Disposition", `attachment; filename="${job.id}.csv"`).send(job.csv);
 });
 
 app.get("/api/trends/export.pdf", requireSession, (_req, res) => {
