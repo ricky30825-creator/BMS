@@ -50,6 +50,12 @@ const wsStreamId = "demo-stream";
 const demoPreferences = new Map<string, { theme: "light" | "dark" | "system"; lang: "ko" | "en" }>();
 const demoAlertChannels = new Map<string, { KAKAO: boolean; EMAIL: boolean; SMS: boolean; WEBPUSH: boolean }>();
 
+function channelsForAlert(ownerId: string, grade: "WARNING" | "DANGER"): Array<"KAKAO" | "EMAIL" | "SMS" | "WEBPUSH"> {
+  const settings = demoAlertChannels.get(ownerId) ?? { KAKAO: true, EMAIL: true, SMS: false, WEBPUSH: true };
+  const keys = (["KAKAO", "EMAIL", "SMS", "WEBPUSH"] as const).filter((key) => settings[key]);
+  return keys.filter((key) => key !== "SMS" || grade === "DANGER");
+}
+
 app.use(
   cors({
     origin: [...new Set([...corsOrigins, "http://127.0.0.1:8766", "http://localhost:8766", "http://127.0.0.1:8767", "http://localhost:8767"])],
@@ -180,6 +186,11 @@ function dashboardMetrics(battery: NonNullable<ReturnType<typeof batteryById>>) 
   };
 }
 
+function anomalyJson(battery: NonNullable<ReturnType<typeof batteryById>>) {
+  const score = battery.latest.score;
+  return { score, grade: gradeForScore(score), aeScore: null, informerScore: null, evaluatedAt: battery.latest.measuredAt };
+}
+
 function quickTrend(battery: NonNullable<ReturnType<typeof batteryById>>, metricName: string) {
   const latest = batteryJson(battery)!.latest;
   const values: Record<string, number | null> = { volt: latest.voltageV, curr: latest.currentA, temp: latest.representativeTempC, soc: latest.socPct };
@@ -189,13 +200,12 @@ function quickTrend(battery: NonNullable<ReturnType<typeof batteryById>>, metric
 
 function dashboardJson(session: NonNullable<ReturnType<typeof activeSession>>, battery: NonNullable<ReturnType<typeof batteryById>>, metricName: string) {
   const payload = batteryJson(battery)!;
-  const score = payload.latest.score;
   const snapshotCursor = String(Date.now());
   return {
     session: sessionJson(session),
     battery: payload,
     metrics: dashboardMetrics(battery),
-    anomaly: { score, grade: gradeForScore(score), aeScore: null, informerScore: null, evaluatedAt: payload.latest.measuredAt },
+    anomaly: anomalyJson(battery),
     relay: relayJson(battery.id),
     notices: demoNotices.slice(0, 3).map(({ body: _body, status: _status, views: _views, ...notice }) => notice),
     quickTrend: quickTrend(battery, metricName),
@@ -992,6 +1002,41 @@ httpServer.on("upgrade", async (req: IncomingMessage, socket: Socket) => {
   socket.on("close", () => wsClients.delete(client));
   socket.on("error", () => wsClients.delete(client));
 });
+
+const lastBroadcastGrade = new Map<string, Grade>();
+
+function tickActiveBattery(): void {
+  const session = activeSession();
+  if (!session) return;
+  const battery = batteryById(session.batteryId);
+  if (!battery) return;
+  broadcast("metrics.tick", dashboardMetrics(battery), null, battery.id);
+  const anomaly = anomalyJson(battery);
+  broadcast("anomaly.score", anomaly, null, battery.id);
+  const previousGrade = lastBroadcastGrade.get(battery.id) ?? null;
+  const nextGrade = anomaly.grade;
+  if (nextGrade) lastBroadcastGrade.set(battery.id, nextGrade);
+  const transition = detectGradeTransition(previousGrade, nextGrade);
+  if (!transition) return;
+  broadcast("anomaly.gradeChanged", { from: transition.from, to: transition.to, score: anomaly.score, batteryId: battery.id, batteryLabel: battery.label }, null, battery.id);
+  if (transition.to !== "WARNING" && transition.to !== "DANGER") return;
+  const alert = {
+    id: `al_${randomUUID()}`,
+    severity: transition.to,
+    titleCode: "ANOMALY_GRADE_ESCALATED",
+    params: { score: anomaly.score, from: transition.from, to: transition.to },
+    batteryId: battery.id,
+    batteryLabel: battery.label,
+    subjectType: "BATTERY" as const,
+    occurredAt: new Date().toISOString(),
+    acknowledgedAt: null as string | null,
+    channels: channelsForAlert(battery.ownerId, transition.to)
+  };
+  demoAlerts.unshift(alert);
+  broadcast("alert.created", alert, null, battery.id);
+}
+
+setInterval(tickActiveBattery, 1000);
 
 httpServer.listen(env.PORT, () => {
   console.log(`CellGuard backend listening on ${env.PORT} (${env.DEMO_MODE ? "demo" : "database"})`);
