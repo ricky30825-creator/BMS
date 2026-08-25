@@ -352,10 +352,31 @@ export function mode1Health(battery: DemoBattery): Record<string, unknown> | nul
   };
 }
 
+export const CSV_HEADER = "measured_at,device_id,battery_id,session_id,mode,voltage_v,current_a,power_w,temp_contact,temp_ir_surface,soc_pct,soc_basis,gas_raw,pressure_raw,acoustic_raw,age_ms";
+
+export function csvRow(battery: DemoBattery, sessionId: string | null): string {
+  return [
+    battery.latest.measuredAt,
+    "demo-device-01",
+    battery.id,
+    sessionId ?? "",
+    battery.targetMode,
+    battery.latest.voltageV,
+    battery.latest.currentA,
+    battery.latest.powerW,
+    battery.latest.tempContact ?? "",
+    battery.latest.tempIrSurface ?? "",
+    battery.targetMode === 2 ? "" : battery.latest.socPct,
+    battery.targetMode === 2 ? "" : "ABSOLUTE_GAUGE",
+    "",
+    "",
+    "",
+    ""
+  ].join(",");
+}
+
 export function csvForBattery(batteryId: string, sessionId: string | null): string {
   const battery = batteryById(batteryId);
   if (!battery) throw new Error("NOT_FOUND");
-  const now = battery.latest.measuredAt;
-  const row = [now, "demo-device-01", battery.id, sessionId ?? "", battery.targetMode, battery.latest.voltageV, battery.latest.currentA, battery.latest.powerW, battery.latest.tempContact ?? "", battery.latest.tempIrSurface ?? "", battery.targetMode === 2 ? "" : battery.latest.socPct, battery.targetMode === 2 ? "" : "ABSOLUTE_GAUGE", "", "", "", ""].join(",");
-  return "measured_at,device_id,battery_id,session_id,mode,voltage_v,current_a,power_w,temp_contact,temp_ir_surface,soc_pct,soc_basis,gas_raw,pressure_raw,acoustic_raw,age_ms\n" + row + "\n";
+  return `${CSV_HEADER}\n${csvRow(battery, sessionId)}\n`;
 }

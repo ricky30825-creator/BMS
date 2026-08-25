@@ -201,7 +201,7 @@ function quickTrend(battery: NonNullable<ReturnType<typeof batteryById>>, metric
 
 function dashboardJson(session: NonNullable<ReturnType<typeof activeSession>>, battery: NonNullable<ReturnType<typeof batteryById>>, metricName: string) {
   const payload = batteryJson(battery)!;
-  const snapshotCursor = String(Date.now());
+  const snapshotCursor = String(wsSequence);
   return {
     session: sessionJson(session),
     battery: payload,
@@ -279,7 +279,7 @@ function errorFromDomain(res: Response, error: unknown): void {
     CAPACITY_REQUIRED: [422, "CAPACITY_REQUIRED"],
     RATED_CURRENT_REQUIRED: [422, "RATED_CURRENT_REQUIRED"],
     IDEMPOTENCY_CONFLICT: [409, "IDEMPOTENCY_CONFLICT"],
-    VALIDATION_FAILED: [422, "VALIDATION_FAILED"]
+    VALIDATION_FAILED: [400, "VALIDATION_FAILED"]
   };
   const [status, mapped] = mapping[code] ?? [500, "INTERNAL_ERROR"];
   apiError(res, status, mapped, code);
@@ -649,27 +649,37 @@ app.get("/api/trends", requireSession, (req, res) => {
 });
 
 const demoAlerts: Array<Record<string, unknown>> = [];
-app.get("/api/alerts/summary", requireSession, (_req, res) => {
-  res.json({ unacknowledgedCount: demoAlerts.filter((alert) => alert.severity === "DANGER" && alert.acknowledgedAt === null).length, today: { DANGER: 0, WARNING: 0, NORMAL_OR_CHECK: 0 } });
+function ownerAlerts(req: Request): Array<Record<string, unknown>> {
+  const actor = actorId(req);
+  return demoAlerts.filter((alert) => alert.ownerId === actor);
+}
+function alertJson(alert: Record<string, unknown>): Record<string, unknown> {
+  const { ownerId: _ownerId, ...rest } = alert;
+  return rest;
+}
+
+app.get("/api/alerts/summary", requireSession, (req, res) => {
+  const owned = ownerAlerts(req);
+  res.json({ unacknowledgedCount: owned.filter((alert) => alert.severity === "DANGER" && alert.acknowledgedAt === null).length, today: { DANGER: 0, WARNING: 0, NORMAL_OR_CHECK: 0 } });
 });
 
-app.get("/api/alerts", requireSession, (_req, res) => {
-  res.json(pageEnvelope(demoAlerts, Number(_req.query.page) || 1, Number(_req.query.size) || 20));
+app.get("/api/alerts", requireSession, (req, res) => {
+  res.json(pageEnvelope(ownerAlerts(req).map(alertJson), Number(req.query.page) || 1, Number(req.query.size) || 20));
 });
 
-app.post("/api/alerts/ack-all", requireSession, (_req, res) => {
+app.post("/api/alerts/ack-all", requireSession, (req, res) => {
   let acknowledgedCount = 0;
-  for (const alert of demoAlerts) {
+  for (const alert of ownerAlerts(req)) {
     if (alert.severity === "DANGER" && alert.acknowledgedAt === null) { alert.acknowledgedAt = new Date().toISOString(); acknowledgedCount += 1; }
   }
   res.json({ acknowledgedCount });
 });
 
 app.post("/api/alerts/:id/ack", requireSession, (req, res) => {
-  const alert = demoAlerts.find((item) => item.id === req.params.id);
+  const alert = ownerAlerts(req).find((item) => item.id === req.params.id);
   if (!alert) { apiError(res, 404, "NOT_FOUND", "Alert was not found."); return; }
   alert.acknowledgedAt = alert.acknowledgedAt ?? new Date().toISOString();
-  res.json(alert);
+  res.json(alertJson(alert));
 });
 
 app.get("/api/notices", requireSession, (req, res) => {
@@ -978,9 +988,19 @@ function broadcast(type: string, payload: unknown, requestId: string | null = nu
   const frame = wsFrame(JSON.stringify(envelope));
   const active = batteryId ? activeSession() : null;
   for (const client of wsClients) {
+    // "session.ended" and "export.ready" are exempted from the "must still be
+    // the currently active battery" check below: both describe something that
+    // just happened to a battery/job which may no longer be the live one (a
+    // session that just stopped being active, or an export for a historical
+    // date range), so requiring "still active" would make them permanently
+    // undeliverable. This means these two event types are delivered live-only
+    // — they are NOT replayable via eventLog on reconnect, since the replay
+    // loop applies the same client.batteryId filter and a client whose
+    // session just ended typically has client.batteryId === null on
+    // reconnect. Known, accepted asymmetry.
     const canReceive = Boolean(
       batteryId && client.batteryId === batteryId &&
-      (type === "session.ended" || (active && active.batteryId === batteryId && active.ownerId === client.userId))
+      (type === "session.ended" || type === "export.ready" || (active && active.batteryId === batteryId && active.ownerId === client.userId))
     );
     if (client.subscribed && client.topics.has(topic) && canReceive && !client.socket.destroyed) client.socket.write(frame);
   }
@@ -1040,7 +1060,7 @@ httpServer.on("upgrade", async (req: IncomingMessage, socket: Socket) => {
   socket.write(`HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${accept}\r\n\r\n`);
   const client: WsClient = { socket, batteryId: activeSession(userId)?.batteryId ?? null, userId, role, topics: new Set<WsTopic>(), subscribed: false };
   wsClients.add(client);
-  socket.write(wsFrame(JSON.stringify(wsEnvelope("sync", { snapshotCursor: "0", asOf: new Date().toISOString() }))));
+  socket.write(wsFrame(JSON.stringify(wsEnvelope("sync", { snapshotCursor: String(wsSequence), asOf: new Date().toISOString() }))));
   socket.on("data", (chunk) => {
     const frame = parseClientFrame(Buffer.from(chunk));
     if (!frame) return;
@@ -1108,10 +1128,11 @@ function tickActiveBattery(): void {
     subjectType: "BATTERY" as const,
     occurredAt: new Date().toISOString(),
     acknowledgedAt: null as string | null,
-    channels: channelsForAlert(battery.ownerId, transition.to)
+    channels: channelsForAlert(battery.ownerId, transition.to),
+    ownerId: battery.ownerId
   };
   demoAlerts.unshift(alert);
-  broadcast("alert.created", alert, null, battery.id);
+  broadcast("alert.created", alertJson(alert), null, battery.id);
 }
 
 setInterval(tickActiveBattery, 1000);

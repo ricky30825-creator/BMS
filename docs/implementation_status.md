@@ -349,5 +349,8 @@ AWS 배포는 삭제됐지만, 호스트 PC 1대에서 **재현 가능하게 묶
 | WS upgrade의 `DATA_MODE` 인지 (C2 갭, 2026-08-25 신규 발견) | 이번 계획(C1/C2/C3) 범위 밖. `AUTH_MODE=demo`이면 `DATA_MODE=postgres`여도 WS가 열려 데모 데이터를 계속 스트리밍한다 — REST의 fail-closed가 WS에는 확장 안 됨 | WS upgrade 핸들러에 `DATA_MODE` 체크 추가. C2b(프로덕션 WS 인증)와 같은 지점을 고치므로 함께 처리 권장 |
 | 카카오톡 발송 (C5) | Phase 6 보류 결정 | 토글은 이미 있으니 발송 경로만 추가 |
 | AWS 배포 | 로컬 단일 PC 구성 | 해당 없음 |
+| `POST /api/account/email-availability`·`email-lookup`의 Origin 검증·rate-limit·감사 이벤트 부재 (2026-08-25 최종 리뷰 신규 발견) | 이번 계획이 만든 갭이 아니라 두 엔드포인트가 원래부터 갖고 있던 것. 계약이 요구하는 보호를 붙이려면 전용 보안 인프라(요청 Origin 검증 미들웨어, rate-limit 저장소, 감사로그 연결)가 먼저 필요해 이번 수정 라운드 범위를 넘는다 | Origin 검증·rate-limit·감사 이벤트를 두 엔드포인트에 함께 추가(하나만 고치면 다시 벌어진다) |
+| 알림 채널 정책의 `dedupeWindowMinutes: 5`(`GET /api/settings/alerts`) 미적용 | 반복 알림을 실제로 눌러줄 코드가 없다. 오늘은 `battery.latest.score`를 사후에 바꾸는 코드가 없어 휴면 상태라 관찰 자체가 불가능 | AI 추론 연동으로 실 이상탐지 데이터가 흐르기 시작할 때, `alert.created` 발신 직전에 dedupe 로직을 추가 |
+| `exports.ts`의 `ExportStatus`에 `EXPIRED`가 있지만 어떤 코드도 잡을 이 상태로 전이시키거나 오래된 완료 잡을 정리하지 않음 | 현재 인메모리 데모 규모(잡 몇 개)에서는 실질적 문제가 없다. 다만 상태 enum이 구현이 실제로 지키는 것보다 많은 것을 약속하고 있다 | 만료 스윕(주기적 `setInterval` 또는 다운로드 시점 지연 평가)을 추가하거나, 그럴 계획이 없다면 enum에서 `EXPIRED`를 빼는 쪽을 판단 |
 
 > `backend/dist/`는 빌드 산출물이며 구현 근거로 세지 않는다.

@@ -1,5 +1,5 @@
 import { createHash, createHmac, randomUUID } from "node:crypto";
-import { batteryById, sessionById } from "./store.js";
+import { CSV_HEADER, batteryById, csvRow, sessionById } from "./store.js";
 import { env } from "./config/env.js";
 
 export type ExportStatus = "QUEUED" | "RUNNING" | "READY" | "FAILED" | "EXPIRED";
@@ -23,7 +23,6 @@ export type ExportJob = {
 const jobs = new Map<string, ExportJob>();
 const READY_DELAY_MS = 300;
 const DOWNLOAD_TTL_MS = 10 * 60 * 1000;
-const CSV_HEADER = "measured_at,device_id,battery_id,session_id,mode,voltage_v,current_a,power_w,temp_contact,temp_ir_surface,soc_pct,soc_basis,gas_raw,pressure_raw,acoustic_raw,age_ms";
 
 function isoNow(): string {
   return new Date().toISOString();
@@ -72,26 +71,7 @@ export function completeExportJob(id: string): ExportJob | undefined {
   }
   const measuredAtMs = Date.parse(battery.latest.measuredAt);
   const withinRange = measuredAtMs >= Date.parse(job.from) && measuredAtMs <= Date.parse(job.to);
-  const row = withinRange
-    ? [
-        battery.latest.measuredAt,
-        "demo-device-01",
-        battery.id,
-        job.sessionId,
-        battery.targetMode,
-        battery.latest.voltageV,
-        battery.latest.currentA,
-        battery.latest.powerW,
-        battery.latest.tempContact ?? "",
-        battery.latest.tempIrSurface ?? "",
-        battery.targetMode === 2 ? "" : battery.latest.socPct,
-        battery.targetMode === 2 ? "" : "ABSOLUTE_GAUGE",
-        "",
-        "",
-        "",
-        ""
-      ].join(",")
-    : null;
+  const row = withinRange ? csvRow(battery, job.sessionId) : null;
   const csv = row ? `${CSV_HEADER}\n${row}\n` : `${CSV_HEADER}\n`;
   job.csv = csv;
   job.rowCount = row ? 1 : 0;
