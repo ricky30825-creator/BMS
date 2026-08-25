@@ -6,6 +6,15 @@
 
 > **남은 작업을 담당자별로 나눈 상세 목록은 이 문서 맨 아래 [「남은 작업과 담당 경계」](#남은-작업과-담당-경계)에 있다.** 아래 표는 현황 요약이고, 그쪽이 실행 목록이다.
 
+## 2026-08-25 범위 결정 — 먼저 읽을 것
+
+이 네 가지가 이후의 모든 판단을 바꾼다. `CLAUDE.md`·`PLAN.md`에도 같은 날짜로 반영했다.
+
+1. **전 구성이 호스트 PC 1대에서 로컬로 돈다. AWS EC2는 쓰지 않는다.** 에지만 같은 LAN의 별도 장비다. Kafka는 LAN 한정 PLAINTEXT이며 TLS/SASL을 쓰지 않는다.
+2. **Google Colab은 학습 전용이고 실시간 경로에 없다.** 로컬 Kafka가 NAT 뒤라 Colab이 인바운드로 못 붙기 때문이다. 체크포인트를 내려받아 호스트 PC의 **로컬 추론 프로세스**가 로드한다. 이 프로세스는 **별도 담당자**가 만든다.
+3. **Phase 1 Better Auth 실인증은 보류한다.** 코드는 남기고 `AUTH_MODE=demo`로 꺼둔다. 데모 계정에 ADMIN이 있어 RBAC·감사로그 시연에는 지장이 없다.
+4. **Phase 6 카카오톡 발송은 보류한다.** 설정 화면의 채널 토글은 **현행 유지** — 저장은 되지만 발송은 일어나지 않고, 화면에 미구현 표시를 추가하지 않는다. ⚠️ 시연에서 "알림이 간다"고 설명하지 않도록 주의.
+
 ## 읽는 법
 
 - **구현됨**: 저장소에서 실행 가능한 코드나 검증 가능한 산출물을 확인할 수 있다.
@@ -18,12 +27,14 @@
 | 영역 | 현재 확인되는 것 | 상태 |
 |---|---|---|
 | 요구사항·제품 계약 | [`PLAN.md`](../PLAN.md), [`docs/product_contract.md`](product_contract.md), 기능정의서·유저플로우 | 구현 기준 문서 있음 |
-| 백엔드 인증 골격 | `backend/src/auth.ts`, 세션 미들웨어, 감사 로그, DB 연결, Better Auth `/api/auth/*` | 부분 구현 |
+| 백엔드 인증 골격 | `backend/src/auth.ts`, 세션 미들웨어, 감사 로그, DB 연결, Better Auth `/api/auth/*`. 데모 토큰 인증으로 RBAC·정지 계정 차단까지 실동작 | 골격 구현 / **실인증 전환은 보류(의도적)** |
 | 백엔드 데모 도메인 API | `backend/src/server.ts`(991줄): 발급 토큰 인증, 사용자·관리자 REST 56개 라우트(`/health`·`/api/demo/*` 포함), 계약형 대시보드, F21 fail-closed, 릴레이 승인·재인증·멱등성, Raw CSV. 게이트 실동작 확인(`409 BATTERY_BLOCKED`/`NO_ACTIVE_SESSION`, `401 REAUTH_REQUIRED`, `ACK_REQUIRED`, 관리자 `403`) | **데모 런타임 구현·실 REST 브라우저 검증 완료** |
 | 백엔드 도메인 데이터 저장 | `backend/src/store.ts`(360줄)가 **전부 인메모리 배열·Map**이며 SQL을 실행하지 않는다. `backend/src/db.ts`의 풀은 `auth.ts`(Better Auth)만 사용. 프로세스 재시작 시 데이터 소멸 | **미착수** (→ B1) |
 | 백엔드 실시간 스트림 (WS 발신) | 프론트가 이벤트 11종을 처리하는데 백엔드는 `relay.changed` 1종만 발신(`server.ts:530`). 주기 푸시 타이머 없음. `relay.autoCut`은 프론트 모달·핸들러만 있고 보내는 쪽이 없어 **서버 Fail-Safe가 도달 불가** | **미착수** (→ C1·B3) |
 | 백엔드 DB 도메인 provider·Consumer·TimescaleDB | `backend/migrations/001_app_auth.sql`에 자산/세션/릴레이/텔레메트리/진단/멱등성 스키마가 있고 컬럼이 `store.ts` 타입과 1:1로 맞으나, production repository·Kafka Consumer·시계열 적재는 없음. `DEMO_MODE=false`에서는 `/api/*` 전체가 `RUNTIME_NOT_READY`(503)로 fail-closed(`server.ts:331`), WS도 `socket.destroy()`(`:945`) | 스키마만 있음 / provider 미착수 |
-| 알림 발송 (카카오·SMS·메일) | 채널 ON/OFF 토글과 policy 응답만 있고(`server.ts:405`·`:409`), **실제로 메시지를 보내는 코드는 `backend/src`에 없다** | 미착수 (→ C5) |
+| 알림 발송 (카카오·SMS·메일) | 채널 ON/OFF 토글과 policy 응답만 있고(`server.ts:405`·`:409`), **실제로 메시지를 보내는 코드는 `backend/src`에 없다** | **보류(의도적)** — 토글 현행 유지, 추가 작업 없음 |
+| AI 로컬 추론 프로세스 | 코드 없음. `ai/` 디렉터리도 없다. 학습(Colab)·체크포인트 반출 절차·추론 프로세스 모두 미착수 | 미착수 — **별도 담당자** |
+| 로컬 실행 패키징 | 프론트 production 빌드를 백엔드가 서빙하는 구성 없음(현재 5173↔3005 두 오리진), 프로세스 자동 시작 없음, 시드 데이터 절차 없음 | 미착수 (→ C8) |
 | 에지 소프트웨어 | `edge/bw150/`에 BW150 HID 로거·탐지·BLE 프로브(914줄)만 있고, 센서·릴레이·Kafka 프로듀서 구현은 없음 | 부분 구현 (BW150 한정) |
 | AI 소프트웨어 | 모델 설계는 있으나 `ai/` 디렉터리, Colab 노트북, 학습·추론·Kafka 연동 구현은 없음 | 미착수 |
 | 프론트엔드 | [`frontend/src/`](../frontend/src/)의 Vite + React + TypeScript strict 앱, v3 사용자 15·관리자 6 라우트, 계약형 API/WS 계층, MSW 시나리오, `npm run dev:real` 데모 경로. WS 이벤트 11종 핸들러가 **서버 발신을 기다리는 상태** | 부분 구현 / production provider 미착수 |
@@ -35,6 +46,8 @@
 | 자동 검증 도구 | `tools/contract_lint.py`(계약서 어휘·영역·REQ 인용 검증, 위반 0건), `landing_lint.py`, `bundle_io.py`, 회로 생성기 2종. 단위 테스트 **48건 통과** | 구현됨 |
 
 ### 이 표를 다시 확인하는 방법
+
+> 아래는 **C2(`AUTH_MODE`/`DATA_MODE` 분리) 착수 전** 기준이다. C2가 끝나면 `DEMO_MODE=true`는 `AUTH_MODE=demo DATA_MODE=memory`로 바뀌므로 이 블록도 같이 고친다.
 
 ```bash
 # 백엔드 데모 런타임 (PostgreSQL 없이 뜬다 — pg 풀이 lazy라 auth 경로를 안 밟으면 접속하지 않는다)
@@ -75,13 +88,13 @@ v3 프로토타입과 정본 문서에는 모드 1/2, 대표 온도 최댓값, s
 
 | 단계 | PLAN 기준 | 현재 판단 |
 |---|---|---|
-| Phase 1 인프라·백엔드 기반 | 백엔드 초기화·인증 골격만 완료 | 부분 구현. EC2, Kafka, PostgreSQL/TimescaleDB는 미착수 |
-| Phase 2 에지 수집 | 센서·100ms 폴링·릴레이·음성·프로듀서 | 미착수 |
+| Phase 1 인프라·백엔드 기반 | 백엔드 초기화·인증 골격만 완료 | 부분 구현. 로컬 Kafka·PostgreSQL/TimescaleDB 미착수. **EC2 항목은 삭제**(로컬 구성), **Better Auth 실인증은 보류** |
+| Phase 2 에지 수집 | 센서·100ms 폴링·릴레이·음성·프로듀서 | 미착수 (BW150 도구만 존재) |
 | Phase 3 스트리밍 | Consumer·세션 태깅·적재·오프셋 | 미착수 |
-| Phase 4 AI | 데이터셋·특징·AE·Informer·추론 | 미착수 |
+| Phase 4 AI | 데이터셋·특징·AE·Informer·추론 | 미착수. **추론이 Colab에서 호스트 PC로 내려왔고 별도 담당자 몫** |
 | Phase 5 웹 | React 초기화·라우팅·화면·관리자 | 부분 구현. v3 화면·계약 계층·mock QA·localhost demo REST 연결 완료. **WS는 수신 측만 완성**이고 서버 발신은 1/11종, production provider 통합 미완료 |
-| Phase 6 알림·차단 | 카카오·Fail-Safe·음성 설정 | **미착수.** 카카오는 채널 토글만, Fail-Safe는 판정 코드 자체가 없음, 음성 설정은 API·화면 모두 없음 |
-| Phase 7 통합·배포 | E2E·시나리오·운영 모니터링 | 미착수. 단 프론트 단독 E2E(Playwright 28건)는 동작 |
+| Phase 6 알림·차단 | 카카오·Fail-Safe·음성 설정 | **카카오는 보류(의도적).** Fail-Safe는 판정 코드 자체가 없고, 음성 설정은 API·화면 모두 없음 — 이 둘은 미착수 |
+| Phase 7 통합·**로컬 실행 패키징** | E2E·시나리오·실행 묶기 | 미착수. **AWS 배포 항목은 삭제**(클라우드 미사용). 단 프론트 단독 E2E(Playwright 28건)는 동작 |
 
 세부 체크리스트는 [`PLAN.md` §8 개발 로드맵](../PLAN.md#8-개발-로드맵)을 기준으로 갱신한다. **담당자별 실행 목록은 [「남은 작업과 담당 경계」](#남은-작업과-담당-경계)를 본다.**
 
@@ -134,17 +147,36 @@ v3 프로토타입과 정본 문서에는 모드 1/2, 대표 온도 최댓값, s
 
 **단, 도메인 데이터는 전부 인메모리다.** `backend/src/store.ts`(360줄)는 `node:crypto`만 import하며 어떤 SQL도 실행하지 않는다. `backend/src/db.ts`의 풀은 `auth.ts`(Better Auth)만 쓴다.
 
-## 2. A군 — 동료(Kafka·DB) 몫
+## 2. A군 — 타 담당자 몫
+
+### A-1. Kafka·DB 담당
 
 | # | 항목 | 완료 판정 |
 |---|---|---|
-| A1 | EC2 Kafka 브로커 운영, 클라이언트 TLS/SASL 자격 발급 | 백엔드·에지·Colab이 각자 자격으로 접속 성공 |
+| A1 | 호스트 PC에 Kafka 설치·토픽 3개 생성, LAN 한정 PLAINTEXT | 에지·추론·백엔드가 LAN에서 접속 성공 |
 | A2 | `battery-raw-metrics` Consumer → `telemetry_metric` 적재 | 에지 발행분이 테이블에 초 단위 지연으로 쌓임 |
 | A3 | TimescaleDB 하이퍼테이블·압축·보존정책 (`telemetry_metric`) | 100ms × 다중 세션 부하에서 조회 지연 확인 |
-| A4 | `battery-anomaly-alerts`(AI 추론 결과) Consumer | 이상점수·AE/Informer 개별 점수·파생 온도가 적재됨 |
+| A4 | `battery-anomaly-alerts`(추론 결과) Consumer | 이상점수·AE/Informer 개별 점수·파생 온도가 적재됨 |
 | A5 | Consumer 오프셋·재처리·중복 방지 | 재시작 후 유실·중복 없음 |
 
-> 스키마 자체는 이미 `backend/migrations/001_app_auth.sql`에 있다 — `battery_asset`(38) / `measurement_session`(62) / `relay_state`(77) / `telemetry_metric`(88) / `diagnosis`(110) / `idempotency_key`(127) / `audit_log`(20) / `app_user_profile`(1). 컬럼은 `store.ts`의 타입과 이미 1:1로 맞는다. **동료가 스키마를 바꾸면 `store.ts` 타입도 같이 바뀌므로 반드시 합의 후 변경한다.**
+> ⚠️ **`advertised.listeners`를 `localhost`로 두면 라즈베리파이가 못 붙는다.** 브로커가 클라이언트에게 자기 주소를 되돌려주는 값이라, `localhost`면 에지가 자기 자신에게 접속을 시도하며 조용히 실패한다. 호스트의 LAN IP로 잡는다.
+
+> 스키마 자체는 이미 `backend/migrations/001_app_auth.sql`에 있다 — `battery_asset`(38) / `measurement_session`(62) / `relay_state`(77) / `telemetry_metric`(88) / `diagnosis`(110) / `idempotency_key`(127) / `audit_log`(20) / `app_user_profile`(1). 컬럼은 `store.ts`의 타입과 이미 1:1로 맞는다. **스키마를 바꾸면 `store.ts` 타입도 같이 바뀌므로 반드시 합의 후 변경한다.**
+
+### A-2. AI 담당
+
+| # | 항목 | 완료 판정 |
+|---|---|---|
+| A6 | LSTM-AE·Informer 학습 (Colab) | 체크포인트 산출 |
+| A7 | 체크포인트를 Colab → 호스트 PC로 반출하는 절차 확정 | 파일 형식·**특징 버전 표기**·저장 위치가 문서화됨 |
+| A8 | **로컬 추론 프로세스** — 체크포인트 로드, `battery-raw-metrics` 구독, AE·Informer Score → Score Fusion, `battery-anomaly-alerts` 발행 | 대시보드 이상점수가 실제 측정에 반응 |
+| A9 | 칼만 필터·내부 셀 온도 추정 (에지가 아니라 여기서 수행) | 파생 온도가 alerts에 실림 |
+
+> **Colab은 학습 전용이며 실시간 경로에 없다.** 로컬 Kafka가 NAT 뒤라 인바운드 접속이 불가능하기 때문이다. 문서 어딘가에 남은 *"Colab이 raw-metrics를 구독한다"*는 폐기된 설계다.
+
+> **`diag_phase != null` 프레임은 정상패턴 학습에서 제외한다**(CLAUDE.md). 진단 중 계단 스윙은 사람이 만든 전류 계단이라 정상으로 배우면 실제 이상을 놓친다.
+
+> 미실측 리스크: 호스트 PC에 GPU가 없으면 추론이 100ms 스트림을 못 따라갈 수 있다. 30 time-step 윈도우라 CPU로도 가능할 것으로 보이나 확인 전이다. 못 따라가면 **추론 주기를 1초로 낮추는 것**을 먼저 검토한다 — 대시보드 `metrics.tick`이 이미 1초 다운샘플링이라 표시 해상도는 그대로다.
 
 ## 3. B군 — 회색지대 (판단은 백엔드, 구현이 갈림)
 
@@ -217,11 +249,29 @@ v3 프로토타입과 정본 문서에는 모드 1/2, 대표 온도 최댓값, s
 - 봉투 형식과 `sequence`/`cursor`는 이미 `server.ts:878`(`wsEnvelope`)에 구현돼 있으니 재사용한다.
 - **완료 판정**: 대시보드를 열어둔 채 값이 1초마다 갱신되고, 등급 전이·알림·이벤트가 새로고침 없이 반영됨
 
-### C2. production 인증 경로 (WebSocket)
+### C2. `DEMO_MODE` → `AUTH_MODE` + `DATA_MODE` 분리 — **B1의 선행 작업**
 
-- **현재 상태**: `DEMO_MODE=false`이면 upgrade 핸들러가 Better Auth 세션을 확인한 **뒤에도 그냥 `socket.destroy()`** 한다(`backend/src/server.ts:945-948`). 즉 production WS는 미구현이며 의도된 fail-closed다.
-- **해야 할 일**: B1 완료 후 이 분기를 실제 구독 경로로 연결한다. 데모 쿼리 토큰(`access_token`)은 production에서 **절대 허용하지 않는다**(`backend/README.md`).
-- **완료 판정**: 쿠키 인증만으로 WS 연결·구독·재연결(resume)이 동작
+지금 `DEMO_MODE` **한 개가 두 축을 동시에** 켜고 끈다. 그래서 "인증은 데모, 데이터는 PostgreSQL"이 불가능하고, 인증을 보류한 채로는 B1을 시작할 수 없다.
+
+- 인증 방식 — `backend/src/auth/middleware.ts:68`이 `!DEMO_MODE`면 데모 토큰을 아예 무시한다
+- 도메인 데이터 가용성 — `backend/src/server.ts:331`의 가드가 `!DEMO_MODE`면 `/api/*` 전부 503
+
+**해야 할 일**
+
+- `AUTH_MODE=demo|betterauth`, `DATA_MODE=memory|postgres` 두 변수로 쪼갠다 (`backend/src/config/env.ts`).
+- `server.ts:331`의 503 가드는 **`DATA_MODE`를 보게** 바꾼다. `middleware.ts:68`·`:92`와 WS upgrade 핸들러의 데모 분기(`server.ts:934`)는 **`AUTH_MODE`를 보게** 바꾼다.
+- `/health` 응답에 두 값을 함께 싣는다 — `{"status":"ok","auth":"demo","data":"postgres"}`. 지금 어떤 조합으로 돌고 있는지 로그·헬스체크로 즉시 보이게 하기 위해서다.
+- `.env.example`, `backend/README.md`, `frontend/package.json`의 `dev:real` 스크립트도 같이 고친다.
+- **당면 목표 조합은 `AUTH_MODE=demo` + `DATA_MODE=postgres`다.**
+
+**주의**: Better Auth 코드와 `/api/auth/*` 라우트는 **삭제하지 않는다**(2026-08-25 결정). `AUTH_MODE=betterauth`로 바꾸면 켜지는 상태로 남긴다. 데모 쿼리 토큰(`access_token`)은 `AUTH_MODE=betterauth`에서 **절대 허용하지 않는다**(`backend/README.md`).
+
+**완료 판정**: `AUTH_MODE=demo DATA_MODE=postgres`로 띄워 브라우저 시나리오가 끝까지 동작하고, 재시작 후 데이터가 유지된다.
+
+### C2b. production 인증 경로 (WebSocket) — **보류(의도적)**
+
+- **현재 상태**: `DEMO_MODE=false`이면 upgrade 핸들러가 Better Auth 세션을 확인한 **뒤에도 그냥 `socket.destroy()`** 한다(`backend/src/server.ts:945-948`).
+- Phase 1 인증 보류 결정에 따라 **지금 하지 않는다.** C2에서 `AUTH_MODE`로 분기만 정리해두고, 나중에 인증을 켤 때 이 분기를 실제 구독 경로로 연결한다.
 
 ### C3. REST 미구현 — 실제로 3건뿐
 
@@ -237,11 +287,12 @@ v3 프로토타입과 정본 문서에는 모드 1/2, 대표 온도 최댓값, s
 - **계약 근거**: `backend_contract.md:1086`·`:1113`·`:1134`, `REQ-WEB-072`. *"v3 어느 화면에도 없다. 그러나 `PLAN.md`에 모델·API가 이미 확정돼 있고 에지 하드웨어 동작과 직결되므로 계약에 포함한다. 프론트가 설정 화면에 탭 또는 섹션을 새로 만들어야 한다."*
 - 필드 정의는 `PLAN.md`에 있다. 전체 ON/OFF·음량·카테고리 5종.
 
-### C5. 카카오톡 알림 발송
+### C5. 카카오톡 알림 발송 — **보류(의도적), 추가 작업 없음**
 
-- **현재 상태**: 채널 ON/OFF 토글과 policy 응답만 있다(`server.ts:405`·`:409`). **실제로 메시지를 보내는 코드는 `backend/src`에 없다** — `KAKAO` 문자열이 나오는 곳은 설정 저장뿐.
-- **해야 할 일**: 이상점수/이벤트 발생 → 채널 정책(`sendOn: ["DANGER","WARNING"]`, `smsOnlyDanger`, `dedupeWindowMinutes: 5`) 적용 → Kakao API 발송 → 결과 기록.
-- **주의**: 서버는 사용자에게 보일 문구를 만들지 않는다는 규칙(CLAUDE.md API 계약)이 있으나, **카카오 발송은 예외적으로 서버가 문장을 만들어야 한다** — 수신자가 웹 프론트가 아니다. 템플릿 위치와 다국어 처리를 먼저 정한다.
+- **현재 상태**: 채널 ON/OFF 토글과 policy 응답만 있다(`server.ts:405`·`:409`). 실제로 메시지를 보내는 코드는 `backend/src`에 없다.
+- **2026-08-25 결정**: 발송을 구현하지 않는다. **설정 화면의 토글은 현행 유지** — 저장은 되지만 아무 일도 일어나지 않고, 화면에 미구현 표시를 **추가하지 않는다.** 즉 이 항목에 지금 할 일은 없다.
+- ⚠️ **시연 주의**: 화면상 토글이 정상으로 보이므로 "알림이 간다"고 설명하면 사실과 다르다.
+- 나중에 되살릴 때 필요한 것(지금 하지 않음): 이상점수/이벤트 → 채널 정책(`sendOn: ["DANGER","WARNING"]`, `smsOnlyDanger`, `dedupeWindowMinutes: 5`) 적용 → Kakao API 발송 → 결과 기록. **서버는 사용자 문구를 만들지 않는다는 규칙(CLAUDE.md API 계약)의 예외가 필요하다** — 수신자가 웹 프론트가 아니라 서버가 문장을 만들어야 한다.
 
 ### C6. `?metric=` 배선 (소)
 
@@ -253,6 +304,15 @@ v3 프로토타입과 정본 문서에는 모드 1/2, 대표 온도 최댓값, s
 
 - **현재 상태**: 빠른 추세 카드와 배터리 상세는 2026-08-25에 `magnitude()`로 부호를 제거했다. 그러나 배터리 상세의 **추세 차트는 전류 Y축이 여전히 음수**(`TrendCharts`).
 - **판단이 필요한 이유**: 시계열에 `abs()`를 걸면 충전→방전 전환이 가짜 V자로 접혀 CLAUDE.md가 지키라는 충·방전 구분이 오히려 깨진다. 축 라벨을 `A (+충전 / −방전)`로 명시하는 쪽이 유력하나 확정 전이다.
+
+### C8. 로컬 실행 패키징 (구 Phase 7 배포)
+
+AWS 배포는 삭제됐지만, 호스트 PC 1대에서 **재현 가능하게 묶는** 작업은 남는다.
+
+- **프론트 production 빌드를 백엔드가 정적 서빙한다.** 지금은 `5173`(Vite) ↔ `3005`(Express) 두 오리진이라 CORS 설정(`server.ts:50-55`)과 쿠키 도메인 문제를 계속 안고 간다. `vite build` 산출물을 Express가 서빙해 **단일 오리진(:3005)** 으로 만들면 이 문제가 통째로 사라진다. SPA라 알 수 없는 경로는 `index.html`로 폴백해야 한다(`/dashboard` 직접 접속이 404가 되지 않도록).
+- **프로세스 자동 시작·재시작** — Kafka·PostgreSQL·추론·백엔드. 시연 중 크래시나 PC 재부팅에서 복구되어야 한다.
+- **`.env` 템플릿과 시드 데이터 절차** — 다른 PC에서도 같은 절차로 뜨는지 확인한다.
+- **완료 판정**: PC를 재부팅해도 브라우저에서 `localhost:3005` 하나로 전체 시나리오가 동작.
 
 ## 5. D군 — 404지만 정상 (착각 방지)
 
@@ -268,11 +328,20 @@ v3 프로토타입과 정본 문서에는 모드 1/2, 대표 온도 최댓값, s
 
 ## 6. 착수 순서 제안
 
-1. **B군 4건의 담당을 문서로 확정한다** — 코드보다 먼저. 특히 B3는 넘기지 않는다.
-2. **C1 WebSocket 발신** — Kafka·DB 없이 지금 당장 가능하고, 프론트가 이미 기다리고 있어 효과가 즉시 보인다. 데모 스토어 기반으로 먼저 구현해도 된다.
-3. **B1 리포지토리 교체** — 분량이 가장 크다(360줄 + 동기→비동기 전환). 동료의 A2와 병렬로 진행 가능하다.
-4. **C2 production 인증** — B1 이후.
+1. **B군 4건의 담당을 문서로 확정한다** — 코드보다 먼저. 특히 B3(Fail-Safe)는 넘기지 않는다.
+2. **C1 WebSocket 발신** — Kafka·DB 없이 지금 당장 가능하고, 프론트가 이미 기다리고 있어 효과가 즉시 보인다. 인메모리 스토어 기반으로 먼저 구현해도 된다.
+3. **C2 `AUTH_MODE`/`DATA_MODE` 분리** — 작지만 B1의 선행이다. 이걸 안 하면 인증 보류 상태로 DB를 붙일 수 없다.
+4. **B1 리포지토리 교체** — 분량이 가장 크다(360줄 + 동기→비동기 전환). A-1 담당자의 A2와 병렬 진행 가능.
 5. **B3·B4 안전 경로** — A2/A4가 데이터를 주기 시작한 뒤.
-6. **C3~C7** — 나머지.
+6. **C8 로컬 실행 패키징** — 시연 리허설 전에 끝나야 한다. 단일 오리진 전환은 CORS·쿠키를 건드리므로 마지막에 몰아서 하지 말 것.
+7. **C3·C4·C6·C7** — 나머지. (C2b·C5는 보류)
+
+### 지금 하지 않기로 한 것
+
+| 항목 | 이유 | 되살릴 때 |
+|---|---|---|
+| Better Auth 실인증 (C2b) | Phase 1 보류 결정 | `AUTH_MODE=betterauth`로 전환 + WS upgrade 분기 연결 |
+| 카카오톡 발송 (C5) | Phase 6 보류 결정 | 토글은 이미 있으니 발송 경로만 추가 |
+| AWS 배포 | 로컬 단일 PC 구성 | 해당 없음 |
 
 > `backend/dist/`는 빌드 산출물이며 구현 근거로 세지 않는다.

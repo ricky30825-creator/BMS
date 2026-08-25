@@ -42,20 +42,24 @@
 ## 2. 기술 아키텍처
 
 ```
-[에지 계층]              [AWS EC2 (클라우드 서버)]                 [분석]            [웹]
-Raspberry Pi 5          Apache Kafka → Consumer → PostgreSQL      Google Colab     React
-INA226·BQ27441          (토픽 3개)               + TimescaleDB    LSTM-AE +        대시보드
-DS18B20·MLX90614          battery-raw-metrics    (시계열 하이퍼     Informer
-ADS1115         TLS/SASL  battery-anomaly-alerts  테이블)           이중 모델
-└가스·압력·음향  ──────▶  battery-events                          (학습·추론,
-   │                     백엔드(REST/WebSocket)  ◀── alerts 발행 ── Score Fusion)
-   │                       │                         ▲ raw-metrics 구독 (TLS)
-   ↓ 릴레이/Kill-Switch     └ WebSocket ─▶ React / 카카오톡 알림
-   + 스피커 음성 안내
-   (에지측 물리 차단·현장 안내)
+[에지 계층]                  [호스트 PC 1대 — 전부 로컬]
+Raspberry Pi 5              Apache Kafka → Consumer → PostgreSQL + TimescaleDB
+INA226·BQ27441              (토픽 3개)                      (시계열 하이퍼테이블)
+DS18B20·MLX90614              battery-raw-metrics                    │
+ADS1115          LAN          battery-anomaly-alerts ◀─ alerts 발행 ─┤
+└가스·압력·음향  ──────────▶   battery-events                        │
+   │              PLAINTEXT                          [추론 프로세스] │
+   │                                              LSTM-AE + Informer │
+   ↓ 릴레이/Kill-Switch                            이중 모델(Score    │
+   + 스피커 음성 안내                               Fusion), 체크포인트 │
+   (에지측 물리 차단·현장 안내)                       로드·raw 구독 ────┘
+                             백엔드(REST/WebSocket)
+                               └─▶ React 대시보드 (localhost) / 카카오톡 알림
 ```
 
-> 에지→AWS Kafka는 TLS/SASL 직접 연결이며, AI 추론은 Google Colab의 LSTM-AutoEncoder + Informer 이중 모델이 Kafka에서 `battery-raw-metrics`를 구독해 추론(AE Score + Informer Score → Score Fusion)한 뒤 `battery-anomaly-alerts`를 다시 발행한다. Kafka·PostgreSQL·백엔드는 모두 AWS EC2에서 호스팅된다.
+> **전 구성이 호스트 PC 1대에서 로컬로 돈다(2026-08-25 확정). AWS EC2는 쓰지 않는다.** 에지만 같은 LAN의 별도 장비이며 PLAINTEXT로 브로커에 직접 붙는다.
+>
+> **Google Colab은 학습 전용이고 실시간 경로에 없다.** 로컬 Kafka는 NAT 뒤라 Colab이 인바운드로 접속할 수 없다. Colab에서 학습한 체크포인트를 내려받아 호스트 PC의 추론 프로세스가 로드하고, 그 프로세스가 `battery-raw-metrics`를 구독해 추론한 뒤 `battery-anomaly-alerts`를 발행한다. **이 문서에 남아 있는 "Colab ↔ Kafka 연동" 서술은 폐기된 설계다.**
 
 ### 기술 스택 요약
 
@@ -63,10 +67,10 @@ ADS1115         TLS/SASL  battery-anomaly-alerts  테이블)           이중 �
 |---|---|---|
 | 에지 | Raspberry Pi | I2C/1-Wire 센서 수집 |
 | 센서 | INA226, BQ27441(Battery Babysitter 탑재), DS18B20, MLX90614, ADS1115 + 가스(MQ-2)·압력(FSR 406)·음향 | 전압·전류·온도·SOC + 오프가스·스웰링·음향 |
-| 클라우드/인프라 | AWS EC2 | Kafka·DB·백엔드 호스팅, TLS/SASL 보안 연결 |
-| 스트리밍 | Apache Kafka | 토픽 3개 (raw/alerts/events) — AWS EC2에서 운영, 에지는 TLS 직접 연결 |
-| DB | PostgreSQL + TimescaleDB | 시계열 하이퍼테이블 |
-| AI | LSTM-AutoEncoder + Informer (이중 모델) | AE 재구성 오차 + Informer 예측 오차를 Score Fusion(가중합)으로 결합한 최종 이상점수 — Google Colab에서 학습·실시간 추론 |
+| 호스트/인프라 | 로컬 PC 1대 | Kafka·DB·추론·백엔드·웹을 모두 호스팅. 클라우드 없음 |
+| 스트리밍 | Apache Kafka | 토픽 3개 (raw/alerts/events) — 호스트 PC에서 로컬 운영, LAN 한정 PLAINTEXT. `advertised.listeners`는 호스트 LAN IP |
+| DB | PostgreSQL + TimescaleDB | 시계열 하이퍼테이블 (로컬) |
+| AI | LSTM-AutoEncoder + Informer (이중 모델) | AE 재구성 오차 + Informer 예측 오차를 Score Fusion(가중합)으로 결합한 최종 이상점수 — **학습은 Google Colab, 실시간 추론은 호스트 PC의 로컬 프로세스** |
 | 백엔드 | Node.js + TypeScript + Express + Better Auth | REST API, WebSocket, 세션 기반 인증/RBAC |
 | 프론트엔드 | React | 반응형 웹 대시보드(데스크톱/태블릿/모바일) |
 | 알림 | Kakao Talk API | SNS 알림 |
@@ -599,12 +603,15 @@ ADS1115         TLS/SASL  battery-anomaly-alerts  테이블)           이중 �
 ## 8. 개발 로드맵
 
 ### Phase 1 — 인프라 기반 구축
-- [ ] AWS EC2 인스턴스 프로비저닝 및 보안그룹/방화벽 설정
-- [ ] Kafka 브로커 TLS/SASL 보안 연결 구성 (에지·Colab·백엔드 인증)
+
+> **로컬 단일 PC 구성으로 변경(2026-08-25).** EC2 프로비저닝·보안그룹·TLS/SASL 항목은 삭제했다.
+
+- [ ] 호스트 PC에 Kafka 설치·토픽 3개 생성, LAN 한정 PLAINTEXT 구성 (S-BYYPVQ) — `advertised.listeners`를 호스트 LAN IP로 잡아야 에지가 붙는다
+- [ ] 브로커·DB 포트를 방화벽에서 LAN으로 제한
 - [ ] PostgreSQL + TimescaleDB 설치 및 시계열 스키마 설계 (S-NFEETD)
-- [ ] Apache Kafka 클러스터 구성 (AWS EC2 상) 및 토픽 3개 생성 (S-BYYPVQ)
 - [x] 백엔드 프로젝트 초기화 (Node.js + TypeScript + Express)
 - [x] Better Auth 기반 사용자 인증 골격 구현 (R-HBLCDS — F-SDSVND, F-TFJKKF, F-HUYIXC)
+- [ ] ~~Better Auth 실인증 전환~~ — **보류(2026-08-25 결정).** 코드는 그대로 두고 `AUTH_MODE=demo`로 꺼둔다. 나중에 환경변수만 바꿔 켠다. 데모 계정에 ADMIN이 있어 RBAC·감사로그 시연에는 지장이 없다
 
 ### Phase 2 — 에지 데이터 수집
 - [ ] Raspberry Pi 센서 드라이버 구현 (S-DPVOCW — I2C/1-Wire/ADS1115 아날로그 추상화, 가스·압력·음향 포함)
@@ -626,8 +633,8 @@ ADS1115         TLS/SASL  battery-anomaly-alerts  테이블)           이중 �
 - [ ] 특징 추출 및 윈도우링 (30 time-steps, LSTM-AutoEncoder·Informer 공통 입력) 파이프라인 (S-WKCPVK)
 - [ ] LSTM-AutoEncoder 모델 학습 (F-MAPLGA) — Google Colab
 - [ ] Informer 모델 학습 (F-MAPLGA) — Google Colab
-- [ ] Colab ↔ AWS Kafka 연동 (raw-metrics 구독 / anomaly-alerts 발행, TLS)
-- [ ] 실시간 추론 서비스 — AE Score·Informer Score 계산 및 Score Fusion으로 최종 이상점수 산출 (S-FGKMXE, F-VTQMVE)
+- [ ] 체크포인트를 Colab에서 호스트 PC로 내보내는 절차 확정 (파일 형식·특징 버전 표기·저장 위치)
+- [ ] **로컬 추론 프로세스** — 호스트 PC에서 체크포인트를 로드해 `battery-raw-metrics` 구독 → AE Score·Informer Score 계산 → Score Fusion → `battery-anomaly-alerts` 발행 (S-FGKMXE, F-VTQMVE). 칼만 필터·내부 셀 온도 추정도 여기서 수행한다
 - [ ] 상태 등급 판정 및 이벤트 저장 (S-WJYKSS, S-RMXMCJ)
 
 ### Phase 5 — 웹 대시보드 & 관제
@@ -641,17 +648,23 @@ ADS1115         TLS/SASL  battery-anomaly-alerts  테이블)           이중 �
 - [ ] 관리자 권한/상태 모델 및 `/admin/*` API
 
 ### Phase 6 — 알림 & 차단
-- [ ] 카카오톡 알림 연동 (S-EOCLMX, S-UZDNPT)
+- [ ] ~~카카오톡 알림 연동 (S-EOCLMX, S-UZDNPT)~~ — **보류(2026-08-25 결정).** 설정 화면의 채널 토글은 **현행 유지**한다: 저장은 되지만 발송은 일어나지 않으며, 화면에 별도 미구현 표시를 추가하지 않는다. ⚠️ 시연에서 "알림이 간다"고 설명하지 않도록 주의
 - [ ] 릴레이/Kill-Switch 제어 API (S-ELAUQJ)
 - [ ] 긴급 차단 자동화 Fail-Safe (S-VMNNAM)
 - [ ] 디바이스 음성 안내 웹 설정 및 백엔드 API (S-VOCALR)
 - [ ] 알림 설정 및 이력 페이지
 
-### Phase 7 — 통합 테스트 & 배포
+### Phase 7 — 통합 테스트 & 로컬 실행 패키징
+
+> **AWS 배포는 삭제(2026-08-25).** 클라우드에 올리지 않으므로 프로비저닝·도메인·HTTPS 항목이 사라지고, 대신 호스트 PC 1대에서 재현 가능하게 묶는 작업이 남는다.
+
 - [ ] 에지→Kafka→DB→AI→대시보드 end-to-end 테스트
 - [ ] 이상 시나리오 주입 테스트 (오탐/미탐 검증)
 - [ ] KPI 측정 및 성능 튜닝
-- [ ] 배포 및 운영 모니터링 설정
+- [ ] 프론트엔드 production 빌드 → 백엔드가 정적 서빙 (단일 오리진으로 CORS·쿠키 설정 제거)
+- [ ] 프로세스 자동 시작·재시작 구성 (Kafka·PostgreSQL·추론·백엔드) — 시연 중 크래시나 PC 재부팅에서 복구
+- [ ] `.env` 템플릿과 시드 데이터 정리 — 다른 PC에서도 같은 절차로 뜨는지 확인
+- [ ] 시연 시나리오 리허설 (`docs/final_month_strategy.md` 기준)
 
 ---
 
@@ -673,8 +686,10 @@ ADS1115         TLS/SASL  battery-anomaly-alerts  테이블)           이중 �
 | 센서 노이즈/캘리브레이션 미흡 | 칼만 필터 전처리, 테스트 시나리오 검증 |
 | 실험 환경 안전 | 안전 장비 및 절차 필수 |
 | 스트리밍/DB/대시보드 통합 복잡도 | 단계별 phase 분리 개발 |
-| Colab 세션 휘발성·런타임 제한 | 모델 체크포인트 저장, 추론 재기동 자동화 / 운영 시 EC2·GPU 인스턴스 이전 검토 |
-| 에지-AWS 공인망 노출 | Kafka TLS/SASL + 보안그룹 IP 제한, 최소 권한 |
+| ~~Colab 세션 휘발성·런타임 제한~~ | **해소(2026-08-25)** — 추론이 호스트 PC로 내려와 실시간 경로가 Colab에 의존하지 않는다. Colab은 학습 전용이라 세션이 끊겨도 시연에 영향이 없다 |
+| ~~에지-AWS 공인망 노출~~ | **해소(2026-08-25)** — 공인망에 노출하지 않는다. Kafka는 LAN 한정 PLAINTEXT + 방화벽 |
+| 호스트 PC 단일 장애점 | Kafka·DB·추론·백엔드·웹이 한 대에 몰려 그 PC가 죽으면 전체가 멈춘다. 프로세스 자동 재시작(Phase 7)과 시연 전 리허설로 완화 |
+| 로컬 추론 성능 | 호스트 PC에 GPU가 없으면 AE+Informer 추론이 100ms 스트림을 못 따라갈 수 있다. **30 time-step 윈도우라 CPU로도 가능할 것으로 보이나 실측 전이다** — 못 따라가면 추론 주기를 1초로 낮추는 것을 먼저 검토(대시보드 `metrics.tick`이 이미 1초 다운샘플링이다) |
 
 ---
 

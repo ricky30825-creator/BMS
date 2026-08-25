@@ -3,15 +3,25 @@
 리튬이온 배터리의 전압·전류·온도·SOC를 100ms로 수집해 Kafka로 흘리고, LSTM-AutoEncoder(현재 진단) + Informer(미래 예측) 이중 모델로 열폭주 전조를 조기 탐지해 React 대시보드에서 관제한다. 임계치 차단(사후)이 아니라 정상패턴 학습 기반 이상탐지(사전)가 핵심 차별점이며, 위험 시 라즈베리파이가 릴레이로 물리 차단한다.
 
 ```
-[Edge]              [AWS EC2]                          [AI]                 [Web]
-Raspberry Pi        Kafka → Consumer → PostgreSQL      Google Colab         React
-(센서·릴레이·        battery-raw-metrics + TimescaleDB   LSTM-AE + Informer   대시보드
- 음성안내)          battery-anomaly-alerts ◀── 추론결과 ──  (Score Fusion)
-   │  TLS/SASL      battery-events            └─ raw-metrics 구독 (TLS)
-   └──────────────▶ 백엔드(REST/WebSocket) ─▶ React / 카카오톡
+[Edge]                    [호스트 PC 1대 — 전부 로컬]
+Raspberry Pi              Kafka → Consumer → PostgreSQL + TimescaleDB
+(센서·릴레이·      LAN      battery-raw-metrics                  │
+ 음성안내)  ──────────▶    battery-anomaly-alerts ◀─ 추론결과 ─┐  │
+                          battery-events                      │  │
+                                                   추론 프로세스  │
+                                            (LSTM-AE + Informer, │
+                                             체크포인트 로드)     │
+                          백엔드(REST/WebSocket) ◀──────────────┘
+                                    │
+                                    └─▶ React (localhost)
 ```
 
-스택: Python(Pi 5, smbus2·w1thermsensor) / Kafka·PostgreSQL+TimescaleDB / Node.js+TypeScript+Express+Better Auth / PyTorch 또는 TensorFlow(Colab) / React 반응형 웹 / Kakao Talk API.
+**전 구성이 호스트 PC 1대에서 로컬로 돈다(2026-08-25 확정).** 에지만 같은 LAN의 별도 장비다. AWS EC2는 쓰지 않는다.
+
+- **Google Colab은 학습 전용이며 실시간 경로에 없다.** 로컬 Kafka는 NAT 뒤라 Colab에서 인바운드로 붙을 수 없다. Colab에서 학습한 체크포인트를 내려받아 호스트 PC의 추론 프로세스가 로드한다. 문서 어딘가에 남아 있는 *"Colab이 raw-metrics를 구독한다"*는 서술은 **폐기된 설계**다.
+- **Kafka는 LAN 한정 PLAINTEXT로 운영한다.** TLS/SASL은 쓰지 않는다 — 인터넷에 노출되지 않으므로 인증서 구성 비용 대비 효과가 없다. 대신 브로커 포트를 방화벽에서 LAN으로 제한한다. 외부 노출이 생기면 이 결정을 먼저 되돌린다.
+
+스택: Python(Pi 5, smbus2·w1thermsensor) / Kafka·PostgreSQL+TimescaleDB(로컬) / Node.js+TypeScript+Express+Better Auth / PyTorch 또는 TensorFlow(학습 Colab, 추론 로컬) / React 반응형 웹 / Kakao Talk API.
 
 ## 정본 문서 지도
 
@@ -37,14 +47,14 @@ Raspberry Pi        Kafka → Consumer → PostgreSQL      Google Colab         
 | 토픽 | 발행자 | 용도 |
 |---|---|---|
 | `battery-raw-metrics` | 에지 (Raspberry Pi) | 센서 Raw 데이터 (100ms 주기) |
-| `battery-anomaly-alerts` | AI 추론 서버 (Google Colab) | 최종 이상점수(Score Fusion) 및 AE/Informer 개별 점수, 파생 온도(칼만 필터, 내부 셀 추정) |
+| `battery-anomaly-alerts` | 로컬 추론 프로세스 | 최종 이상점수(Score Fusion) 및 AE/Informer 개별 점수, 파생 온도(칼만 필터, 내부 셀 추정) |
 | `battery-events` | 에지/백엔드 | 센서 오류, 인터락 발생, 릴레이 제어 이벤트, 음성 안내 대상 이벤트 |
 
-> Kafka 브로커는 AWS EC2에서 운영하며, 모든 클라이언트(에지·Colab·백엔드)는 TLS/SASL로 접속한다.
+> **Kafka 브로커는 호스트 PC에서 로컬로 운영하며 LAN 한정 PLAINTEXT다.** 클라이언트는 에지·추론 프로세스·백엔드 셋이며 Colab은 포함되지 않는다. `advertised.listeners`를 `localhost`가 아니라 **호스트의 LAN IP**로 잡아야 라즈베리파이가 붙는다 — `localhost`로 두면 브로커가 클라이언트에게 자기 주소를 `localhost`로 되돌려줘, 에지가 자기 자신에게 접속을 시도하며 조용히 실패한다.
 
 ## 센서 데이터 JSON 스키마
 
-에지는 Raw 측정값만 전송한다. 칼만 필터링과 내부 셀 온도 추정은 AI 서버에서 수행한다.
+에지는 Raw 측정값만 전송한다. 칼만 필터링과 내부 셀 온도 추정은 추론 프로세스에서 수행한다.
 
 에지는 `device_id`(측정 장비=라즈베리파이)만 전송하며, `battery_id`(측정 대상 자산)는 에지가 모른다. battery_id 귀속은 백엔드 세션 태깅으로 적재 시점에 부여한다(아래 "배터리 자산" 참조).
 
