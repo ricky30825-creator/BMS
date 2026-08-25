@@ -53,7 +53,7 @@ function pageMetaFor(pathname: string, me: MeResponse, isAdmin: boolean): [strin
 }
 
 function notificationTitle(alert: Alert): string {
-  return ({ TEMP_THRESHOLD_EXCEEDED: "온도 임계값 초과", CURRENT_CHANGE_SPIKE: "전류 변화량 급상승", SOC_DROP: "SOC 급락 감지", DEVICE_HEARTBEAT_MISSED: "디바이스 하트비트 미수신" } as Record<string, string>)[alert.titleCode] ?? alert.titleCode;
+  return ({ TEMP_THRESHOLD_EXCEEDED: "온도 임계값 초과", CURRENT_CHANGE_SPIKE: "전류 변화량 급상승", SOC_DROP: "SOC 급락 감지", DEVICE_HEARTBEAT_MISSED: "디바이스 하트비트 미수신", ANOMALY_GRADE_ESCALATED: "이상 등급 상승" } as Record<string, string>)[alert.titleCode] ?? alert.titleCode;
 }
 
 export function AppShell({ me, onLogout, onTheme, children }: { me: MeResponse; onLogout: () => Promise<void>; onTheme: (theme: "light" | "dark" | "system") => void; children?: ReactNode }) {
