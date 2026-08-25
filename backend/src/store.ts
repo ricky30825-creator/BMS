@@ -169,6 +169,7 @@ export function users(): DemoUser[] { return demoUsers.map((user) => ({ ...user 
 export function batteries(ownerId?: string): DemoBattery[] { return demoBatteries.filter((battery) => !ownerId || battery.ownerId === ownerId).map((battery) => ({ ...battery })); }
 export function activeSession(ownerId?: string): DemoSession | null { return [...demoSessions.values()].find((session) => session.status === "ACTIVE" && (!ownerId || session.ownerId === ownerId)) ?? null; }
 export function sessionsForBattery(batteryId: string): DemoSession[] { return [...demoSessions.values()].filter((session) => session.batteryId === batteryId).map((session) => ({ ...session })); }
+export function sessionById(id: string): DemoSession | undefined { const session = demoSessions.get(id); return session ? { ...session } : undefined; }
 export function activeDiagnosis(batteryId?: string): DemoDiagnosis | null { return [...demoDiagnoses.values()].find((diagnosis) => diagnosis.status === "RUNNING" && (!batteryId || diagnosis.batteryId === batteryId)) ?? null; }
 export function diagnosesForBattery(batteryId: string): DemoDiagnosis[] { return [...demoDiagnoses.values()].filter((diagnosis) => diagnosis.batteryId === batteryId).map((diagnosis) => ({ ...diagnosis })); }
 export function diagnosisById(id: string): DemoDiagnosis | undefined { const diagnosis = demoDiagnoses.get(id); return diagnosis ? { ...diagnosis } : undefined; }
