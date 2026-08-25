@@ -8,6 +8,7 @@ import { auth } from "./auth.js";
 import { corsOrigins, env } from "./config/env.js";
 import { demoPasswordMatches, demoUserForToken, issueDemoToken, requireRole, requireSession, revokeDemoToken, setDemoPassword } from "./auth/middleware.js";
 import { writeAuditLog } from "./auth/audit.js";
+import { detectGradeTransition, gradeForScore, type Grade } from "./realtime/grade.js";
 import {
   F21_THRESHOLDS,
   abortDiagnosis,
@@ -67,14 +68,6 @@ function actorId(req: Request): string {
 
 function actorName(req: Request): string {
   return req.appUser?.name ?? req.authSession?.user.name ?? "Unknown";
-}
-
-function gradeForScore(score: number | null): "NORMAL" | "CAUTION" | "WARNING" | "DANGER" | null {
-  if (score === null) return null;
-  if (score < 0.3) return "NORMAL";
-  if (score < 0.6) return "CAUTION";
-  if (score < 0.8) return "WARNING";
-  return "DANGER";
 }
 
 function temperatureStatus(value: number | null): "OK" | "WARN" | "CRIT" | null {
