@@ -10,6 +10,7 @@
     "test:watch": "vitest",
     "build": "tsc",
     "start": "node dist/server.js",
+    "start:local": "tsx src/server.ts",
     "auth:generate": "auth generate",
     "auth:migrate": "auth migrate"
   },

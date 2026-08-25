@@ -3,7 +3,7 @@ import { Navigate, Route, Routes, useLocation, useNavigate } from "react-router-
 import { QueryClientProvider, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { AppShell } from "./components/Shell";
 import { Modal } from "./components/ui";
-import { api, subscribeAuthFailure } from "./api/client";
+import { api, demoTransportEnabled, subscribeAuthFailure } from "./api/client";
 import { useMe } from "./api/hooks";
 import { useRealtime } from "./realtime/useRealtime";
 import type { MeResponse } from "./types";
@@ -127,7 +127,7 @@ function AppContent() {
   const meQuery = useMe();
   const navigate = useNavigate();
   const qc = useQueryClient();
-  const demoMode = typeof __CELLGUARD_DEV_SERVER__ !== "undefined" && __CELLGUARD_DEV_SERVER__ && import.meta.env.VITE_DEMO_MODE === "true";
+  const demoMode = demoTransportEnabled();
   const demoLoginStarted = useRef(false);
   const [demoLoginPending, setDemoLoginPending] = useState(demoMode);
   const [autoCut, setAutoCut] = useState<Record<string, unknown> | null>(null);

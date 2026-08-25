@@ -4,7 +4,7 @@ import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { AlertTriangle, ArrowRight, BatteryCharging, Check, ChevronRight, ShieldCheck, Zap } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
-import { api, ApiError } from "../api/client";
+import { api, ApiError, demoTransportEnabled } from "../api/client";
 import { Button, Field, Logo } from "../components/ui";
 import { PublicHeader } from "../components/Shell";
 
@@ -46,7 +46,7 @@ export function LandingPage() {
 
 export function LoginPage({ onSuccess }: { onSuccess: () => Promise<void> }) {
   const navigate = useNavigate();
-  const localDemoMode = typeof __CELLGUARD_DEV_SERVER__ !== "undefined" && __CELLGUARD_DEV_SERVER__ && import.meta.env.VITE_DEMO_MODE === "true";
+  const localDemoMode = demoTransportEnabled();
   const [serverError, setServerError] = useState("");
   const form = useForm<LoginValues>({ resolver: zodResolver(loginSchema), defaultValues: { email: "", password: "" } });
   const submit = form.handleSubmit(async (values) => { setServerError(""); try { await api.signIn(values.email, values.password); await onSuccess(); } catch (error) { setServerError(error instanceof ApiError && error.code === "ACCOUNT_SUSPENDED" ? "정지된 계정입니다. 관리자에게 문의하세요." : "이메일 또는 비밀번호를 확인하세요."); } });

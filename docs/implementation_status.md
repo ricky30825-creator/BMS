@@ -34,12 +34,12 @@
 | 백엔드 DB 도메인 provider·Consumer·TimescaleDB | `backend/migrations/001_app_auth.sql`에 자산/세션/릴레이/텔레메트리/진단/멱등성 스키마가 있고 컬럼이 `store.ts` 타입과 1:1로 맞으나, production repository·Kafka Consumer·시계열 적재는 없음. `DATA_MODE=postgres`에서는 `/api/*` 전체가 `RUNTIME_NOT_READY`(503)로 fail-closed(C2, 2026-08-25 실측), `AUTH_MODE=betterauth`에서는 WS도 `socket.destroy()`(C2b, 보류) — 단 WS upgrade는 `DATA_MODE`를 보지 않는 갭이 있다(§4 C2 참조) | 스키마만 있음 / provider 미착수 |
 | 알림 발송 (카카오·SMS·메일) | 채널 ON/OFF 토글과 policy 응답만 있고(`server.ts:405`·`:409`), **실제로 메시지를 보내는 코드는 `backend/src`에 없다** | **보류(의도적)** — 토글 현행 유지, 추가 작업 없음 |
 | AI 로컬 추론 프로세스 | 코드 없음. `ai/` 디렉터리도 없다. 학습(Colab)·체크포인트 반출 절차·추론 프로세스 모두 미착수 | 미착수 — **별도 담당자** |
-| 로컬 실행 패키징 | 프론트 production 빌드를 백엔드가 서빙하는 구성 없음(현재 5173↔3005 두 오리진), 프로세스 자동 시작 없음, 시드 데이터 절차 없음 | 미착수 (→ C8) |
+| 로컬 실행 패키징 | **C8 완료(2026-08-25)** — 단일 오리진(`:3005`), `start-local.bat`(Windows, 수동 실행), `docs/local_run.md`. memory 모드 한정(Kafka·PostgreSQL·추론은 별도) | 완료 (memory 모드) |
 | 에지 소프트웨어 | `edge/bw150/`에 BW150 HID 로거·탐지·BLE 프로브(914줄)만 있고, 센서·릴레이·Kafka 프로듀서 구현은 없음 | 부분 구현 (BW150 한정) |
 | AI 소프트웨어 | 모델 설계는 있으나 `ai/` 디렉터리, Colab 노트북, 학습·추론·Kafka 연동 구현은 없음 | 미착수 |
 | 프론트엔드 | [`frontend/src/`](../frontend/src/)의 Vite + React + TypeScript strict 앱, v3 사용자 15·관리자 6 라우트, 계약형 API/WS 계층, MSW 시나리오, `npm run dev:real` 데모 경로. WS 이벤트 11종 핸들러 중 **8종이 서버 발신을 실제로 수신**(C1), 잔여 `relay.autoCut`·`diagnosis.*` 3종은 여전히 대기 | 부분 구현 / production provider 미착수 |
 | 프론트엔드 실행 기반 | `frontend/package.json`, React Router, Query, RHF/Zod, 토큰 CSS, 공용 UI, Vitest/RTL/Playwright. **Vitest 44건·Playwright 28건·`tsc --noEmit` 통과**(2026-08-25 실행) | 구현됨 |
-| 미구현 REST·화면 | **C3 완료(2026-08-25)**: `POST /api/account/email-availability`, `POST /api/exports`+`GET /api/exports/{id}`+`GET /api/exports/{id}/download`(QUEUED→READY 비동기 잡, 서명·시한부 다운로드 URL, 멱등성·소유권 검증까지 실측 완료). 남은 것은 `GET /api/trends/export.pdf`(503 스텁 — PDF 생성에 새 의존성이 필요해 이번 라운드는 범위 밖으로 확정), `GET`/`PATCH` `/api/settings/voice-alert`(백엔드·프론트 양쪽 없음) | 부분 구현 — 잔여 `export.pdf`(범위 밖 확정)·C4 |
+| 미구현 REST·화면 | **C3 완료(2026-08-25)**: `POST /api/account/email-availability`, `POST /api/exports`+`GET /api/exports/{id}`+`GET /api/exports/{id}/download`(QUEUED→READY 비동기 잡, 서명·시한부 다운로드 URL, 멱등성·소유권 검증까지 실측 완료). **C4 완료(2026-08-25)**: `GET`/`PATCH /api/settings/voice-alert` + 설정 화면 새 탭. 남은 것은 `GET /api/trends/export.pdf`(503 스텁 — PDF 생성에 새 의존성이 필요해 이번 라운드는 범위 밖으로 확정) | 부분 구현 — 잔여 `export.pdf`(범위 밖 확정) |
 | 모드 1 하드웨어 | KiCad 회로 파일, [`docs/hardware/mode1_backend_spec.md`](hardware/mode1_backend_spec.md), 조립 안내서 | 문서·설계 있음, 실물 검증 전 |
 | 모드 2 하드웨어 | [`docs/hardware/mode2_powerbank_diagnosis_spec.md`](hardware/mode2_powerbank_diagnosis_spec.md) | 설계 계약 있음, 구현 전 |
 | 디자인·목업 | [`design-system/cellguard/MASTER.md`](../design-system/cellguard/MASTER.md), [`web/cellguard_mockup_v4.html`](../web/cellguard_mockup_v4.html) | 참고 산출물 있음 |
@@ -94,7 +94,7 @@ v3 프로토타입과 정본 문서에는 모드 1/2, 대표 온도 최댓값, s
 | Phase 4 AI | 데이터셋·특징·AE·Informer·추론 | 미착수. **추론이 Colab에서 호스트 PC로 내려왔고 별도 담당자 몫** |
 | Phase 5 웹 | React 초기화·라우팅·화면·관리자 | 부분 구현. v3 화면·계약 계층·mock QA·localhost demo REST 연결 완료. **WS 서버 발신이 1/11종 → 8/11종으로 확장**(C1, 2026-08-25)됐으나 잔여 2종은 각각 B3·F21 안전 프로필 선행. production DB provider 통합(B1)은 미완료 |
 | Phase 6 알림·차단 | 카카오·Fail-Safe·음성 설정 | **카카오는 보류(의도적).** Fail-Safe는 판정 코드 자체가 없고, 음성 설정은 API·화면 모두 없음 — 이 둘은 미착수 |
-| Phase 7 통합·**로컬 실행 패키징** | E2E·시나리오·실행 묶기 | 미착수. **AWS 배포 항목은 삭제**(클라우드 미사용). 단 프론트 단독 E2E(Playwright 28건)는 동작 |
+| Phase 7 통합·**로컬 실행 패키징** | E2E·시나리오·실행 묶기 | **로컬 실행 패키징은 C8로 완료(2026-08-25)**. **AWS 배포 항목은 삭제**(클라우드 미사용). 프론트 단독 E2E(Playwright 29건, C8에서 1건 추가)는 동작 |
 
 세부 체크리스트는 [`PLAN.md` §8 개발 로드맵](../PLAN.md#8-개발-로드맵)을 기준으로 갱신한다. **담당자별 실행 목록은 [「남은 작업과 담당 경계」](#남은-작업과-담당-경계)를 본다.**
 
@@ -285,11 +285,13 @@ v3 프로토타입과 정본 문서에는 모드 1/2, 대표 온도 최댓값, s
 | `POST /api/exports` + `GET /api/exports/{id}` + `GET /api/exports/{id}/download` | `:904`·`:905` | **✓ 구현·실측 완료** — QUEUED→READY 비동기 잡 전체 생애주기를 서명·시한부 다운로드 URL과 함께 구현. 멱등성·소유권 검증까지 end-to-end 실측 |
 | `GET /api/trends/export.pdf` | `:907` | 503 스텁 (`server.ts:832`), **변경 없음** — PDF 생성이 새 의존성을 요구해 이번 라운드는 명시적으로 범위 밖 |
 
-### C4. 음성 안내 설정 `/api/settings/voice-alert`
+### C4. 음성 안내 설정 `/api/settings/voice-alert` — **완료(2026-08-25)**
 
-- **현재 상태**: 백엔드 라우트 없음, 프론트 화면도 없음.
-- **계약 근거**: `backend_contract.md:1086`·`:1113`·`:1134`, `REQ-WEB-072`. *"v3 어느 화면에도 없다. 그러나 `PLAN.md`에 모델·API가 이미 확정돼 있고 에지 하드웨어 동작과 직결되므로 계약에 포함한다. 프론트가 설정 화면에 탭 또는 섹션을 새로 만들어야 한다."*
-- 필드 정의는 `PLAN.md`에 있다. 전체 ON/OFF·음량·카테고리 5종.
+- **구현**: `GET`/`PATCH /api/settings/voice-alert` (`backend/src/voiceAlert.ts` — 순수 검증/머지 함수 + `vitest` 5건, `backend/src/server.ts`에 Map 기반 사용자별 저장으로 배선). 필드는 계약대로 `enabled`·`volume`(0–100)·`connectionEnabled`·`anomalyEnabled`·`failsafeRelayEnabled`·`deviceErrorEnabled`·`networkEnabled`·`updatedAt`.
+- **프론트**: `설정` 화면에 새 탭 `음성 안내` 추가(`frontend/src/pages/UserPages.tsx`의 `SettingsPage`) — 전체 ON/OFF, 볼륨 슬라이더, 카테고리 5종 토글. 전체가 꺼지면 하위 토글·슬라이더가 비활성화된다(계약: 릴레이/Fail-Safe 판단에 영향 없음, 운영 보조 기능).
+- **버그 하나 잡음**: `.toggle-row input`이 타입 구분 없이 모든 input을 토글 스위치로 렌더링하고 있어(`styles.css`), 볼륨 range 슬라이더가 깨진 토글처럼 보였다. `[type="checkbox"]`/`[type="range"]`로 분리해 수정.
+- **실측**: 브라우저로 배터리 연결 → 설정 → 음성 안내 탭에서 전체 ON, 볼륨 드래그(40%→100%), 카테고리 토글까지 확인. `curl`로 GET/PATCH 검증 완료, 볼륨 범위 밖(140) 요청은 `400 VALIDATION_FAILED`.
+- 프론트 테스트: `frontend/src/test/settings-ui.test.tsx`에 음성 안내 탭 2건 추가.
 
 ### C5. 카카오톡 알림 발송 — **보류(의도적), 추가 작업 없음**
 
@@ -298,25 +300,37 @@ v3 프로토타입과 정본 문서에는 모드 1/2, 대표 온도 최댓값, s
 - ⚠️ **시연 주의**: 화면상 토글이 정상으로 보이므로 "알림이 간다"고 설명하면 사실과 다르다.
 - 나중에 되살릴 때 필요한 것(지금 하지 않음): 이상점수/이벤트 → 채널 정책(`sendOn: ["DANGER","WARNING"]`, `smsOnlyDanger`, `dedupeWindowMinutes: 5`) 적용 → Kakao API 발송 → 결과 기록. **서버는 사용자 문구를 만들지 않는다는 규칙(CLAUDE.md API 계약)의 예외가 필요하다** — 수신자가 웹 프론트가 아니라 서버가 문장을 만들어야 한다.
 
-### C6. `?metric=` 배선 (소)
+### C6. `?metric=` 배선 (소) — **완료(2026-08-25)**
 
-- **현재 상태**: `/api/dashboard`가 `metric` 쿼리를 보내지 않는다 — `frontend/src/api/hooks.ts:33`, `frontend/src/realtime/useRealtime.ts:168`·`:179`. 그래서 지표 선택이 서버 시리즈를 바꾸지 못하고, 큰 차트는 선 색만 바뀐다.
-- **계약 근거**: `backend_contract.md:755` — *"`quickTrend.metric`은 `volt|curr|temp|soc` 중 프론트가 선택. 쿼리 `?metric=temp`로 지정."*
-- **연관**: 2026-08-25에 미니 스파크라인을 실데이터 기반으로 고치면서(`UserPages.tsx`) 이 배선은 남겨뒀다. 배선하면 선택한 카드에 실제 선이 그려진다.
+- **구현**: `frontend/src/api/normalize.ts`에 프론트 카드 키(`voltageV`|`currentA`|`representativeTempC`|`socPct`) ↔ 서버 쿼리 값(`volt`|`curr`|`temp`|`soc`) 순수 매핑 함수 `dashboardMetricParam`/`dashboardMetricKey` 추가(단위 테스트 포함, `normalize.test.ts`).
+  - `useDashboard(enabled, metric)`(`api/hooks.ts`)가 `?metric=`을 실어 보낸다.
+  - `useRealtime`(`realtime/useRealtime.ts`)에 `refetchMetric(metric)`을 새로 노출 — 지표 카드 클릭 시 이걸 호출해 `/api/dashboard?metric=...`을 다시 받아 `quickTrend`만 교체한다(웹소켓 재연결 없이). 내부 `metricRef`로 최근 선택을 기억해두어 이후 `fetchSnapshot`/`resyncQueries`(초기 연결·재동기화)도 같은 지표로 요청한다.
+  - `DashboardPage`의 카드·세그먼트 버튼 클릭이 `setMetric` + `realtime.refetchMetric(...)`을 함께 호출하도록 배선(`UserPages.tsx`).
+- **실측**: 브라우저에서 "전류" 카드 클릭 → 네트워크 탭에 `GET /api/dashboard?metric=curr 200` 확인, 카드·세그먼트 활성 상태 전환 확인.
+- 프론트 테스트: `frontend/src/test/dashboard-ui.test.tsx`에 클릭→`refetchMetric` 호출, 응답 반영 후 해당 카드에만 선이 그려지는지 검증하는 2건 추가.
 
-### C7. 전류 부호 표기 — 추세 차트 (판단 필요)
+### C7. 전류 부호 표기 — 추세 차트 — **완료(2026-08-25)**
 
-- **현재 상태**: 빠른 추세 카드와 배터리 상세는 2026-08-25에 `magnitude()`로 부호를 제거했다. 그러나 배터리 상세의 **추세 차트는 전류 Y축이 여전히 음수**(`TrendCharts`).
-- **판단이 필요한 이유**: 시계열에 `abs()`를 걸면 충전→방전 전환이 가짜 V자로 접혀 CLAUDE.md가 지키라는 충·방전 구분이 오히려 깨진다. 축 라벨을 `A (+충전 / −방전)`로 명시하는 쪽이 유력하나 확정 전이다.
+- **결정**: 사용자 확인 결과 — *"부호는 신경 쓰지 말고 abs()로 하자."* 축 라벨 명시나 서브라인 분리 없이 단순 `abs()`로 확정.
+- **구현**: `frontend/src/pages/UserPages.tsx`에 순수 함수 `trendSeriesValue(metricKey, value)` 추가 — `curr`만 `magnitude()`(null-safe abs)를 적용하고 나머지 지표는 그대로 둔다. `TrendCharts`가 이 함수를 통해 포인트를 만들도록 배선.
+- **테스트**: `frontend/src/test/trend-charts.test.ts` 3건(부호 제거, null 보존, 다른 지표는 그대로).
+- **실측**: 배터리 상세 → 추세 차트에서 전류 Y축이 `0 – 2.4`(음수 없음)로 렌더링됨을 브라우저로 확인.
 
-### C8. 로컬 실행 패키징 (구 Phase 7 배포)
+### C8. 로컬 실행 패키징 (구 Phase 7 배포) — **완료(2026-08-25), 실측 범위는 memory 모드 한정**
 
-AWS 배포는 삭제됐지만, 호스트 PC 1대에서 **재현 가능하게 묶는** 작업은 남는다.
+정본은 `docs/local_run.md`. AWS 배포는 삭제됐고, 실제로 도는 것은 `AUTH_MODE=demo DATA_MODE=memory`뿐이다(Kafka·PostgreSQL 연동·추론 프로세스는 이 저장소에 아직 없음 — 별도 담당자 몫, CLAUDE.md).
 
-- **프론트 production 빌드를 백엔드가 정적 서빙한다.** 지금은 `5173`(Vite) ↔ `3005`(Express) 두 오리진이라 CORS 설정(`server.ts:50-55`)과 쿠키 도메인 문제를 계속 안고 간다. `vite build` 산출물을 Express가 서빙해 **단일 오리진(:3005)** 으로 만들면 이 문제가 통째로 사라진다. SPA라 알 수 없는 경로는 `index.html`로 폴백해야 한다(`/dashboard` 직접 접속이 404가 되지 않도록).
-- **프로세스 자동 시작·재시작** — Kafka·PostgreSQL·추론·백엔드. 시연 중 크래시나 PC 재부팅에서 복구되어야 한다.
-- **`.env` 템플릿과 시드 데이터 절차** — 다른 PC에서도 같은 절차로 뜨는지 확인한다.
-- **완료 판정**: PC를 재부팅해도 브라우저에서 `localhost:3005` 하나로 전체 시나리오가 동작.
+- **호스트 PC는 Windows로 확인됐다(2026-08-25)** — 이 사실을 CLAUDE.md와 개인 메모리에 남겼다. 이하 전부 Windows 기준.
+- **단일 오리진**: `backend/src/server.ts`에 `/api/*` 명시적 JSON 404(기존엔 Express 기본 HTML 404로 새고 있었음) + `express.static(frontend/dist)` + SPA 폴백(`index.html`)을 추가. `frontend/dist`가 없으면(백엔드 단독 dev 세션) 조용히 스킵된다.
+- **버그 하나 발견·수정**: `frontend/src/api/client.ts`의 `demoTransportEnabled()`(및 `App.tsx`·`PublicPages.tsx`의 동일 로직)가 `__CELLGUARD_DEV_SERVER__`(Vite `dev` 커맨드에서만 `true`) 뒤에 숨어 있어서, 단순히 `vite build`만 하면 데모 로그인이 전혀 안 됐다 — 진짜 Better Auth(C2b)가 아직 없어 대체 경로가 없다. `VITE_DEMO_MODE==="true"` 단독 체크로 게이트를 바꿔 해결(서버가 `AUTH_MODE=demo`로 이미 독립적으로 재검증하므로 안전). `main.tsx`의 MSW 목 게이트는 그대로 dev 전용 유지.
+- **`frontend/.env.production`(신규)**: `npm run build`가 자동으로 읽어 `VITE_API_BASE=`(동일 오리진)·`VITE_DEMO_MODE=true`·`VITE_USE_MOCKS=false`를 굽는다.
+- **Windows 배치 스크립트**: `start-local.bat` — `.env` 확인 → 최초 1회만 `npm install` → 매번 프론트 재빌드 → `npm run start:local`(`tsx src/server.ts`, backend/package.json에 신규 추가)로 백엔드 기동. **작업 스케줄러 등록 등 영구 자동시작은 설치하지 않는다** — 사용자가 명시적으로 이 옵션을 거절했다(재부팅 후 수동 실행).
+- **시드 데이터**: 별도 절차 없음 — `DATA_MODE=memory`의 시드가 곧 `backend/src/store.ts`에 내장된 데모 데이터다. `docs/local_run.md`에 이 사실을 명시해 헛수고로 시딩 스크립트를 찾지 않게 했다.
+- **`.env` 템플릿**: `backend/.env.example`·`frontend/.env.example`에 주석 보강(왜 `DATABASE_URL`이 memory 모드에서도 필요한지, `.env.production`이 별도 파일인 이유).
+- **실측(이 세션, macOS에서 실제 프로덕션 빌드로 검증)**: `npm run build` → 백엔드 기동 → `curl`로 `/`·`/dashboard`(200 HTML)·`/api/does-not-exist`(404 JSON, HTML로 새지 않음) 확인. 브라우저로 `localhost:3005` 접속 → 데모 로그인 자동 진행 → 배터리 연결 → 대시보드·설정(C4 음성 안내 탭)·`?metric=` 배선(C6)·전류 abs() 추세(C7)까지 전부 단일 오리진에서 재확인. 콘솔 에러 없음.
+- **Playwright**: 기존 `e2e/production-bundle.spec.ts`(실서비스 빌드에 데모 자격증명이 새지 않는지 검증하는 기존 테스트)에 대칭 테스트 1건 추가 — `VITE_DEMO_MODE=true` 빌드에는 데모 로그인 트랜스포트가 **반드시 포함**돼야 함을 검증. 29건 전체 통과.
+- ⚠️ **Windows `.bat` 자체는 실제 Windows PC에서 실행해 검증하지 못했다** — macOS 세션에서 작성만 했다. 처음 돌릴 때 문제가 있으면 알려달라고 `docs/local_run.md`에 남겨뒀다.
+- **완료 판정 재확인**: "PC 재부팅 후 `localhost:3005` 하나로 전체 시나리오 동작"은 memory 모드 기준으로 today 성립한다. Kafka/PostgreSQL/추론이 붙는 순간(B1 이후) 이 문서·스크립트는 다시 봐야 한다.
 
 ## 5. D군 — 404지만 정상 (착각 방지)
 
@@ -338,8 +352,8 @@ AWS 배포는 삭제됐지만, 호스트 PC 1대에서 **재현 가능하게 묶
 4. **B1 리포지토리 교체** — **다음 우선순위.** 분량이 가장 크다(`store.ts` 전체 + 동기→비동기 전환). A-1 담당자의 A2와 병렬 진행 가능. C2가 끝나 `AUTH_MODE=demo DATA_MODE=postgres` 조합의 배선은 준비돼 있으니, B1이 끝나는 즉시 이 조합이 실제로 열린다.
 5. **B3·B4 안전 경로** — A2/A4가 데이터를 주기 시작한 뒤. B3이 끝나면 C1의 `relay.autoCut`도 같이 닫힌다.
 6. ~~**C3 REST 미구현**~~ — **완료(2026-08-25).** `email-availability`·`exports` 계열 구현·실측 완료. `export.pdf`는 범위 밖 확정으로 남김.
-7. **C8 로컬 실행 패키징** — 시연 리허설 전에 끝나야 한다. 단일 오리진 전환은 CORS·쿠키를 건드리므로 마지막에 몰아서 하지 말 것.
-8. **C4·C6·C7, 그리고 WS의 `DATA_MODE` 인지(C2 갭)** — 나머지. (C2b·C5는 보류)
+7. ~~**C8 로컬 실행 패키징**~~ — **완료(2026-08-25).** memory 모드 한정, Windows 배치 스크립트는 실제 Windows PC에서 미검증.
+8. ~~**C4 음성 안내 설정**~~ · ~~**C6 `?metric=` 배선**~~ · ~~**C7 전류 부호 표기**~~ · ~~**C8 로컬 실행 패키징**~~ — **모두 완료(2026-08-25).** 남은 것: WS의 `DATA_MODE` 인지(C2 갭)뿐. (C2b·C5는 보류)
 
 ### 지금 하지 않기로 한 것
 

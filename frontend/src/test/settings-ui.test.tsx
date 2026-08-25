@@ -60,3 +60,46 @@ describe("settings alert UI", () => {
     expect(screen.getByRole("status")).toHaveTextContent("비밀번호가 변경되었습니다.");
   });
 });
+
+describe("settings voice-alert UI", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  const defaultVoiceSettings = { enabled: true, volume: 70, connectionEnabled: true, anomalyEnabled: true, failsafeRelayEnabled: true, deviceErrorEnabled: true, networkEnabled: false, updatedAt: "2026-01-01T00:00:00.000Z" };
+
+  it("loads server settings into the voice-alert tab and PATCHes on toggle", async () => {
+    vi.spyOn(api, "getAlertSettings").mockResolvedValue({ channels: { KAKAO: true, EMAIL: true, SMS: false, WEBPUSH: true }, policy: {} });
+    vi.spyOn(api, "getVoiceAlertSettings").mockResolvedValue(defaultVoiceSettings);
+    const update = vi.spyOn(api, "updateVoiceAlertSettings").mockResolvedValue({ ...defaultVoiceSettings, networkEnabled: true, updatedAt: "2026-01-02T00:00:00.000Z" });
+    const user = userEvent.setup();
+    render(<SettingsPage me={me} onProfileSaved={() => undefined} onPreferencesSaved={() => undefined} />);
+    await user.click(screen.getByRole("tab", { name: "음성 안내" }));
+    await waitFor(() => expect(screen.getByText("이상 탐지 경보")).toBeInTheDocument());
+    const networkToggle = screen.getByText("네트워크 상태").closest(".toggle-row")!.querySelector("input")!;
+    expect(networkToggle).not.toBeChecked();
+
+    await user.click(networkToggle);
+    await waitFor(() => expect(update).toHaveBeenCalledWith({ networkEnabled: true }));
+    await waitFor(() => expect(networkToggle).toBeChecked());
+    expect(document.body).toHaveTextContent("음성 안내 설정이 저장되었습니다.");
+  });
+
+  it("disables the category toggles and volume slider while the master switch is off, and rolls back a failed PATCH", async () => {
+    vi.spyOn(api, "getAlertSettings").mockResolvedValue({ channels: { KAKAO: true, EMAIL: true, SMS: false, WEBPUSH: true }, policy: {} });
+    vi.spyOn(api, "getVoiceAlertSettings").mockResolvedValue({ ...defaultVoiceSettings, enabled: false });
+    const update = vi.spyOn(api, "updateVoiceAlertSettings").mockRejectedValue(new Error("offline"));
+    const user = userEvent.setup();
+    render(<SettingsPage me={me} onProfileSaved={() => undefined} onPreferencesSaved={() => undefined} />);
+    await user.click(screen.getByRole("tab", { name: "음성 안내" }));
+    await waitFor(() => expect(screen.getByText("이상 탐지 경보")).toBeInTheDocument());
+    const volumeSlider = screen.getByText("음량").closest(".toggle-row")!.querySelector("input")!;
+    expect(volumeSlider).toBeDisabled();
+    const anomalyToggle = screen.getByText("이상 탐지 경보").closest(".toggle-row")!.querySelector("input")!;
+    expect(anomalyToggle).toBeDisabled();
+
+    const masterToggle = screen.getByText("음성 안내 전체").closest(".toggle-row")!.querySelector("input")!;
+    await user.click(masterToggle);
+    await waitFor(() => expect(update).toHaveBeenCalledWith({ enabled: true }));
+    await waitFor(() => expect(masterToggle).not.toBeChecked());
+    expect(document.body).toHaveTextContent("음성 안내 설정을 저장하지 못했습니다.");
+  });
+});

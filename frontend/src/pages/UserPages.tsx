@@ -7,10 +7,10 @@ import { useQuery } from "@tanstack/react-query";
 import { Link, useNavigate } from "react-router-dom";
 import { api, ApiError } from "../api/client";
 import { buildCapacityDiagnosisBody, buildQuickDiagnosisBody, type SocHintLevel } from "../api/diagnosis";
-import { normalizeBattery } from "../api/normalize";
+import { dashboardMetricKey, dashboardMetricParam, normalizeBattery, type DashboardMetricKey, type DashboardMetricParam } from "../api/normalize";
 import { useAckAlert, useAckAll, useActiveDiagnosis, useAnomalySummary, useBattery, useBatteries, useCreateBattery, useDashboard, useDiagnosisDetail, useDiagnosisHistory, useDiagnosisStart, useDiagnosisStop, useEvidence, useEvents, useNotices, useRelay, useRelayHistory, useRelayMutation, useStartSession, useTrends, useUpdateBattery, useAlertSummary, useAlerts } from "../api/hooks";
 import { useRealtime, type RealtimeState } from "../realtime/useRealtime";
-import type { Alert, AlertChannels, Battery, BatteryEvent, Dashboard, Grade, MeResponse, NoticeCategory, Relay, TrendResponse } from "../types";
+import type { Alert, AlertChannels, Battery, BatteryEvent, Dashboard, Grade, MeResponse, NoticeCategory, Relay, TrendResponse, VoiceAlertSettings } from "../types";
 import { Button, Card, EmptyState, Field, MetricStatusBadge, Modal, PageHeading, Pagination, StatusBadge, TableState, Tabs, formatDateTime, formatTime, relativeTime, score100 } from "../components/ui";
 import { Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis, BarChart, Bar, CartesianGrid, Cell } from "recharts";
 
@@ -26,10 +26,11 @@ function direction(value: number | null | undefined): string { return value == n
 // direction() 라벨로 낸다. 부호를 살려야 하는 온도 등에는 쓰지 않는다.
 function magnitude(value: number | null | undefined): number | null { return value == null ? null : Math.abs(value); }
 
-export function DashboardPage({ realtime, me }: { realtime: { state: RealtimeState; dashboard: Dashboard | null; lastAt: string | null }; me: MeResponse }) {
-  const query = useDashboard(Boolean(me.activeSession));
+export function DashboardPage({ realtime, me }: { realtime: { state: RealtimeState; dashboard: Dashboard | null; lastAt: string | null; refetchMetric: (metric: DashboardMetricParam) => Promise<void> }; me: MeResponse }) {
+  const [metric, setMetric] = useState<DashboardMetricKey>("representativeTempC");
+  const query = useDashboard(Boolean(me.activeSession), dashboardMetricParam(metric));
   const data = realtime.dashboard ?? query.data;
-  const [metric, setMetric] = useState<"voltageV" | "currentA" | "representativeTempC" | "socPct">("representativeTempC");
+  const selectMetric = (key: DashboardMetricKey) => { setMetric(key); void realtime.refetchMetric(dashboardMetricParam(key)); };
   if (!me.activeSession) return <GateCard />;
   if (!data && (query.isPending || realtime.state === "loading" || realtime.state === "connecting")) return <TableState state="loading" message="대시보드 스냅샷을 불러오는 중입니다." />;
   if (!data) return <Card><EmptyState title="대시보드 데이터를 사용할 수 없습니다." description="서버가 필수 측정 필드를 반환하지 않았거나 일시적으로 응답하지 않았습니다." action={<Button variant="secondary" onClick={() => void query.refetch()}>다시 시도</Button>} /></Card>;
@@ -42,13 +43,7 @@ export function DashboardPage({ realtime, me }: { realtime: { state: RealtimeSta
   if (grade === null || anomalyScore === null) return null;
   const metrics = [{ key: "voltageV" as const, label: "전압", short: "V", unit: "V", value: data.metrics.voltageV.value, status: data.metrics.voltageV.status, tone: "volt", color: "#16a34a" }, { key: "currentA" as const, label: "전류", short: "A", unit: "A", value: data.metrics.currentA.value, status: data.metrics.currentA.status, tone: "curr", color: "#0ea5e9" }, { key: "representativeTempC" as const, label: "온도 (°C)", short: "온도", unit: "°C", value: data.metrics.representativeTempC.value, status: data.metrics.representativeTempC.status, tone: "temp", color: "#ea580c" }, { key: "socPct" as const, label: data.metrics.socBasis === "RELATIVE_SESSION_START" ? "상대 SOC" : "SOC", short: "SOC", unit: "%", value: data.metrics.socPct.value, status: data.metrics.socPct.status, tone: "soc", color: "#7c3aed" }];
   const trend = data.quickTrend?.points.map((point) => ({ at: formatTime(point.at), value: point.value })) ?? [];
-  return <div className="page-stack dashboard-page"><Card className={`dashboard-hero ${grade.toLowerCase()}`}><div className="dashboard-hero-copy"><div className="dashboard-context"><span className="dashboard-battery-icon"><BatteryCharging size={18} /></span><div><strong>{data.battery.label}</strong><small>{data.battery.model ?? "모델 미입력"} · 한 번에 하나의 배터리만 연결됩니다.</small></div><Link className="dashboard-change" to="/battery">배터리 변경</Link></div><div><h1>{grade === "DANGER" ? "위험 상태" : grade === "WARNING" ? "경고 상태" : grade === "CAUTION" ? "주의 · 이상점수 상승" : "정상적으로 가동 중"}</h1><p>이상점수 {score100(anomalyScore)} · {data.relay.state === "OPEN" ? "릴레이가 차단된 상태입니다." : "현재 회로가 연결되어 있습니다."}</p></div><div className="dashboard-hero-actions"><Link className="button button-danger" to="/relay">릴레이 차단</Link><span className={`stream-status stream-${realtime.state}`}><span className="status-dot" />{realtime.state === "live" ? "실시간 수신 중" : realtime.state === "reconnecting" ? "재연결 중" : "연결 대기"}</span></div></div><div className="dashboard-score"><div className="dashboard-score-head"><span>현재 이상점수</span><Link to="/anomaly">이상 탐지 →</Link></div><div className="score-gauge"><svg viewBox="0 0 220 124" role="img" aria-label={`이상점수 ${score100(anomalyScore)} ${grade}`}><path d="M18 108 A92 92 0 0 1 202 108" fill="none" stroke="var(--border)" strokeWidth="16" strokeLinecap="round" /><path d="M18 108 A92 92 0 0 1 202 108" fill="none" className={`stroke-${grade.toLowerCase()}`} strokeWidth="16" strokeLinecap="round" pathLength="100" strokeDasharray={`${Math.max(0, Math.min(100, anomalyScore * 100))} 100`} /></svg><div className="score-gauge-value"><strong className="mono">{score100(anomalyScore)}</strong><StatusBadge grade={grade} compact /></div></div><div className="grade-legend">{(["NORMAL", "CAUTION", "WARNING", "DANGER"] as Grade[]).map((item) => <span key={item}><i className={`grade-shape ${item === "NORMAL" ? "circle" : item === "CAUTION" ? "diamond" : item === "WARNING" ? "triangle" : "square"}`} />{item === "NORMAL" ? "정상 0–29" : item === "CAUTION" ? "주의 30–59" : item === "WARNING" ? "경고 60–79" : "위험 80+"}</span>)}</div></div></Card><div className="quick-trend-section"><div className="section-heading-inline"><div><h2>빠른 추세</h2><p>최신 측정값을 한눈에 확인합니다.</p></div><Link className="text-button" to="/trend">전체 추세 보기 →</Link></div><div className="quick-metric-grid">{metrics.map((item) => <button className={`dashboard-metric-card ${item.tone} ${metric === item.key ? "active" : ""}`} key={item.key} aria-pressed={metric === item.key} onClick={() => setMetric(item.key)}><span className="metric-tone-head"><small>{item.label}</small><MetricStatusBadge status={item.status} /></span><strong className="mono">{metricValue(item.key === "currentA" ? magnitude(item.value) : item.value)}<em>{item.unit}</em></strong>{item.key === "currentA" && <span className="metric-direction">{direction(item.value)}</span>}<MiniMetricLine color={item.color} points={quickTrendMetricKey(data.quickTrend?.metric) === item.key ? data.quickTrend?.points : undefined} /></button>)}</div></div><Card className="dashboard-trend-card"><div className="card-title-row"><h2>V · I · T · SOC 추세</h2><span className="mono">{formatDateTime(data.metrics.measuredAt, true)}</span></div><div className="metric-selector segmented">{metrics.map((item) => <button key={item.key} className={metric === item.key ? "active" : ""} onClick={() => setMetric(item.key)}>{item.label}</button>)}</div>{trend.length ? <ResponsiveContainer width="100%" height={190}><LineChart data={trend}><CartesianGrid vertical={false} stroke="var(--border)" strokeDasharray="3 4" /><XAxis dataKey="at" tick={false} axisLine={false} /><YAxis hide domain={["auto", "auto"]} /><Tooltip contentStyle={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 8 }} /><Line type="monotone" dataKey="value" stroke={metrics.find((item) => item.key === metric)?.color ?? "var(--primary)"} strokeWidth={2.5} dot={false} isAnimationActive={false} /></LineChart></ResponsiveContainer> : <TableState state="empty" message="추세 데이터가 없습니다." />}</Card><NoticePreview notices={data.notices} /></div>;
-}
-
-// 서버 quickTrend는 한 번에 지표 하나의 시리즈만 준다. 그 지표의 카드에만 선을 그린다.
-function quickTrendMetricKey(metric: NonNullable<Dashboard["quickTrend"]>["metric"] | undefined): string | null {
-  if (!metric) return null;
-  return { volt: "voltageV", curr: "currentA", temp: "representativeTempC", soc: "socPct" }[metric] ?? null;
+  return <div className="page-stack dashboard-page"><Card className={`dashboard-hero ${grade.toLowerCase()}`}><div className="dashboard-hero-copy"><div className="dashboard-context"><span className="dashboard-battery-icon"><BatteryCharging size={18} /></span><div><strong>{data.battery.label}</strong><small>{data.battery.model ?? "모델 미입력"} · 한 번에 하나의 배터리만 연결됩니다.</small></div><Link className="dashboard-change" to="/battery">배터리 변경</Link></div><div><h1>{grade === "DANGER" ? "위험 상태" : grade === "WARNING" ? "경고 상태" : grade === "CAUTION" ? "주의 · 이상점수 상승" : "정상적으로 가동 중"}</h1><p>이상점수 {score100(anomalyScore)} · {data.relay.state === "OPEN" ? "릴레이가 차단된 상태입니다." : "현재 회로가 연결되어 있습니다."}</p></div><div className="dashboard-hero-actions"><Link className="button button-danger" to="/relay">릴레이 차단</Link><span className={`stream-status stream-${realtime.state}`}><span className="status-dot" />{realtime.state === "live" ? "실시간 수신 중" : realtime.state === "reconnecting" ? "재연결 중" : "연결 대기"}</span></div></div><div className="dashboard-score"><div className="dashboard-score-head"><span>현재 이상점수</span><Link to="/anomaly">이상 탐지 →</Link></div><div className="score-gauge"><svg viewBox="0 0 220 124" role="img" aria-label={`이상점수 ${score100(anomalyScore)} ${grade}`}><path d="M18 108 A92 92 0 0 1 202 108" fill="none" stroke="var(--border)" strokeWidth="16" strokeLinecap="round" /><path d="M18 108 A92 92 0 0 1 202 108" fill="none" className={`stroke-${grade.toLowerCase()}`} strokeWidth="16" strokeLinecap="round" pathLength="100" strokeDasharray={`${Math.max(0, Math.min(100, anomalyScore * 100))} 100`} /></svg><div className="score-gauge-value"><strong className="mono">{score100(anomalyScore)}</strong><StatusBadge grade={grade} compact /></div></div><div className="grade-legend">{(["NORMAL", "CAUTION", "WARNING", "DANGER"] as Grade[]).map((item) => <span key={item}><i className={`grade-shape ${item === "NORMAL" ? "circle" : item === "CAUTION" ? "diamond" : item === "WARNING" ? "triangle" : "square"}`} />{item === "NORMAL" ? "정상 0–29" : item === "CAUTION" ? "주의 30–59" : item === "WARNING" ? "경고 60–79" : "위험 80+"}</span>)}</div></div></Card><div className="quick-trend-section"><div className="section-heading-inline"><div><h2>빠른 추세</h2><p>최신 측정값을 한눈에 확인합니다.</p></div><Link className="text-button" to="/trend">전체 추세 보기 →</Link></div><div className="quick-metric-grid">{metrics.map((item) => <button className={`dashboard-metric-card ${item.tone} ${metric === item.key ? "active" : ""}`} key={item.key} aria-pressed={metric === item.key} onClick={() => selectMetric(item.key)}><span className="metric-tone-head"><small>{item.label}</small><MetricStatusBadge status={item.status} /></span><strong className="mono">{metricValue(item.key === "currentA" ? magnitude(item.value) : item.value)}<em>{item.unit}</em></strong>{item.key === "currentA" && <span className="metric-direction">{direction(item.value)}</span>}<MiniMetricLine color={item.color} points={dashboardMetricKey(data.quickTrend?.metric) === item.key ? data.quickTrend?.points : undefined} /></button>)}</div></div><Card className="dashboard-trend-card"><div className="card-title-row"><h2>V · I · T · SOC 추세</h2><span className="mono">{formatDateTime(data.metrics.measuredAt, true)}</span></div><div className="metric-selector segmented">{metrics.map((item) => <button key={item.key} className={metric === item.key ? "active" : ""} onClick={() => selectMetric(item.key)}>{item.label}</button>)}</div>{trend.length ? <ResponsiveContainer width="100%" height={190}><LineChart data={trend}><CartesianGrid vertical={false} stroke="var(--border)" strokeDasharray="3 4" /><XAxis dataKey="at" tick={false} axisLine={false} /><YAxis hide domain={["auto", "auto"]} /><Tooltip contentStyle={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 8 }} /><Line type="monotone" dataKey="value" stroke={metrics.find((item) => item.key === metric)?.color ?? "var(--primary)"} strokeWidth={2.5} dot={false} isAnimationActive={false} /></LineChart></ResponsiveContainer> : <TableState state="empty" message="추세 데이터가 없습니다." />}</Card><NoticePreview notices={data.notices} /></div>;
 }
 
 function MiniMetricLine({ color, points }: { color: string; points?: Array<{ at: string; value: number | null }> }) {
@@ -122,9 +117,14 @@ export function BatteryDetailPage({ id }: { id: string }) {
   return <div className="page-stack"><PageHeading eyebrow="BATTERY DETAIL" title={data.label} description={`battery_id · ${data.id}`} actions={<Link className="button button-secondary" to="/battery">배터리 자산으로</Link>} /><div className="detail-summary"><Card><div className="card-title-row"><h2>현재 상태</h2>{data.latest?.grade != null && data.latest?.score != null ? <StatusBadge grade={data.latest.grade} score={data.latest.score} /> : <span className="plain-status">측정 없음</span>}</div><div className="detail-metric-grid"><div><small>전압</small><strong className="mono">{metricValue(data.latest?.voltageV)} V</strong></div><div><small>전류</small><strong className="mono">{metricValue(magnitude(data.latest?.currentA))} A</strong><span>{direction(data.latest?.currentA)}</span></div><div><small>대표 온도</small><strong className="mono">{metricValue(data.latest?.representativeTempC)} °C</strong></div><div><small>SOC</small><strong className="mono">{metricValue(data.latest?.socPct, 0)} %</strong><span>{data.latest?.socBasis === "RELATIVE_SESSION_START" ? "세션 시작 기준" : data.latest?.socBasis === "ABSOLUTE_GAUGE" ? "게이지 기준" : "기준 없음"}</span></div></div></Card><Card><div className="card-title-row"><h2>SOH / RUL 건강도</h2><span className="field-hint">서버 산출값</span></div>{data.health ? <div className="health-grid"><div><small>SOH</small><strong className="mono">{data.health.sohPct == null ? "—" : `${data.health.sohPct}%`}</strong></div><div><small>RUL</small><strong className="mono">{data.health.rulCycles == null ? "—" : `${data.health.rulCycles} cycle`}</strong></div><div><small>누적 사이클</small><strong className="mono">{data.health.cycleCount == null ? "—" : data.health.cycleCount}</strong></div><div><small>내부 저항</small><strong className="mono">{data.health.internalResistanceMohm == null ? "—" : `${data.health.internalResistanceMohm} mΩ`}</strong></div></div> : <EmptyState title="아직 유효한 건강도 데이터가 없습니다." description={data.targetMode === 2 ? "모드 2는 정밀 진단 결과가 쌓인 뒤 상대 SOH를 제공합니다." : "측정 데이터가 충분히 쌓이면 서버가 건강도를 산출합니다."} />}</Card></div><Card><div className="card-title-row"><div><h2>V · I · T · SOC 추세</h2><p>데이터가 없는 구간은 0으로 보정하지 않습니다.</p></div><div className="segmented">{(["24h", "7d", "30d"] as const).map((item) => <button key={item} className={period === item ? "active" : ""} onClick={() => setPeriod(item)}>{item === "24h" ? "24시간" : item === "7d" ? "7일" : "30일"}</button>)}</div></div>{trend.isPending ? <TableState state="loading" /> : trend.data ? <TrendCharts data={trend.data} /> : <TableState state="empty" message="추세 데이터가 없습니다." />}</Card><Card><div className="card-title-row"><h2>과거 측정 세션</h2><span className="field-hint">{sessions.data?.page.total ?? 0}건</span></div>{sessions.isPending ? <TableState state="loading" /> : sessions.data?.items.length ? <div className="data-table-wrap"><table className="data-table"><thead><tr><th>세션 ID</th><th>기간</th><th>최고 이상점수</th><th>상태</th><th>보기</th></tr></thead><tbody>{sessions.data.items.map((item) => <tr key={item.id}><td className="mono">{item.label ?? item.id}</td><td>{formatDateTime(item.startedAt)} — {formatDateTime(item.endedAt)}</td><td>{item.peakScore != null && item.peakGrade != null ? <StatusBadge grade={item.peakGrade} score={item.peakScore} compact /> : "—"}</td><td>{item.status}</td><td><button className="text-button">보기</button></td></tr>)}</tbody></table></div> : <TableState state="empty" message="과거 세션이 없습니다." />}</Card></div>;
 }
 
+// 전류는 크기만 그린다 — 부호는 충·방전 방향이지 추세 차트의 관심사가 아니다.
+export function trendSeriesValue(metricKey: TrendResponse["series"][number]["metric"], value: number | null): number | null {
+  return metricKey === "curr" ? magnitude(value) : value;
+}
+
 function TrendCharts({ data }: { data: TrendResponse }) {
   const metrics = [{ key: "volt", label: "전압", unit: "V", color: "#2563eb" }, { key: "curr", label: "전류", unit: "A", color: "#7c3aed" }, { key: "temp", label: "대표 온도", unit: "°C", color: "#c2410c" }, { key: "soc", label: "SOC", unit: "%", color: "#0f766e" }] as const;
-  return <div className="trend-chart-grid">{metrics.map((metric) => { const series = data.series.find((item) => item.metric === metric.key); const points = data.buckets.map((at, index) => ({ at: formatTime(at), value: series?.points[index] ?? null })); return <div className="chart-card" key={metric.key}><div className="chart-heading"><strong>{metric.label}</strong><span>{metric.unit}</span></div><ResponsiveContainer width="100%" height={170}><LineChart data={points}><CartesianGrid vertical={false} stroke="var(--border)" strokeDasharray="3 4" /><XAxis dataKey="at" tick={{ fontSize: 10 }} tickLine={false} axisLine={false} /><YAxis tick={{ fontSize: 10 }} tickLine={false} axisLine={false} width={32} /><Tooltip contentStyle={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 8 }} /><Line type="monotone" dataKey="value" connectNulls={false} stroke={metric.color} strokeWidth={2} dot={false} isAnimationActive={false} /></LineChart></ResponsiveContainer></div>; })}</div>;
+  return <div className="trend-chart-grid">{metrics.map((metric) => { const series = data.series.find((item) => item.metric === metric.key); const points = data.buckets.map((at, index) => ({ at: formatTime(at), value: trendSeriesValue(metric.key, series?.points[index] ?? null) })); return <div className="chart-card" key={metric.key}><div className="chart-heading"><strong>{metric.label}</strong><span>{metric.unit}</span></div><ResponsiveContainer width="100%" height={170}><LineChart data={points}><CartesianGrid vertical={false} stroke="var(--border)" strokeDasharray="3 4" /><XAxis dataKey="at" tick={{ fontSize: 10 }} tickLine={false} axisLine={false} /><YAxis tick={{ fontSize: 10 }} tickLine={false} axisLine={false} width={32} /><Tooltip contentStyle={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 8 }} /><Line type="monotone" dataKey="value" connectNulls={false} stroke={metric.color} strokeWidth={2} dot={false} isAnimationActive={false} /></LineChart></ResponsiveContainer></div>; })}</div>;
 }
 
 export function AnomalyPage() {
@@ -256,6 +256,15 @@ const alertChannelOptions: Array<[keyof AlertChannels, string, string]> = [
   ["WEBPUSH", "웹푸시 (PWA)", "브라우저·모바일 푸시"],
 ];
 
+type VoiceToggleField = "connectionEnabled" | "anomalyEnabled" | "failsafeRelayEnabled" | "deviceErrorEnabled" | "networkEnabled";
+const voiceAlertOptions: Array<[VoiceToggleField, string, string]> = [
+  ["connectionEnabled", "장비 연결/해제", "라즈베리파이 연결·해제 시 안내"],
+  ["anomalyEnabled", "이상 탐지 경보", "주의·경고·위험 등급 진입 시 안내"],
+  ["failsafeRelayEnabled", "Fail-Safe 릴레이 차단", "안전 회로가 릴레이를 차단했을 때 안내"],
+  ["deviceErrorEnabled", "센서/장비 오류", "센서 오류·통신 두절 시 안내"],
+  ["networkEnabled", "네트워크 상태", "브로커·백엔드 연결 상태 변화 안내"],
+];
+
 export function SettingsPage({ me, onProfileSaved, onPreferencesSaved }: { me: MeResponse; onProfileSaved: (user: MeResponse["user"]) => void; onPreferencesSaved: (preferences: MeResponse["preferences"]) => void }) {
   const [tab, setTab] = useState("alerts");
   const [saved, setSaved] = useState("");
@@ -265,6 +274,12 @@ export function SettingsPage({ me, onProfileSaved, onPreferencesSaved }: { me: M
   const [alertsAttempt, setAlertsAttempt] = useState(0);
   const [alertsSaving, setAlertsSaving] = useState(false);
   const [alertsError, setAlertsError] = useState("");
+  const [voice, setVoice] = useState<VoiceAlertSettings | null>(null);
+  const [voiceLoading, setVoiceLoading] = useState(true);
+  const [voiceReady, setVoiceReady] = useState(false);
+  const [voiceAttempt, setVoiceAttempt] = useState(0);
+  const [voiceSaving, setVoiceSaving] = useState(false);
+  const [voiceError, setVoiceError] = useState("");
   const profile = useForm({ defaultValues: { name: me.user?.name ?? "", email: me.user?.email ?? "", phone: me.user?.phone ?? "" } });
 
   useEffect(() => {
@@ -287,6 +302,27 @@ export function SettingsPage({ me, onProfileSaved, onPreferencesSaved }: { me: M
     });
     return () => { mounted = false; };
   }, [alertsAttempt]);
+
+  useEffect(() => {
+    let mounted = true;
+    setVoiceLoading(true);
+    setVoiceReady(false);
+    void api.getVoiceAlertSettings().then((response) => {
+      if (mounted) {
+        setVoice(response);
+        setVoiceReady(true);
+        setVoiceError("");
+      }
+    }).catch(() => {
+      if (mounted) {
+        setVoiceReady(false);
+        setVoiceError("음성 안내 설정을 불러오지 못했습니다. 서버 설정을 확인한 뒤 다시 시도하세요.");
+      }
+    }).finally(() => {
+      if (mounted) setVoiceLoading(false);
+    });
+    return () => { mounted = false; };
+  }, [voiceAttempt]);
 
   const submit = profile.handleSubmit(async (values) => {
     try { const user = await api.updateMe(values); onProfileSaved(user); setSaved("계정 정보가 저장되었습니다."); } catch { setSaved("저장하지 못했습니다."); }
@@ -313,5 +349,28 @@ export function SettingsPage({ me, onProfileSaved, onPreferencesSaved }: { me: M
       setAlertsSaving(false);
     }
   };
-  return <div className="page-stack"><PageHeading eyebrow="SETTINGS" title="설정" description="알림 수신·계정 정보·테마를 관리합니다." />{saved && <div className="save-message" role="status"><Check size={16} />{saved}</div>}<Card><Tabs value={tab} onChange={setTab} items={[{ value: "alerts", label: "알림 수신" }, { value: "account", label: "계정 정보" }, { value: "theme", label: "테마" }]} />{tab === "alerts" && <div className="settings-section"><div className="section-heading-inline"><div><h2>알림 수신 채널</h2><p>동일 이벤트는 서버 정책에 따라 중복 발송이 억제됩니다.</p></div></div>{alertsLoading ? <TableState state="loading" message="서버 알림 설정을 불러오는 중입니다." /> : <>{alertChannelOptions.map(([key, label, hint]) => <label className="toggle-row" key={key}><span><strong>{label}</strong><small>{hint}</small></span><input type="checkbox" checked={channels[key]} disabled={!alertsReady || alertsSaving} onChange={(event) => void toggleChannel(key, event.target.checked)} /></label>)}{alertsError && <div className="form-error" role="alert"><span>{alertsError}</span><Button variant="ghost" onClick={() => setAlertsAttempt((attempt) => attempt + 1)}>다시 시도</Button></div>}</>}</div>}{tab === "account" && <div className="settings-section"><form onSubmit={submit} className="form-stack"><Field label="이름"><input {...profile.register("name")} /></Field><Field label="이메일"><input {...profile.register("email")} type="email" /></Field><Field label="전화번호" hint="SMS·카카오 알림 수신에 사용됩니다."><input {...profile.register("phone")} /></Field><div className="settings-actions"><Button variant="primary" type="submit" loading={profile.formState.isSubmitting}>변경 저장</Button></div></form><PasswordChangeForm /></div>}{tab === "theme" && <div className="settings-section"><div className="section-heading-inline"><div><h2>테마</h2><p>라이트·다크·시스템 테마를 선택합니다.</p></div></div><div className="theme-options">{(["light", "dark", "system"] as const).map((theme) => <button key={theme} className={me.preferences.theme === theme ? "active" : ""} onClick={() => void selectTheme(theme)}><span className={`theme-preview theme-${theme}`} /><strong>{theme === "light" ? "라이트" : theme === "dark" ? "다크" : "시스템"}</strong><small>{me.preferences.theme === theme ? "현재 선택" : "선택"}</small></button>)}</div></div>}</Card></div>;
+  const patchVoice = async (patch: Partial<Omit<VoiceAlertSettings, "updatedAt">>) => {
+    if (!voice || !voiceReady) return;
+    const previous = voice;
+    setVoice({ ...previous, ...patch });
+    setVoiceSaving(true);
+    setVoiceError("");
+    try {
+      const response = await api.updateVoiceAlertSettings(patch);
+      setVoice(response);
+      setSaved("음성 안내 설정이 저장되었습니다.");
+    } catch {
+      setVoice(previous);
+      setVoiceError("음성 안내 설정을 저장하지 못했습니다.");
+      setSaved("음성 안내 설정을 저장하지 못했습니다.");
+    } finally {
+      setVoiceSaving(false);
+    }
+  };
+  return <div className="page-stack"><PageHeading eyebrow="SETTINGS" title="설정" description="알림 수신·계정 정보·테마·음성 안내를 관리합니다." />{saved && <div className="save-message" role="status"><Check size={16} />{saved}</div>}<Card><Tabs value={tab} onChange={setTab} items={[{ value: "alerts", label: "알림 수신" }, { value: "account", label: "계정 정보" }, { value: "theme", label: "테마" }, { value: "voice", label: "음성 안내" }]} />{tab === "alerts" && <div className="settings-section"><div className="section-heading-inline"><div><h2>알림 수신 채널</h2><p>동일 이벤트는 서버 정책에 따라 중복 발송이 억제됩니다.</p></div></div>{alertsLoading ? <TableState state="loading" message="서버 알림 설정을 불러오는 중입니다." /> : <>{alertChannelOptions.map(([key, label, hint]) => <label className="toggle-row" key={key}><span><strong>{label}</strong><small>{hint}</small></span><input type="checkbox" checked={channels[key]} disabled={!alertsReady || alertsSaving} onChange={(event) => void toggleChannel(key, event.target.checked)} /></label>)}{alertsError && <div className="form-error" role="alert"><span>{alertsError}</span><Button variant="ghost" onClick={() => setAlertsAttempt((attempt) => attempt + 1)}>다시 시도</Button></div>}</>}</div>}{tab === "account" && <div className="settings-section"><form onSubmit={submit} className="form-stack"><Field label="이름"><input {...profile.register("name")} /></Field><Field label="이메일"><input {...profile.register("email")} type="email" /></Field><Field label="전화번호" hint="SMS·카카오 알림 수신에 사용됩니다."><input {...profile.register("phone")} /></Field><div className="settings-actions"><Button variant="primary" type="submit" loading={profile.formState.isSubmitting}>변경 저장</Button></div></form><PasswordChangeForm /></div>}{tab === "theme" && <div className="settings-section"><div className="section-heading-inline"><div><h2>테마</h2><p>라이트·다크·시스템 테마를 선택합니다.</p></div></div><div className="theme-options">{(["light", "dark", "system"] as const).map((theme) => <button key={theme} className={me.preferences.theme === theme ? "active" : ""} onClick={() => void selectTheme(theme)}><span className={`theme-preview theme-${theme}`} /><strong>{theme === "light" ? "라이트" : theme === "dark" ? "다크" : "시스템"}</strong><small>{me.preferences.theme === theme ? "현재 선택" : "선택"}</small></button>)}</div></div>}{tab === "voice" && <div className="settings-section"><div className="section-heading-inline"><div><h2>음성 안내</h2><p>라즈베리파이 스피커로 재생되는 사전 녹음 안내입니다. 릴레이·Fail-Safe 판단에는 영향을 주지 않습니다.</p></div></div>{voiceLoading || !voice ? <TableState state="loading" message="음성 안내 설정을 불러오는 중입니다." /> : <>
+    <label className="toggle-row"><span><strong>음성 안내 전체</strong><small>끄면 볼륨·카테고리 설정과 무관하게 모든 음성 안내가 정지됩니다.</small></span><input type="checkbox" checked={voice.enabled} disabled={!voiceReady || voiceSaving} onChange={(event) => void patchVoice({ enabled: event.target.checked })} /></label>
+    <div className="toggle-row"><span><strong>음량</strong><small>{voice.volume}%</small></span><input type="range" min={0} max={100} step={5} value={voice.volume} disabled={!voice.enabled || !voiceReady || voiceSaving} onChange={(event) => setVoice({ ...voice, volume: Number(event.target.value) })} onMouseUp={(event) => void patchVoice({ volume: Number((event.target as HTMLInputElement).value) })} onTouchEnd={(event) => void patchVoice({ volume: Number((event.target as HTMLInputElement).value) })} onKeyUp={(event) => void patchVoice({ volume: Number((event.target as HTMLInputElement).value) })} /></div>
+    {voiceAlertOptions.map(([key, label, hint]) => <label className="toggle-row" key={key}><span><strong>{label}</strong><small>{hint}</small></span><input type="checkbox" checked={voice[key]} disabled={!voice.enabled || !voiceReady || voiceSaving} onChange={(event) => void patchVoice({ [key]: event.target.checked })} /></label>)}
+    {voiceError && <div className="form-error" role="alert"><span>{voiceError}</span><Button variant="ghost" onClick={() => setVoiceAttempt((attempt) => attempt + 1)}>다시 시도</Button></div>}
+  </>}</div>}</Card></div>;
 }

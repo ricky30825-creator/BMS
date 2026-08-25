@@ -10,6 +10,20 @@ export class ApiShapeError extends Error {
   }
 }
 
+export type DashboardMetricKey = "voltageV" | "currentA" | "representativeTempC" | "socPct";
+export type DashboardMetricParam = "volt" | "curr" | "temp" | "soc";
+
+const DASHBOARD_METRIC_PARAMS: Record<DashboardMetricKey, DashboardMetricParam> = { voltageV: "volt", currentA: "curr", representativeTempC: "temp", socPct: "soc" };
+const DASHBOARD_METRIC_KEYS: Record<DashboardMetricParam, DashboardMetricKey> = { volt: "voltageV", curr: "currentA", temp: "representativeTempC", soc: "socPct" };
+
+export function dashboardMetricParam(key: DashboardMetricKey): DashboardMetricParam {
+  return DASHBOARD_METRIC_PARAMS[key];
+}
+
+export function dashboardMetricKey(param: DashboardMetricParam | undefined): DashboardMetricKey | null {
+  return param ? DASHBOARD_METRIC_KEYS[param] : null;
+}
+
 export function gradeFromScore(score: number): Grade {
   if (score < 0.3) return "NORMAL";
   if (score < 0.6) return "CAUTION";

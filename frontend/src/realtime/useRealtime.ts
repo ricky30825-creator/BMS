@@ -1,7 +1,7 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { QueryClient, useQueryClient } from "@tanstack/react-query";
 import { api, apiBaseUrl, demoAuthToken } from "../api/client";
-import { normalizeDashboard, normalizeDashboardAnomaly, normalizeDashboardMetrics, normalizeRelay } from "../api/normalize";
+import { normalizeDashboard, normalizeDashboardAnomaly, normalizeDashboardMetrics, normalizeRelay, type DashboardMetricParam } from "../api/normalize";
 import type { Alert, BatteryEvent, Dashboard, Diagnosis, Grade, MeResponse, Relay, WsEnvelope } from "../types";
 
 export type RealtimeState = "idle" | "loading" | "connecting" | "live" | "reconnecting" | "offline" | "expired" | "resyncing";
@@ -141,6 +141,7 @@ export function useRealtime({ enabled, sessionKey, onAutoCut, onSessionEnded, on
   const sequenceRef = useRef<string | null>(null);
   const lastEventIdRef = useRef<string | null>(null);
   const eventIdsRef = useRef(new Set<string>());
+  const metricRef = useRef<DashboardMetricParam | undefined>(undefined);
   const callbacks = useRef({ onAutoCut, onSessionEnded, onAuthFailure });
   callbacks.current = { onAutoCut, onSessionEnded, onAuthFailure };
 
@@ -165,7 +166,7 @@ export function useRealtime({ enabled, sessionKey, onAutoCut, onSessionEnded, on
     };
 
     const fetchSnapshot = async () => {
-      const raw = await api.get<Record<string, unknown>>("/api/dashboard");
+      const raw = await api.get<Record<string, unknown>>("/api/dashboard", metricRef.current ? { metric: metricRef.current } : undefined);
       const snapshot = normalizeDashboard(raw);
       cursorRef.current = snapshot.snapshotCursor;
       setDashboard(snapshot);
@@ -176,7 +177,7 @@ export function useRealtime({ enabled, sessionKey, onAutoCut, onSessionEnded, on
     const resyncQueries = async () => {
       const [me, rawDashboard, alertSummary, relay, diagnosis] = await Promise.all([
         api.me(),
-        api.get<Record<string, unknown>>("/api/dashboard"),
+        api.get<Record<string, unknown>>("/api/dashboard", metricRef.current ? { metric: metricRef.current } : undefined),
         api.get<Record<string, unknown>>("/api/alerts/summary"),
         api.get<Relay>("/api/relay"),
         api.get<Diagnosis | null>("/api/diagnosis/active"),
@@ -347,5 +348,18 @@ export function useRealtime({ enabled, sessionKey, onAutoCut, onSessionEnded, on
     return () => { disposed = true; clearTimers(); socketRef.current?.close(); socketRef.current = null; };
   }, [enabled, queryClient, sessionKey]);
 
-  return { state, dashboard, lastAt };
+  const refetchMetric = useCallback(async (metric: DashboardMetricParam) => {
+    metricRef.current = metric;
+    if (!enabled) return;
+    try {
+      const raw = await api.get<Record<string, unknown>>("/api/dashboard", { metric });
+      const snapshot = normalizeDashboard(raw);
+      setDashboard((current) => current ? { ...current, quickTrend: snapshot.quickTrend } : snapshot);
+      queryClient.setQueryData<Dashboard>(["dashboard"], (current) => current ? { ...current, quickTrend: snapshot.quickTrend } : snapshot);
+    } catch {
+      // Keep the last known quick trend; a failed metric switch is not user-blocking.
+    }
+  }, [enabled, queryClient]);
+
+  return { state, dashboard, lastAt, refetchMetric };
 }

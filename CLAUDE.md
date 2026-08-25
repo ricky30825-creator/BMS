@@ -16,7 +16,7 @@ Raspberry Pi              Kafka → Consumer → PostgreSQL + TimescaleDB
                                     └─▶ React (localhost)
 ```
 
-**전 구성이 호스트 PC 1대에서 로컬로 돈다(2026-08-25 확정).** 에지만 같은 LAN의 별도 장비다. AWS EC2는 쓰지 않는다.
+**전 구성이 호스트 PC 1대에서 로컬로 돈다(2026-08-25 확정).** 에지만 같은 LAN의 별도 장비다. AWS EC2는 쓰지 않는다. **호스트 PC는 Windows다(2026-08-25 확정)** — 자동 시작·프로세스 스크립트는 launchd가 아니라 `.bat`/작업 스케줄러 기준으로 짠다. 라즈베리파이 에지는 그대로 Python/Linux.
 
 - **Google Colab은 학습 전용이며 실시간 경로에 없다.** 로컬 Kafka는 NAT 뒤라 Colab에서 인바운드로 붙을 수 없다. Colab에서 학습한 체크포인트를 내려받아 호스트 PC의 추론 프로세스가 로드한다. 문서 어딘가에 남아 있는 *"Colab이 raw-metrics를 구독한다"*는 서술은 **폐기된 설계**다.
 - **Kafka는 LAN 한정 PLAINTEXT로 운영한다.** TLS/SASL은 쓰지 않는다 — 인터넷에 노출되지 않으므로 인증서 구성 비용 대비 효과가 없다. 대신 브로커 포트를 방화벽에서 LAN으로 제한한다. 외부 노출이 생기면 이 결정을 먼저 되돌린다.
@@ -38,6 +38,7 @@ Raspberry Pi              Kafka → Consumer → PostgreSQL + TimescaleDB
 | 모드 1 회로 / 조립 / 에지 수집 계약 | `hardware/mode1/`(KiCad), `docs/hardware/mode1_beginner_guide.md`, `docs/hardware/mode1_backend_spec.md` |
 | 모드 2 진단 설계 | `docs/hardware/mode2_powerbank_diagnosis_spec.md` |
 | 남은 1개월 실행 전략 (조립 순서·데이터 수집·시연 시나리오·BW150 활용) | `docs/final_month_strategy.md` (2026-08-05 확정) |
+| 로컬 실행 (호스트 PC, Windows) — 단일 오리진 기동·`.env`·재부팅 후 절차 | `docs/local_run.md` (2026-08-25 확정) |
 | BW150 단독 데이터 추출 (프로토콜·시험 프로토콜·CSV 스키마) | `docs/hardware/bw150_data_extraction_guide.md` (2026-08-05) |
 
 **충돌 해소 순서**: 회로 > 사용자가 준 최신 와이어프레임 HTML > 계약서 > 나머지 문서. v3 프로토타입과 계약서가 어긋나면 **v3가 틀린 것**이다(v3 수정 목록 25건은 `docs/backend_contract.md` §12). HTML만으로 동작이 불명확하면 추정하지 말고 `정의 필요`로 표시한다.

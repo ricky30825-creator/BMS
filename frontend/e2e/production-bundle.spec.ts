@@ -57,3 +57,23 @@ for (const mode of ["production", "development"] as const) {
     expectBuildExcludesMocks(mode);
   });
 }
+
+test("a production build with VITE_DEMO_MODE=true still bundles the demo-login transport (docs/local_run.md single-origin path)", () => {
+  execFileSync(process.execPath, [join(process.cwd(), "node_modules", "vite", "bin", "vite.js"), "build", "--mode", "production"], {
+    cwd: process.cwd(),
+    env: { ...process.env, NODE_ENV: "production", VITE_USE_MOCKS: "false", VITE_DEMO_MODE: "true", VITE_API_BASE: "" },
+    stdio: "pipe",
+  });
+
+  const distDirectory = join(process.cwd(), "dist");
+  const buildContents = listFiles(distDirectory)
+    .map((path) => readFileSync(path, "utf8"))
+    .join("\n");
+
+  // demoTransportEnabled() must not be gated behind the Vite dev-server flag
+  // — a `vite build` with VITE_DEMO_MODE=true (frontend/.env.production) is
+  // exactly this case, and login has no other transport available yet
+  // (AUTH_MODE=betterauth / C2b is not implemented).
+  expect(buildContents).toContain("hong@cellguard.io");
+  expect(buildContents).toContain("demo-password");
+});

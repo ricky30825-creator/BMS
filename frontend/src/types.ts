@@ -33,6 +33,16 @@ export type ActiveSession = {
 export type Preferences = { theme: "light" | "dark" | "system"; lang: "ko" | "en" };
 export type AlertChannels = { KAKAO: boolean; EMAIL: boolean; SMS: boolean; WEBPUSH: boolean };
 export type AlertSettings = { channels: AlertChannels; policy?: { sendOn?: string[]; smsOnlyDanger?: boolean; dedupeWindowMinutes?: number } };
+export type VoiceAlertSettings = {
+  enabled: boolean;
+  volume: number;
+  connectionEnabled: boolean;
+  anomalyEnabled: boolean;
+  failsafeRelayEnabled: boolean;
+  deviceErrorEnabled: boolean;
+  networkEnabled: boolean;
+  updatedAt: string;
+};
 
 export type MeResponse = {
   user: ApiUser | null;

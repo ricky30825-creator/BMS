@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ApiShapeError, gradeFromScore, normalizeBattery, normalizeDashboard } from "../api/normalize";
+import { ApiShapeError, dashboardMetricKey, dashboardMetricParam, gradeFromScore, normalizeBattery, normalizeDashboard } from "../api/normalize";
 
 describe("CellGuard contract adapters", () => {
   it("uses the four server grade bands for legacy demo scores", () => {
@@ -7,6 +7,18 @@ describe("CellGuard contract adapters", () => {
     expect(gradeFromScore(0.3)).toBe("CAUTION");
     expect(gradeFromScore(0.6)).toBe("WARNING");
     expect(gradeFromScore(0.8)).toBe("DANGER");
+  });
+
+  it("maps the dashboard metric card key to the server's ?metric= query value and back", () => {
+    expect(dashboardMetricParam("voltageV")).toBe("volt");
+    expect(dashboardMetricParam("currentA")).toBe("curr");
+    expect(dashboardMetricParam("representativeTempC")).toBe("temp");
+    expect(dashboardMetricParam("socPct")).toBe("soc");
+    expect(dashboardMetricKey("volt")).toBe("voltageV");
+    expect(dashboardMetricKey("curr")).toBe("currentA");
+    expect(dashboardMetricKey("temp")).toBe("representativeTempC");
+    expect(dashboardMetricKey("soc")).toBe("socPct");
+    expect(dashboardMetricKey(undefined)).toBeNull();
   });
 
   it("keeps null metrics distinct from zero", () => {

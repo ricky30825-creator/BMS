@@ -1,9 +1,11 @@
 import { render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
-import { describe, expect, it } from "vitest";
+import userEvent from "@testing-library/user-event";
+import { describe, expect, it, vi } from "vitest";
 import { DashboardPage } from "../pages/UserPages";
 import type { Dashboard, MeResponse } from "../types";
+import type { DashboardMetricParam } from "../api/normalize";
 
 const session = { id: "ses_1", batteryId: "B1", batteryLabel: "DEMO-PACK-001", status: "ACTIVE" as const, startedAt: "2026-08-25T00:00:00.000Z" };
 
@@ -37,12 +39,12 @@ function dashboard(overrides: Partial<Dashboard> = {}): Dashboard {
   };
 }
 
-function renderDashboard(data: Dashboard) {
+function renderDashboard(data: Dashboard, refetchMetric: (metric: DashboardMetricParam) => Promise<void> = async () => undefined) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={client}>
       <MemoryRouter>
-        <DashboardPage realtime={{ state: "live", dashboard: data, lastAt: null }} me={me} />
+        <DashboardPage realtime={{ state: "live", dashboard: data, lastAt: null, refetchMetric }} me={me} />
       </MemoryRouter>
     </QueryClientProvider>,
   );
@@ -125,5 +127,38 @@ describe("dashboard trend chart", () => {
     const { container } = renderDashboard(dashboard());
 
     expect(container.querySelector(".score-gauge-value")).toHaveTextContent("18");
+  });
+});
+
+describe("dashboard metric selection", () => {
+  it("requests the server's series for the clicked metric card using its ?metric= alias", async () => {
+    const refetchMetric = vi.fn().mockResolvedValue(undefined);
+    const user = userEvent.setup();
+    const { container } = renderDashboard(dashboard(), refetchMetric);
+
+    await user.click(container.querySelector(".dashboard-metric-card.volt")!);
+    expect(refetchMetric).toHaveBeenCalledWith("volt");
+
+    await user.click(container.querySelector(".dashboard-metric-card.soc")!);
+    expect(refetchMetric).toHaveBeenCalledWith("soc");
+  });
+
+  it("draws the newly selected metric's line once the server responds with its series", async () => {
+    const refetchMetric = vi.fn().mockReturnValue(new Promise<void>(() => undefined));
+    const user = userEvent.setup();
+    const { container, rerender } = renderDashboard(dashboard(), refetchMetric);
+
+    await user.click(container.querySelector(".dashboard-metric-card.volt")!);
+    expect(container.querySelectorAll(".metric-mini-line")).toHaveLength(0);
+
+    const withVoltSeries = dashboard({ quickTrend: { metric: "volt", points: [{ at: "a", value: 11.8 }, { at: "b", value: 12.1 }] } });
+    rerender(
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <MemoryRouter>
+          <DashboardPage realtime={{ state: "live", dashboard: withVoltSeries, lastAt: null, refetchMetric }} me={me} />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    expect(container.querySelector(".dashboard-metric-card.volt .metric-mini-line")).toBeInTheDocument();
   });
 });

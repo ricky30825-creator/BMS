@@ -1,5 +1,8 @@
 import { createServer, type IncomingMessage } from "node:http";
 import { createHash, randomUUID } from "node:crypto";
+import { existsSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import type { Socket } from "node:net";
 import cors from "cors";
 import express, { type NextFunction, type Request, type Response } from "express";
@@ -11,6 +14,7 @@ import { writeAuditLog } from "./auth/audit.js";
 import { detectGradeTransition, gradeForScore, type Grade } from "./realtime/grade.js";
 import { createEventLog } from "./realtime/eventLog.js";
 import { createExportJob, exportJobById, scheduleExportCompletion, signDownload, verifyDownload } from "./exports.js";
+import { DEFAULT_VOICE_ALERT_SETTINGS, applyVoiceAlertPatch } from "./voiceAlert.js";
 import {
   F21_THRESHOLDS,
   abortDiagnosis,
@@ -50,6 +54,7 @@ let wsSequence = 0;
 const wsStreamId = "demo-stream";
 const demoPreferences = new Map<string, { theme: "light" | "dark" | "system"; lang: "ko" | "en" }>();
 const demoAlertChannels = new Map<string, { KAKAO: boolean; EMAIL: boolean; SMS: boolean; WEBPUSH: boolean }>();
+const demoVoiceAlertSettings = new Map<string, ReturnType<typeof applyVoiceAlertPatch>>();
 
 function channelsForAlert(ownerId: string, grade: "WARNING" | "DANGER"): Array<"KAKAO" | "EMAIL" | "SMS" | "WEBPUSH"> {
   const settings = demoAlertChannels.get(ownerId) ?? { KAKAO: true, EMAIL: true, SMS: false, WEBPUSH: true };
@@ -429,6 +434,19 @@ app.patch("/api/settings/alerts", requireSession, (req, res) => {
   const next = Object.fromEntries(keys.map((key) => [key, channels[key]])) as { KAKAO: boolean; EMAIL: boolean; SMS: boolean; WEBPUSH: boolean };
   demoAlertChannels.set(actorId(req), next);
   res.json({ channels: next, policy: { sendOn: ["DANGER", "WARNING"], smsOnlyDanger: true, dedupeWindowMinutes: 5 } });
+});
+
+app.get("/api/settings/voice-alert", requireSession, (req, res) => {
+  res.json(demoVoiceAlertSettings.get(actorId(req)) ?? DEFAULT_VOICE_ALERT_SETTINGS);
+});
+
+app.patch("/api/settings/voice-alert", requireSession, (req, res) => {
+  const current = demoVoiceAlertSettings.get(actorId(req)) ?? DEFAULT_VOICE_ALERT_SETTINGS;
+  try {
+    const next = applyVoiceAlertPatch(current, req.body);
+    demoVoiceAlertSettings.set(actorId(req), next);
+    res.json(next);
+  } catch (error) { errorFromDomain(res, error); }
 });
 
 app.get("/api/batteries", requireSession, (req, res) => {
@@ -925,6 +943,25 @@ app.use((error: unknown, _req: Request, res: Response, _next: NextFunction) => {
   console.error(error);
   apiError(res, 500, "INTERNAL_ERROR", "An internal error occurred.");
 });
+
+// Any /api/* route that reached here matched no handler above — 404 as JSON,
+// not Express's default HTML page, and never fall through to the SPA below.
+app.use("/api", (_req, res) => {
+  apiError(res, 404, "NOT_FOUND", "Route not found.");
+});
+
+// Single-origin packaging (docs/local_run.md): if a frontend production
+// build is sitting next to this backend, serve it and fall back to
+// index.html for client-side routes. Absent in a backend-only dev session
+// (`npm run dev` without `frontend/dist` built) — this block is then a no-op.
+const frontendDist = join(dirname(fileURLToPath(import.meta.url)), "../../frontend/dist");
+if (existsSync(join(frontendDist, "index.html"))) {
+  app.use(express.static(frontendDist));
+  app.get(/^\/(?!api|ws).*/, (_req, res) => {
+    res.sendFile(join(frontendDist, "index.html"));
+  });
+  console.log(`Serving frontend build from ${frontendDist}`);
+}
 
 function wsFrame(text: string, opcode = 0x81): Buffer {
   const payload = Buffer.from(text);

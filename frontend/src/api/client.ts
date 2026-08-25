@@ -1,9 +1,14 @@
-import type { AlertChannels, AlertSettings, ApiUser, ErrorCode, MeResponse, Preferences } from "../types";
+import type { AlertChannels, AlertSettings, ApiUser, ErrorCode, MeResponse, Preferences, VoiceAlertSettings } from "../types";
 
 const API_BASE = (import.meta.env.VITE_API_BASE ?? "").replace(/\/$/, "");
 
-function demoTransportEnabled(): boolean {
-  return typeof __CELLGUARD_DEV_SERVER__ !== "undefined" && __CELLGUARD_DEV_SERVER__ && import.meta.env.VITE_DEMO_MODE === "true";
+// Gated only by VITE_DEMO_MODE (baked in at build time), not by the Vite
+// dev-server flag — a single-origin production build of the demo deployment
+// (VITE_DEMO_MODE=true) must be able to use this transport too, since real
+// Better Auth (AUTH_MODE=betterauth) isn't implemented yet. The server
+// independently refuses this transport unless AUTH_MODE=demo.
+export function demoTransportEnabled(): boolean {
+  return import.meta.env.VITE_DEMO_MODE === "true";
 }
 
 let demoToken: string | null = null;
@@ -128,6 +133,8 @@ export const api = {
   updateAlertSettings: (channels: AlertChannels) => request<AlertSettings>("/api/settings/alerts", { method: "PATCH", body: JSON.stringify({ channels }) }),
   changePassword: (body: { currentPassword: string; newPassword: string }) => request<void>("/api/me/password", { method: "POST", body: JSON.stringify(body) }),
   updatePreferences: (body: Preferences) => request<Preferences>("/api/settings/preferences", { method: "PATCH", body: JSON.stringify(body) }),
+  getVoiceAlertSettings: () => request<VoiceAlertSettings>("/api/settings/voice-alert"),
+  updateVoiceAlertSettings: (patch: Partial<Omit<VoiceAlertSettings, "updatedAt">>) => request<VoiceAlertSettings>("/api/settings/voice-alert", { method: "PATCH", body: JSON.stringify(patch) }),
 };
 
 export function idempotencyKey(prefix: string): string {

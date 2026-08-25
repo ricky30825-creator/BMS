@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, idempotencyKey } from "./client";
-import { normalizeBattery, normalizeDashboard } from "./normalize";
+import { normalizeBattery, normalizeDashboard, type DashboardMetricParam } from "./normalize";
 import type { AdminBatteryDetail, AdminBatteryListItem, AdminMemoMutationResponse, AdminStatusMutationResponse, Alert, AnomalySummary, ApiUser, AuditEntry, Battery, BatteryEvent, Dashboard, Diagnosis, DiagnosisListItem, Evidence, MeResponse, NoticeSummary, Relay, RelayHistory, TrendResponse } from "../types";
 
 const keys = {
@@ -30,7 +30,7 @@ export { keys as queryKeys };
 export function useMe(enabled = true) { return useQuery({ queryKey: keys.me, queryFn: () => api.me(), enabled, retry: false }); }
 export function useBatteries(enabled = true) { return useQuery({ queryKey: keys.batteries, queryFn: async () => { const result = await api.get<{ items: Battery[]; page: { number: number; size: number; total: number; totalPages: number } }>("/api/batteries", { size: 100 }); return { ...result, items: result.items.map(normalizeBattery) }; }, enabled }); }
 export function useBattery(id: string | undefined, enabled = true) { return useQuery({ queryKey: id ? keys.battery(id) : ["battery", "none"], queryFn: async () => normalizeBattery(await api.get<Battery>(`/api/batteries/${id}`)), enabled: Boolean(id) && enabled }); }
-export function useDashboard(enabled = true) { return useQuery({ queryKey: keys.dashboard, queryFn: async () => normalizeDashboard(await api.get<Record<string, unknown>>("/api/dashboard")), enabled, retry: false }); }
+export function useDashboard(enabled = true, metric?: DashboardMetricParam) { return useQuery({ queryKey: keys.dashboard, queryFn: async () => normalizeDashboard(await api.get<Record<string, unknown>>("/api/dashboard", metric ? { metric } : undefined)), enabled, retry: false }); }
 export function useRelay(enabled = true) { return useQuery({ queryKey: keys.relay, queryFn: () => api.get<Relay>("/api/relay"), enabled, retry: false }); }
 export function useRelayHistory(enabled = true) { return useQuery({ queryKey: ["relay-history"], queryFn: () => api.get<{ items: RelayHistory[] }>("/api/relay/history"), enabled }); }
 export function useAnomalySummary(enabled = true) { return useQuery({ queryKey: keys.anomalySummary, queryFn: () => api.get<AnomalySummary>("/api/anomaly/summary"), enabled }); }
