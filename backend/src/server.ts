@@ -917,7 +917,10 @@ function broadcast(type: string, payload: unknown, requestId: string | null = nu
   const frame = wsFrame(JSON.stringify(envelope));
   const active = batteryId ? activeSession() : null;
   for (const client of wsClients) {
-    const canReceive = Boolean(batteryId && active && active.batteryId === batteryId && active.ownerId === client.userId && client.batteryId === batteryId);
+    const canReceive = Boolean(
+      batteryId && client.batteryId === batteryId &&
+      (type === "session.ended" || (active && active.batteryId === batteryId && active.ownerId === client.userId))
+    );
     if (client.subscribed && client.topics.has(topic) && canReceive && !client.socket.destroyed) client.socket.write(frame);
   }
 }
