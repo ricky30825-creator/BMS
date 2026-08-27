@@ -29,9 +29,10 @@
 | 요구사항·제품 계약 | [`PLAN.md`](../PLAN.md), [`docs/product_contract.md`](product_contract.md), 기능정의서·유저플로우 | 구현 기준 문서 있음 |
 | 백엔드 인증 골격 | `backend/src/auth.ts`, 세션 미들웨어, 감사 로그, DB 연결, Better Auth `/api/auth/*`. 데모 토큰 인증으로 RBAC·정지 계정 차단까지 실동작 | 골격 구현 / **실인증 전환은 보류(의도적)** |
 | 백엔드 데모 도메인 API | `backend/src/server.ts`(991줄): 발급 토큰 인증, 사용자·관리자 REST 56개 라우트(`/health`·`/api/demo/*` 포함), 계약형 대시보드, F21 fail-closed, 릴레이 승인·재인증·멱등성, Raw CSV. 게이트 실동작 확인(`409 BATTERY_BLOCKED`/`NO_ACTIVE_SESSION`, `401 REAUTH_REQUIRED`, `ACK_REQUIRED`, 관리자 `403`) | **데모 런타임 구현·실 REST 브라우저 검증 완료** |
-| 백엔드 도메인 데이터 저장 | `backend/src/store.ts`(360줄)가 **전부 인메모리 배열·Map**이며 SQL을 실행하지 않는다. `backend/src/db.ts`의 풀은 `auth.ts`(Better Auth)만 사용. 프로세스 재시작 시 데이터 소멸 | **미착수** (→ B1) |
-| 백엔드 실시간 스트림 (WS 발신) | **C1 완료(2026-08-25).** 프론트가 처리하는 11종 중 `metrics.tick`·`anomaly.score`·`anomaly.gradeChanged`·`relay.changed`·`alert.created`·`event.created`·`session.ended`·`resync.required` 8종이 실제로 발신되고, `subscribe`/`resume`이 1만 건 링버퍼로 실제 재전송을 수행한다. 단 `metrics.tick`·`anomaly.score`·`anomaly.gradeChanged`·`alert.created`는 이 저장소 안에 `battery.latest.score`를 사후에 바꾸는 코드가 아직 없어 **매초 같은 값을 반복 push하는 휴면 상태**다(AI 추론 연동 후 살아난다) — 이는 버그가 아니라 현재 범위의 자연스러운 결과다. `relay.autoCut`·`diagnosis.progress`/`.done`/`.aborted`는 여전히 미발신(§4 C1 참조) | **구현됨(부분 휴면)** — 잔여 `relay.autoCut`(→B3)·`diagnosis.*`(→ F21 안전 프로필) |
-| 백엔드 DB 도메인 provider·Consumer·TimescaleDB | `backend/migrations/001_app_auth.sql`에 자산/세션/릴레이/텔레메트리/진단/멱등성 스키마가 있고 컬럼이 `store.ts` 타입과 1:1로 맞으나, production repository·Kafka Consumer·시계열 적재는 없음. `DATA_MODE=postgres`에서는 `/api/*` 전체가 `RUNTIME_NOT_READY`(503)로 fail-closed(C2, 2026-08-25 실측), `AUTH_MODE=betterauth`에서는 WS도 `socket.destroy()`(C2b, 보류) — 단 WS upgrade는 `DATA_MODE`를 보지 않는 갭이 있다(§4 C2 참조) | 스키마만 있음 / provider 미착수 |
+| 백엔드 도메인 데이터 저장 | `backend/src/store/contract.ts`(비동기 `CellGuardStore` 인터페이스) + `backend/src/store/memory.ts`(인메모리 구현체, 계약 테스트 19건 통과) + `backend/src/store.ts`(facade). `backend/src/db.ts`의 풀은 아직 `auth.ts`(Better Auth)만 사용. `DATA_MODE=postgres` PostgreSQL 구현체는 인프라 인계(`docs/handover/infra-implementations.md` 1부) | **인터페이스 분리 완료 / PostgreSQL 구현체 대기** (→ B1) |
+| 백엔드 실시간 스트림 (WS 발신) | **C1 완료(2026-08-25).** 프론트가 처리하는 11종 중 `metrics.tick`·`anomaly.score`·`anomaly.gradeChanged`·`relay.changed`·`alert.created`·`event.created`·`session.ended`·`resync.required` 8종이 실제로 발신되고, `subscribe`/`resume`이 1만 건 링버퍼로 실제 재전송을 수행한다. 단 `metrics.tick`·`anomaly.score`·`anomaly.gradeChanged`·`alert.created`는 이 저장소 안에 `battery.latest.score`를 사후에 바꾸는 코드가 아직 없어 **매초 같은 값을 반복 push하는 휴면 상태**다(AI 추론 연동 후 살아난다) — 이는 버그가 아니라 현재 범위의 자연스러운 결과다. `relay.autoCut`은 **구현됨(문턱 미설정이라 휴면)**(B3 완료, §4 C1 참조), `diagnosis.progress`/`.done`/`.aborted`는 여전히 미발신 | **구현됨(부분 휴면)** — 잔여 `diagnosis.*`(→ F21 안전 프로필) |
+| 에지 명령 경로 | `backend/src/device/port.ts`(`DeviceCommandPort` 인터페이스, 메서드 4개) + `backend/src/device/logging.ts`(로깅 스텁 — 콘솔에만 남기고 실제 전송 없음). `battery-events` 발행을 실제로 수행하는 Kafka 구현체는 인프라 인계(`docs/handover/infra-implementations.md` 2부) — dual-write 원자성·`sessionEnded` 배선 지점 미결정 | **DeviceCommandPort + 로그 스텁 / Kafka 구현체 대기** (→ B4) |
+| 백엔드 DB 도메인 provider·Consumer·TimescaleDB | `backend/migrations/001_app_auth.sql`에 자산/세션/릴레이/텔레메트리/진단/멱등성 스키마가 있고 컬럼이 `store/types.ts` 타입과 1:1로 맞으나, production repository·Kafka Consumer·시계열 적재는 없음. `DATA_MODE=postgres`에서는 `/api/*` 전체가 `RUNTIME_NOT_READY`(503)로 fail-closed(C2, 2026-08-25 실측), `AUTH_MODE=betterauth`에서는 WS도 `socket.destroy()`(C2b, 보류) — 단 WS upgrade는 `DATA_MODE`를 보지 않는 갭이 있다(§4 C2 참조) | 스키마만 있음 / provider 미착수 |
 | 알림 발송 (카카오·SMS·메일) | 채널 ON/OFF 토글과 policy 응답만 있고(`server.ts:405`·`:409`), **실제로 메시지를 보내는 코드는 `backend/src`에 없다** | **보류(의도적)** — 토글 현행 유지, 추가 작업 없음 |
 | AI 로컬 추론 프로세스 | 코드 없음. `ai/` 디렉터리도 없다. 학습(Colab)·체크포인트 반출 절차·추론 프로세스 모두 미착수 | 미착수 — **별도 담당자** |
 | 로컬 실행 패키징 | **C8 완료(2026-08-25)** — 단일 오리진(`:3005`), `start-local.bat`(Windows, 수동 실행), `docs/local_run.md`. memory 모드 한정(Kafka·PostgreSQL·추론은 별도) | 완료 (memory 모드) |
@@ -185,46 +186,41 @@ v3 프로토타입과 정본 문서에는 모드 1/2, 대표 온도 최댓값, s
 
 **이 4건이 지금 가장 위험하다.** "DB는 동료 몫"으로 뭉뚱그리면 양쪽 다 착수하지 않은 채 통합 시점에 드러난다.
 
-### B1. `store.ts` → PostgreSQL 리포지토리 교체 — **판단·구현 모두 백엔드**
+### B1. `store.ts` → PostgreSQL 리포지토리 교체 — **1단계 완료(2026-08-27) / 2단계 인계**
 
-사실 회색지대가 아니다. 버전 충돌(`version` 컬럼), 멱등성 키, `opsStatus` 게이트, 소유자 스코프가 전부 백엔드 계약이라 **DB를 쓰는 애플리케이션 코드**다. 동료가 A2를 완벽히 끝내도 *그 테이블을 읽어 REST로 내보내는 코드가 존재하지 않는다.*
+사실 회색지대가 아니다. 버전 충돌(`version` 컬럼), 멱등성 키, `opsStatus` 게이트, 소유자 스코프가 전부 백엔드 계약이라 **DB를 쓰는 애플리케이션 코드**다.
 
-- **현재 상태**: `backend/src/store.ts` 전체가 모듈 스코프 배열·Map(`138` `demoBatteries` / `147` `demoSessions` / `148` `demoRelays` / `149` `demoDiagnoses` / `150` `demoAudits` / `151` `idempotency`). 프로세스 재시작하면 전부 사라진다.
-- **해야 할 일**: `store.ts`가 내보내는 함수 시그니처를 그대로 두고 내부만 SQL로 교체한다. 교체 대상 표면(줄번호는 현재 파일 기준):
-  - 조회: `userById`(166) `batteryById`(167) `users`(168) `batteries`(169) `activeSession`(170) `sessionsForBattery`(171) `activeDiagnosis`(172) `diagnosesForBattery`(173) `diagnosisById`(174) `relayByBattery`(175) `audits`(176)
-  - 변경: `createBattery`(178) `updateBattery`(204) `recordAudit`(220) `startSession`(239) `changeOpsStatus`(257) `saveMemo`(278) `changeUserStatus`(288) `changeRelay`(299) `startDiagnosis`(320) `abortDiagnosis`(332)
-  - 멱등성: `idempotent`(226) `rememberIdempotency`(235) → `idempotency_key` 테이블
-  - 파생: `mode1Health`(341) `csvForBattery`(354)
-- **주의**: 함수들이 동기 시그니처다. SQL로 바꾸면 전부 `Promise`가 되어 **`server.ts`의 모든 호출부가 `await`로 바뀐다.** 이 변환이 이 작업 분량의 절반이다. 한 번에 다 바꾸지 말고 리포지토리 인터페이스를 먼저 정의하고 도메인별로 옮긴다.
-- **트랜잭션**: `backend/src/db.ts`의 `inTransaction()`이 이미 있다. `changeRelay`·`changeOpsStatus`·`startSession`처럼 감사로그를 같이 남기는 것은 반드시 한 트랜잭션에 넣는다.
-- **동시성**: `measurement_session`에 `unique (device_id) where status='ACTIVE'`, `diagnosis`에 `unique (battery_id) where status='RUNNING'` 부분 인덱스가 이미 있다. 애플리케이션 레벨 체크에 의존하지 말고 이 제약 위반을 잡아 `409`로 변환한다.
-- **완료 판정**: `AUTH_MODE=demo DATA_MODE=postgres`로 띄우고 브라우저 시나리오(로그인→자산→세션→대시보드→릴레이 차단)가 끝까지 동작. 프로세스 재시작 후 데이터 유지.
+**1단계(백엔드, 완료) 산출물**:
+- 인터페이스 `backend/src/store/contract.ts` — `CellGuardStore`. 에러는 `throw new Error("<CODE>")`, 반환값 방어 복사, 감사 로그 동반 메서드(`changeRelay`·`engageFailsafe`·`changeOpsStatus`·`saveMemo`·`changeUserStatus`·`startSession`)는 원자적이어야 한다는 규칙을 명문화.
+- 인메모리 구현체 `backend/src/store/memory.ts` — 위 인터페이스를 만족하는 참조 구현. 데모 시드(`hong`/`kimeng`/`leelab`/`parktest`, `PACK-001`~`005`, `DEMO-PACK-001`)를 포함.
+- facade `backend/src/store.ts` — 기존 호출부 이름을 유지한 채 `active.<method>.bind(active)`로 위임. `DATA_MODE`에 따른 구현체 분기는 아직 없음(2단계 몫, 지금은 무조건 `createMemoryStore()`).
+- 계약 테스트 19건 — `backend/src/store/contract.test.ts`의 `runStoreContractTests()`. 소유자 스코프, `BATTERY_BLOCKED` 게이트, 세션 SUPERSEDED 전이, 버전 충돌 등 도메인 불변식을 인메모리 구현체로 검증 완료. **PostgreSQL 구현체도 같은 스위트를 통과해야 한다**(2단계 완료 판정).
+- 라우트 57개 async 전환 + `asyncRoute` 래퍼(`backend/src/asyncRoute.ts`) — `store.ts`의 모든 메서드가 `Promise`를 반환하도록 바뀌었으므로 `server.ts`의 호출부 전체가 `await`로 전환됐고, 각 라우트 핸들러를 `asyncRoute(async (req, res) => { ... })`로 감싸 에러를 `errorFromDomain()`으로 일괄 처리한다.
 
-### B2. `battery_id` 세션 태깅 — **규칙은 백엔드, 실행은 Consumer**
+**2단계(인프라 담당, 인계) — 정본은 `docs/handover/infra-implementations.md` 1부**:
+- `backend/src/store/postgres.ts`에 `createPostgresStore(pool: pg.Pool): CellGuardStore` 구현.
+- 계약 테스트 19건에 PostgreSQL 구현체를 추가로 통과시키고, 부분 유니크 인덱스 경합을 노리는 동시성 테스트를 별도로 추가.
+- `battery_asset`/`measurement_session`의 `owner_user_id` FK가 아직 없는 Better Auth `user` 테이블을 참조하는 문제를 먼저 푼다(seed 또는 FK 제거 중 택1).
+- 완료 후 `server.ts`의 `DATA_MODE` 503 가드와 `store.ts`의 구현체 분기를 연다.
 
-- **현재 상태**: 에지는 `device_id`만 싣고 `battery_id`를 모른다(CLAUDE.md 센서 스키마). 적재 시점에 백엔드 세션 정보로 귀속해야 하는데, 그 적재 코드가 동료의 Consumer 안에 있다.
-- **해야 할 일**: 백엔드가 **태깅 규칙을 명세로 내리고** 동료가 Consumer에 구현한다. 명세에 반드시 포함할 것:
-  - `device_id` → 활성 `measurement_session` 조회 방법 (Consumer가 DB를 직접 읽을지, 백엔드가 캐시/API를 제공할지)
-  - 활성 세션이 **없을 때** 도착한 프레임의 처리 (버림 / `battery_id=null`로 적재 / 보류)
-  - 세션 전환 **경계 프레임** 처리 — 세션 종료 직후 도착한 늦은 프레임을 이전 세션에 붙일지
-  - 시계 차이: `measured_at`(에지 시각) vs 적재 시각 중 무엇으로 세션 구간을 판정할지
-- **계약 근거**: CLAUDE.md 「배터리 자산과 이력 추적」, `PLAN.md` 데이터 모델
-- **완료 판정**: 세션 시작→종료 사이 프레임의 `battery_id`가 100% 채워지고, 세션 밖 프레임이 잘못 귀속되지 않음
+### B2. `battery_id` 세션 태깅 — **명세 완료(2026-08-27) / Consumer 구현 인계**
 
-### B3. Fail-Safe 판정 주체 — **판단·구현 모두 백엔드. 넘기지 말 것**
+- **현재 상태**: 에지는 `device_id`만 싣고 `battery_id`를 모른다(CLAUDE.md 센서 스키마). 적재 시점에 백엔드 세션 정보로 귀속해야 한다.
+- **완료된 것(백엔드, Task 14)**: 태깅 규칙 명세 — [`docs/handover/b2-session-tagging.md`](handover/b2-session-tagging.md). 활성 세션 조회 방법(`device_id`+`status='ACTIVE'` 조회, 세션 시작/종료 시 무효화하는 캐시), 활성 세션이 없을 때 `battery_id=null`로 적재(버리지 않음), 세션 전환 경계 프레임은 **적재 시점의 활성 세션**을 기준으로 판정(에지 `measured_at`을 신뢰하지 않음, 시계 미동기화 대비), 완료 판정 SQL 2건을 포함해 규칙 5개를 실제 값으로 확정했다.
+- **남은 일(인프라, Consumer 구현)**: 위 문서의 규칙을 Kafka Consumer 코드로 옮긴다. 캐시 구현 방안(DB WAL/CDC 또는 `battery-events` 토픽 구독)은 문서 §2.2에서 선택지만 제시했으므로 인프라 담당자가 확정한다.
+- **완료 판정**: 세션 시작→종료 사이 프레임의 `battery_id`가 100% 채워지고, 세션 밖 프레임이 잘못 귀속되지 않음(문서 §5의 SQL 검증 2건).
 
-- **현재 상태**: 판정하는 코드가 **어디에도 없다.** 프론트엔드는 자동 차단 모달을 이미 갖고 있고(`frontend/src/App.tsx:133`·`161`) WS 핸들러도 있지만(`frontend/src/realtime/useRealtime.ts:285`), **보내는 쪽이 없다.**
-- **왜 넘기면 안 되나**: 스트림이 지나가는 자리가 Consumer라 인프라 담당은 합리적으로 Consumer를 고른다. 그런데 인터락·감사로그·수동 복구 게이트는 전부 백엔드 도메인이라 안전 로직이 두 곳으로 쪼개진다. 관련 불변식이 계약에 이미 박혀 있다 — *"릴레이 자동 복구는 없다"*, *"계정 제재와 안전 감시는 분리한다"*, *"진단 중 알림은 억제하되 Fail-Safe는 억제하지 않는다"*, *"부하를 0A로 내린 다음 릴레이를 차단한다"*.
-- **해야 할 일**: 백엔드가 적재된 텔레메트리(또는 A4 이상점수)를 구독해 안전 조건을 판정하고, ① `relay_state` 갱신 ② `audit_log`에 `RELAY_AUTO_CUT` 기록 ③ 에지로 차단 명령(B4) ④ WS `relay.autoCut` 푸시를 **한 흐름으로** 수행한다.
-- **계약 근거**: `docs/backend_contract.md:357`(자동 차단 시 `relay.autoCut` 즉시 푸시), `:1628`(payload = `{ batteryId, batteryLabel, representativeTempC, representativeTempSource, triggerCode, cutAt }`), `:176`, `:1646`, `:1858`
-- **미결정**: 온도 문턱은 모드 1이 55/60°C, **모드 2는 실측 미정**(`mode2_powerbank_diagnosis_spec.md` §8 H2). 값을 추정해 하드코딩하지 않는다.
-- **완료 판정**: 조건 충족 시 모달이 뜨고, 릴레이가 `OPEN`으로 남고, 재인증·사유 없이는 복구되지 않음
+### B3. Fail-Safe 판정 주체 — **판정 엔진 완료(2026-08-27) / 문턱 실측·구독 배선 대기**
 
-### B4. 릴레이 차단 → 에지 실제 전달 — **판단은 백엔드, 프로듀서 배선은 도움 가능**
+- **완료된 것(백엔드)**: 순수 판정 함수 `judgeFailsafe`(`backend/src/failsafe.ts`) — 절대온도(IR·접촉) → 가스 → 압력 상대상승률 → 온도 상승률 순으로 검사하고, 하드웨어 프로필(`MODE1_EXTERNAL_CELL_V1`/`COMBINED_EXISTING_PARTS_V1`)별로 실재하는 센서만 활성화한다. 이걸 저장소·에지·WS에 잇는 `evaluateFailsafe`(`backend/src/failsafeRunner.ts`) — 인터락 중복 방지(이미 걸려 있으면 재차단 안 함) → `engageFailsafe`(저장소, 릴레이 전이+`RELAY_AUTO_CUT` 감사 원자적) → `devicePort.relayCut`(에지 통보) → `broadcastAutoCut`(WS `relay.autoCut` 푸시) 순서로 실행하며, `backend/src/server.ts`가 `runFailsafe(batteryId, profile, sample, thresholds)`로 이 전체를 노출한다.
+- **⚠️ 문턱값이 전부 `0`이라 현재 어떤 계층도 차단하지 않는다.** `failsafe.ts`의 `UNSET_THRESHOLDS`가 미설정 sentinel이며, `judgeFailsafe`는 `threshold > 0`일 때만 그 계층을 활성화한다. 하드웨어 실측(`mode1_backend_spec.md` §13 H8, `mode2_powerbank_diagnosis_spec.md` §8 H2) 전까지 의도된 휴면 상태다.
+- **⚠️ 텔레메트리 구독 배선은 아직 없다** — `runFailsafe`를 프레임마다 부르는 호출부는 Kafka Consumer가 생긴 뒤에야 만들어진다(지금은 순수 로직만 완성되어 있고 호출부가 없다). 정본·인계 세부(TOCTOU 직렬화 요구사항, WS 실패 로깅 요구사항 포함)는 `docs/handover/infra-implementations.md` 2부 §14.
+- **완료 판정**: 문턱값 설정 후 — 조건 충족 시 모달이 뜨고, 릴레이가 `OPEN`으로 남고, 재인증·사유 없이는 복구되지 않음(자동 복구 없음).
 
-- **현재 상태**: `backend/src/store.ts:299` `changeRelay()`가 **메모리 상태만 바꾼다.** 물리 릴레이로 가는 경로가 없다.
-- **해야 할 일**: 백엔드가 `battery-events` 토픽에 제어 이벤트를 발행한다. **즉 "카프카는 동료 몫"이어도 백엔드는 Kafka 프로듀서 클라이언트를 직접 쓴다 — 운영하는 것과 사용하는 것은 다르다.** 무엇을 언제 발행할지는 백엔드 도메인 판단.
-- **같은 경로를 쓰는 것**: 세션 시작/종료 음성 안내 발행도 백엔드 책임이다(`docs/backend_contract.md:697`, `[PLAN: S-VOCALR]`).
+### B4. 릴레이 차단 → 에지 실제 전달 — **포트 완료(2026-08-27) / Kafka 구현체 인계**
+
+- **완료된 것(백엔드)**: `DeviceCommandPort` 인터페이스(`backend/src/device/port.ts`, 메서드 4개 — `relayCut`/`relayRestore`/`sessionStarted`/`sessionEnded`) + 로깅 스텁(`backend/src/device/logging.ts`, 실제로 명령을 보내지 않고 콘솔에 `[device] {...}` 형태로만 남김). 서버는 이미 이 인터페이스를 통해 `relayCut`을 호출하도록 배선돼 있다.
+- **남은 일(인프라)**: `backend/src/device/kafka.ts`에 `createKafkaDeviceCommandPort(...)`를 구현해 로깅 스텁을 대체하고 `battery-events` 토픽으로 발행한다. **dual-write 원자성**(저장소 커밋과 Kafka 발행 사이 원자성 미확보 — 브로커가 죽으면 DB 상태와 에지 상태가 어긋남)과 **`sessionEnded` 배선 지점**(세션 종료가 라우트가 아니라 저장소 내부 사건이라 지금 훅이 없음)이 미결정이며, 정본은 `docs/handover/infra-implementations.md` 2부 §13·§15(둘 다 outbox 테이블로 동시에 풀 수 있음을 제안).
 - **완료 판정**: 백엔드 차단 승인 → 라즈베리파이 릴레이가 실제로 열림 → 결과가 `battery-events`로 되돌아와 상태가 일치
 
 ## 4. C군 — 백엔드·프론트 몫 (Kafka·DB 무관)
@@ -239,14 +235,14 @@ v3 프로토타입과 정본 문서에는 모드 1/2, 대표 온도 최댓값, s
 | `anomaly.score` | `:255` | `:1625` | ✓ (휴면 — 위 참조) |
 | `anomaly.gradeChanged` | `:266` | `:1626` | ✓ (휴면 — 위 참조) |
 | `relay.changed` | `:271` | — | ✓ |
-| `relay.autoCut` | `:285` | `:1628` (B3) | ✗ |
+| `relay.autoCut` | `:285` | `:1628` (B3) | ✓ (문턱 미설정이라 휴면) |
 | `alert.created` | `:290` | `:1629` | ✓ (휴면 — 위 참조) |
 | `event.created` | `:291` | `:1630` | ✓ |
 | `session.ended` | `:292` | `:1631` | ✓ |
 | `diagnosis.progress`/`.done`/`.aborted` | `:297` | `:1633` | ✗ |
 | `resync.required` | `:309` | `:1638` | ✓ |
 
-- **`relay.autoCut`은 이번 계획에서 시도하지 않았다** — B3(Fail-Safe 판정 로직)가 저장소 어디에도 없어 이 이벤트를 트리거할 실행 경로 자체가 없다. B3을 먼저 구현할 것.
+- **`relay.autoCut`은 2026-08-25 시점에는 시도하지 않았으나, B3(Fail-Safe 판정 로직)가 2026-08-27에 완료돼 지금은 배선돼 있다.** `judgeFailsafe`·`evaluateFailsafe`·`runFailsafe`(§3 B3 참조)가 조건 충족 시 이 이벤트를 실제로 발신한다. 단 **문턱값이 전부 `0`(미설정)이라 실행 경로는 있어도 실제로 트리거되지는 않는 휴면 상태**다 — 텔레메트리 구독 배선(Consumer)과 하드웨어 실측 문턱값이 갖춰져야 관찰 가능하다.
 - **`diagnosis.progress`/`.done`/`.aborted`도 시도하지 않았다** — `store.ts`의 `F21_THRESHOLDS.configured`가 하드코딩 `false`라 `startDiagnosis`가 항상 `409 SAFETY_PROFILE_NOT_READY`를 던지고, 진단 진행을 시뮬레이션할 도달 가능한 코드 경로가 없다. 이 플래그를 켜는 작업(§8 H2 등 안전 문턱 확정)이 선행돼야 한다.
 - **`metrics.tick`은 100ms 원본을 그대로 흘리지 않는다.** 서버가 **1초 단위로 다운샘플링**해 푸시한다(`:1643`). 페이로드는 `GET /api/dashboard`의 `metrics`와 **동일 구조**(각 지표 `{ value, status }` + `measuredAt`).
 - **`relay.autoCut`을 `relay.changed`에 섞지 않는다**(`:1646`) — 사용자 차단과 구분이 안 된다.
