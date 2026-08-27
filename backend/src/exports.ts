@@ -28,10 +28,10 @@ function isoNow(): string {
   return new Date().toISOString();
 }
 
-export function createExportJob(ownerId: string, sessionId: string, from: string, to: string): ExportJob {
-  const session = sessionById(sessionId);
+export async function createExportJob(ownerId: string, sessionId: string, from: string, to: string): Promise<ExportJob> {
+  const session = await sessionById(sessionId);
   if (!session || session.ownerId !== ownerId) throw new Error("NOT_FOUND");
-  const battery = batteryById(session.batteryId);
+  const battery = await batteryById(session.batteryId);
   if (!battery) throw new Error("NOT_FOUND");
   const fromMs = Date.parse(from);
   const toMs = Date.parse(to);
@@ -60,11 +60,11 @@ export function exportJobById(id: string): ExportJob | undefined {
   return job ? { ...job } : undefined;
 }
 
-export function completeExportJob(id: string): ExportJob | undefined {
+export async function completeExportJob(id: string): Promise<ExportJob | undefined> {
   const job = jobs.get(id);
   if (!job) return undefined;
   if (job.status !== "QUEUED") return { ...job };
-  const battery = batteryById(job.batteryId);
+  const battery = await batteryById(job.batteryId);
   if (!battery) {
     job.status = "FAILED";
     return { ...job };
@@ -83,8 +83,14 @@ export function completeExportJob(id: string): ExportJob | undefined {
 
 export function scheduleExportCompletion(id: string, onReady: (job: ExportJob) => void): void {
   setTimeout(() => {
-    const job = completeExportJob(id);
-    if (job && job.status === "READY") onReady(job);
+    void completeExportJob(id)
+      .then((job) => {
+        if (job && job.status === "READY") return onReady(job);
+        return undefined;
+      })
+      .catch((error) => {
+        console.error("export job failed", error);
+      });
   }, READY_DELAY_MS);
 }
 

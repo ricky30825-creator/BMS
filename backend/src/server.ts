@@ -232,8 +232,8 @@ async function ownerBatteries(req: Request): Promise<Awaited<ReturnType<typeof b
   return await batteries(req.userRole === "ADMIN" ? undefined : actorId(req));
 }
 
-function diagnosisJson(diagnosis: NonNullable<ReturnType<typeof diagnosisById>>) {
-  const battery = batteryById(diagnosis.batteryId);
+async function diagnosisJson(diagnosis: NonNullable<Awaited<ReturnType<typeof diagnosisById>>>) {
+  const battery = await batteryById(diagnosis.batteryId);
   const input = diagnosis.input;
   return {
     id: diagnosis.id,
@@ -522,7 +522,7 @@ app.post("/api/sessions", requireSession, asyncRoute(async (req, res) => {
     const priorSession = await activeSession();
     const session = await startSession(actorId(req), battery.id);
     if (priorSession && priorSession.id !== session.id) {
-      broadcast("session.ended", { sessionId: priorSession.id, endReason: "SUPERSEDED" }, null, priorSession.batteryId);
+      await broadcast("session.ended", { sessionId: priorSession.id, endReason: "SUPERSEDED" }, null, priorSession.batteryId);
     }
     await recordAudit({ actorId: actorId(req), action: "SESSION_START", resource: session.id, result: "SUCCESS", reason: null });
     res.status(201).json(await sessionJson(session));
@@ -571,9 +571,9 @@ async function relayMutation(req: Request, res: Response, action: "cut" | "resto
     await changeRelay(actorId(req), battery.id, action, reason);
     const response = { decision: "APPROVED", requestId: `relay_${randomUUID()}`, relay: await relayJson(battery.id) };
     await rememberIdempotency(actorId(req), key, requestBody, 200, response);
-    broadcast("relay.changed", await relayJson(battery.id), response.requestId, battery.id);
+    await broadcast("relay.changed", await relayJson(battery.id), response.requestId, battery.id);
     const latestAudit = (await audits()).find((audit) => audit.resource === battery.id && audit.action === (action === "cut" ? "RELAY_CUT" : "RELAY_RESTORE"));
-    if (latestAudit) broadcast("event.created", await auditToEvent(latestAudit), response.requestId, battery.id);
+    if (latestAudit) await broadcast("event.created", await auditToEvent(latestAudit), response.requestId, battery.id);
     res.json(response);
   } catch (error) {
     errorFromDomain(res, error);
@@ -732,94 +732,100 @@ app.get("/api/admin/notices", requireRole("ADMIN"), (_req, res) => {
   res.json({ items: demoNotices.map(({ id, category, title, status, views, publishedAt }) => ({ id, category, title, status, views, publishedAt })) });
 });
 
-app.get("/api/admin/users", requireRole("ADMIN"), (req, res) => {
+app.get("/api/admin/users", requireRole("ADMIN"), asyncRoute(async (req, res) => {
   const q = typeof req.query.q === "string" ? req.query.q.toLowerCase() : "";
   const status = req.query.status === "ACTIVE" || req.query.status === "SUSPENDED" ? req.query.status : null;
   const role = req.query.role === "USER" || req.query.role === "ADMIN" ? req.query.role : null;
-  const items = demoUsers.filter((user) => (!status || user.status === status) && (!role || user.role === role) && (!q || `${user.name} ${user.email}`.toLowerCase().includes(q))).map((user) => ({ ...user, loginId: user.id, batteryCount: batteries(user.id).length }));
+  const filtered = demoUsers.filter((user) => (!status || user.status === status) && (!role || user.role === role) && (!q || `${user.name} ${user.email}`.toLowerCase().includes(q)));
+  const items = await Promise.all(filtered.map(async (user) => ({ ...user, loginId: user.id, batteryCount: (await batteries(user.id)).length })));
   res.json({ items, page: { number: 1, size: items.length || 20, total: items.length, totalPages: items.length ? 1 : 0 } });
-});
+}));
 
-app.get("/api/admin/users/:id", requireRole("ADMIN"), (req, res) => {
-  const user = userById(req.params.id);
+app.get("/api/admin/users/:id", requireRole("ADMIN"), asyncRoute(async (req, res) => {
+  const user = await userById(req.params.id);
   if (!user) { apiError(res, 404, "NOT_FOUND", "User was not found."); return; }
-  res.json({ ...user, loginId: user.id, batteryCount: batteries(user.id).length });
-});
+  res.json({ ...user, loginId: user.id, batteryCount: (await batteries(user.id)).length });
+}));
 
 async function userStatusMutation(req: Request, res: Response, status: "ACTIVE" | "SUSPENDED"): Promise<void> {
   const reason = typeof req.body?.reason === "string" ? req.body.reason.trim() : "";
   try {
-    const user = changeUserStatus(actorId(req), req.params.id, status, reason);
+    const user = await changeUserStatus(actorId(req), req.params.id, status, reason);
     res.json(user);
   } catch (error) {
     errorFromDomain(res, error);
   }
 }
 
-app.post("/api/admin/users/:id/suspend", requireRole("ADMIN"), async (req, res) => userStatusMutation(req, res, "SUSPENDED"));
-app.post("/api/admin/users/:id/restore", requireRole("ADMIN"), async (req, res) => userStatusMutation(req, res, "ACTIVE"));
-app.patch("/api/admin/users/:id", requireRole("ADMIN"), async (req, res) => {
+app.post("/api/admin/users/:id/suspend", requireRole("ADMIN"), asyncRoute(async (req, res) => userStatusMutation(req, res, "SUSPENDED")));
+app.post("/api/admin/users/:id/restore", requireRole("ADMIN"), asyncRoute(async (req, res) => userStatusMutation(req, res, "ACTIVE")));
+app.patch("/api/admin/users/:id", requireRole("ADMIN"), asyncRoute(async (req, res) => {
   const status = req.body?.status === "SUSPENDED" ? "SUSPENDED" : req.body?.status === "ACTIVE" ? "ACTIVE" : null;
   if (!status) { apiError(res, 400, "VALIDATION_FAILED", "status must be ACTIVE or SUSPENDED."); return; }
   await userStatusMutation(req, res, status);
-});
-app.post("/api/admin/users/:id/password-reset", requireRole("ADMIN"), (req, res) => {
-  if (!userById(req.params.id)) { apiError(res, 404, "NOT_FOUND", "User was not found."); return; }
-  recordAudit({ actorId: actorId(req), action: "USER_PASSWORD_RESET_REQUEST", resource: req.params.id, result: "SUCCESS", reason: null });
+}));
+app.post("/api/admin/users/:id/password-reset", requireRole("ADMIN"), asyncRoute(async (req, res) => {
+  if (!(await userById(req.params.id))) { apiError(res, 404, "NOT_FOUND", "User was not found."); return; }
+  await recordAudit({ actorId: actorId(req), action: "USER_PASSWORD_RESET_REQUEST", resource: req.params.id, result: "SUCCESS", reason: null });
   res.status(202).json({ status: "accepted", userId: req.params.id });
-});
+}));
 
-app.get("/api/admin/batteries", requireRole("ADMIN"), (req, res) => {
+app.get("/api/admin/batteries", requireRole("ADMIN"), asyncRoute(async (req, res) => {
   const q = typeof req.query.q === "string" ? req.query.q.toLowerCase() : "";
   const status = typeof req.query.opsStatus === "string" ? req.query.opsStatus : null;
-  const items = batteries().filter((battery) => (!status || battery.opsStatus === status) && (!q || `${battery.id} ${battery.label} ${battery.ownerId}`.toLowerCase().includes(q))).map((battery) => ({ ...batteryJson(battery), owner: userById(battery.ownerId) }));
+  const all = await batteries();
+  const filtered = all.filter((battery) => (!status || battery.opsStatus === status) && (!q || `${battery.id} ${battery.label} ${battery.ownerId}`.toLowerCase().includes(q)));
+  const items = await Promise.all(filtered.map(async (battery) => ({ ...(await batteryJson(battery)), owner: await userById(battery.ownerId) })));
   res.json({ items, page: { number: 1, size: items.length || 20, total: items.length, totalPages: items.length ? 1 : 0 } });
-});
+}));
 
-app.get("/api/admin/batteries/:id", requireRole("ADMIN"), (req, res) => {
-  const battery = batteryById(req.params.id);
+app.get("/api/admin/batteries/:id", requireRole("ADMIN"), asyncRoute(async (req, res) => {
+  const battery = await batteryById(req.params.id);
   if (!battery) { apiError(res, 404, "NOT_FOUND", "Battery was not found."); return; }
-  res.json({ ...batteryJson(battery), owner: userById(battery.ownerId), info: { adminMemo: battery.adminMemo, device: { id: "demo-device-01", label: "진단기 A", status: "ONLINE" } }, opsLogs: audits().filter((audit) => audit.resource === battery.id) });
-});
+  res.json({ ...(await batteryJson(battery)), owner: await userById(battery.ownerId), info: { adminMemo: battery.adminMemo, device: { id: "demo-device-01", label: "진단기 A", status: "ONLINE" } }, opsLogs: (await audits()).filter((audit) => audit.resource === battery.id) });
+}));
 
-app.patch("/api/admin/batteries/:id/ops-status", requireRole("ADMIN"), (req, res) => {
+app.patch("/api/admin/batteries/:id/ops-status", requireRole("ADMIN"), asyncRoute(async (req, res) => {
   const next = req.body?.opsStatus;
   const reason = typeof req.body?.reason === "string" ? req.body.reason : "";
   if (!["NORMAL", "WATCH", "BLOCKED"].includes(next)) { apiError(res, 400, "VALIDATION_FAILED", "Invalid ops status."); return; }
   try {
-    const targetBattery = batteryById(req.params.id);
-    const priorSession = targetBattery ? activeSession(targetBattery.ownerId) : null;
+    const targetBattery = await batteryById(req.params.id);
+    const priorSession = targetBattery ? await activeSession(targetBattery.ownerId) : null;
     const version = Number.isInteger(req.body?.version) ? req.body.version : undefined;
-    const battery = changeOpsStatus(actorId(req), req.params.id, next as "NORMAL" | "WATCH" | "BLOCKED", reason, version);
+    const battery = await changeOpsStatus(actorId(req), req.params.id, next as "NORMAL" | "WATCH" | "BLOCKED", reason, version);
     if (next === "BLOCKED" && priorSession && priorSession.batteryId === req.params.id) {
-      broadcast("session.ended", { sessionId: priorSession.id, endReason: "BLOCKED" }, null, req.params.id);
+      await broadcast("session.ended", { sessionId: priorSession.id, endReason: "BLOCKED" }, null, req.params.id);
     }
     res.json({ opsStatus: battery.opsStatus, version: battery.version, updatedAt: battery.latest.measuredAt, updatedBy: actorName(req) });
   } catch (error) { errorFromDomain(res, error); }
-});
+}));
 
-app.patch("/api/admin/batteries/:id/memo", requireRole("ADMIN"), (req, res) => {
+app.patch("/api/admin/batteries/:id/memo", requireRole("ADMIN"), asyncRoute(async (req, res) => {
   if (typeof req.body?.memo !== "string") { apiError(res, 400, "VALIDATION_FAILED", "Memo must be a string."); return; }
   try {
     const version = Number.isInteger(req.body?.version) ? req.body.version : undefined;
-    const battery = saveMemo(actorId(req), req.params.id, req.body.memo, version);
+    const battery = await saveMemo(actorId(req), req.params.id, req.body.memo, version);
     res.json({ memo: battery.adminMemo, version: battery.version, updatedAt: battery.latest.measuredAt, updatedBy: actorName(req) });
   } catch (error) { errorFromDomain(res, error); }
-});
+}));
 
-app.get("/api/admin/audit-logs", requireRole("ADMIN"), (_req, res) => {
-  res.json({ items: audits(), page: { number: 1, size: 100, total: audits().length, totalPages: 1 } });
-});
+app.get("/api/admin/audit-logs", requireRole("ADMIN"), asyncRoute(async (_req, res) => {
+  const items = await audits();
+  res.json({ items, page: { number: 1, size: 100, total: items.length, totalPages: 1 } });
+}));
 
-app.get("/api/admin/health", requireRole("ADMIN"), (req, res) => {
-  recordAudit({ actorId: actorId(req), action: "ADMIN_ACCESS", resource: "/api/admin/health", result: "SUCCESS", reason: null });
+app.get("/api/admin/health", requireRole("ADMIN"), asyncRoute(async (req, res) => {
+  await recordAudit({ actorId: actorId(req), action: "ADMIN_ACCESS", resource: "/api/admin/health", result: "SUCCESS", reason: null });
   res.json({ status: "ok", scope: "admin", runtime: "demo", safetyProfile: F21_THRESHOLDS });
-});
+}));
 
-app.get("/api/admin/overview", requireRole("ADMIN"), (_req, res) => {
-  const allBatteries = batteries();
-  res.json({ users: demoUsers.length, batteries: allBatteries.length, activeSessions: activeSession() ? 1 : 0, blockedBatteries: allBatteries.filter((item) => item.opsStatus === "BLOCKED").length, relayOpen: allBatteries.filter((item) => relayByBattery(item.id).state === "OPEN").length });
-});
+app.get("/api/admin/overview", requireRole("ADMIN"), asyncRoute(async (_req, res) => {
+  const allBatteries = await batteries();
+  const session = await activeSession();
+  const relays = await Promise.all(allBatteries.map((item) => relayByBattery(item.id)));
+  res.json({ users: demoUsers.length, batteries: allBatteries.length, activeSessions: session ? 1 : 0, blockedBatteries: allBatteries.filter((item) => item.opsStatus === "BLOCKED").length, relayOpen: relays.filter((relay) => relay.state === "OPEN").length });
+}));
 
 app.get("/api/relay/history", requireSession, asyncRoute(async (req, res) => {
   const session = await activeSession(actorId(req));
@@ -840,40 +846,44 @@ app.get("/api/relay/history", requireSession, asyncRoute(async (req, res) => {
   res.json({ items });
 }));
 
-function diagnosisStart(req: Request, res: Response, kind: "QUICK" | "CAPACITY"): void {
-  const session = activeSession(actorId(req));
+async function diagnosisStart(req: Request, res: Response, kind: "QUICK" | "CAPACITY"): Promise<void> {
+  const session = await activeSession(actorId(req));
   const batteryId = session?.batteryId;
   if (!batteryId) { apiError(res, 409, "NO_ACTIVE_SESSION", "An active session is required."); return; }
   const body = req.body ?? {};
   if (body.acknowledged !== true) { apiError(res, 400, "ACK_REQUIRED", "Safety acknowledgement is required."); return; }
   if (kind === "CAPACITY" && body.fullyChargedConfirmed !== true) { apiError(res, 400, "FULL_CHARGE_REQUIRED", "Full-charge confirmation is required."); return; }
   try {
-    const diagnosis = startDiagnosis(actorId(req), kind, batteryId, body);
-    recordAudit({ actorId: actorId(req), action: kind === "QUICK" ? "DIAGNOSIS_QUICK_START" : "DIAGNOSIS_CAPACITY_START", resource: diagnosis.id, result: "SUCCESS", reason: null });
-    res.status(202).json(diagnosisJson(diagnosis));
+    const diagnosis = await startDiagnosis(actorId(req), kind, batteryId, body);
+    await recordAudit({ actorId: actorId(req), action: kind === "QUICK" ? "DIAGNOSIS_QUICK_START" : "DIAGNOSIS_CAPACITY_START", resource: diagnosis.id, result: "SUCCESS", reason: null });
+    res.status(202).json(await diagnosisJson(diagnosis));
   } catch (error) { errorFromDomain(res, error); }
 }
 
-app.post("/api/diagnosis/quick", requireSession, (req, res) => diagnosisStart(req, res, "QUICK"));
-app.post("/api/diagnosis/capacity", requireSession, (req, res) => diagnosisStart(req, res, "CAPACITY"));
-app.get("/api/diagnosis/active", requireSession, (req, res) => {
-  const diagnosis = activeDiagnosis(activeSession(actorId(req))?.batteryId ?? undefined);
-  res.json(diagnosis ? diagnosisJson(diagnosis) : null);
-});
-app.delete("/api/diagnosis/active", requireSession, (req, res) => {
-  const batteryId = activeSession(actorId(req))?.batteryId;
+app.post("/api/diagnosis/quick", requireSession, asyncRoute(async (req, res) => diagnosisStart(req, res, "QUICK")));
+app.post("/api/diagnosis/capacity", requireSession, asyncRoute(async (req, res) => diagnosisStart(req, res, "CAPACITY")));
+app.get("/api/diagnosis/active", requireSession, asyncRoute(async (req, res) => {
+  const session = await activeSession(actorId(req));
+  const diagnosis = await activeDiagnosis(session?.batteryId ?? undefined);
+  res.json(diagnosis ? await diagnosisJson(diagnosis) : null);
+}));
+app.delete("/api/diagnosis/active", requireSession, asyncRoute(async (req, res) => {
+  const session = await activeSession(actorId(req));
+  const batteryId = session?.batteryId;
   if (!batteryId) { apiError(res, 409, "NO_DIAGNOSIS_IN_PROGRESS", "No active diagnosis exists."); return; }
   try {
-    const diagnosis = abortDiagnosis(actorId(req), batteryId);
-    recordAudit({ actorId: actorId(req), action: "DIAGNOSIS_ABORT", resource: diagnosis.id, result: "SUCCESS", reason: "USER" });
-    res.json(diagnosisJson(diagnosis));
+    const diagnosis = await abortDiagnosis(actorId(req), batteryId);
+    await recordAudit({ actorId: actorId(req), action: "DIAGNOSIS_ABORT", resource: diagnosis.id, result: "SUCCESS", reason: "USER" });
+    res.json(await diagnosisJson(diagnosis));
   } catch (error) { errorFromDomain(res, error); }
-});
+}));
 
-app.get("/api/batteries/:id/diagnoses", requireSession, (req, res) => {
-  const battery = ensureOwner(req, req.params.id);
+app.get("/api/batteries/:id/diagnoses", requireSession, asyncRoute(async (req, res) => {
+  const battery = await ensureOwner(req, req.params.id);
   if (!battery) { apiError(res, 404, "NOT_FOUND", "Battery was not found."); return; }
-  const items = diagnosesForBattery(battery.id).map(diagnosisJson).map((diagnosis) => ({
+  const diagnoses = await diagnosesForBattery(battery.id);
+  const jsons = await Promise.all(diagnoses.map((diagnosis) => diagnosisJson(diagnosis)));
+  const items = jsons.map((diagnosis) => ({
     id: diagnosis.id,
     batteryId: diagnosis.batteryId,
     batteryLabel: diagnosis.batteryLabel,
@@ -885,24 +895,24 @@ app.get("/api/batteries/:id/diagnoses", requireSession, (req, res) => {
     summary: diagnosis.kind === "QUICK" ? { regulationKneeA: null, thermalSlopeCPerMin: null, grade: null } : { sohRelPct: null, deliveredWh: null }
   }));
   res.json(pageEnvelope(items, Number(req.query.page) || 1, Number(req.query.size) || 20));
-});
+}));
 
-app.get("/api/diagnoses/:id", requireSession, (req, res) => {
-  const diagnosis = diagnosisById(req.params.id);
-  if (!diagnosis || !ensureOwner(req, diagnosis.batteryId)) { apiError(res, 404, "NOT_FOUND", "Diagnosis was not found."); return; }
-  res.json(diagnosisJson(diagnosis));
-});
+app.get("/api/diagnoses/:id", requireSession, asyncRoute(async (req, res) => {
+  const diagnosis = await diagnosisById(req.params.id);
+  if (!diagnosis || !(await ensureOwner(req, diagnosis.batteryId))) { apiError(res, 404, "NOT_FOUND", "Diagnosis was not found."); return; }
+  res.json(await diagnosisJson(diagnosis));
+}));
 
-app.get("/api/metrics/export.csv", requireSession, (req, res) => {
-  const session = activeSession(actorId(req));
+app.get("/api/metrics/export.csv", requireSession, asyncRoute(async (req, res) => {
+  const session = await activeSession(actorId(req));
   const requestedBatteryId = typeof req.query.batteryId === "string" ? req.query.batteryId : null;
   const batteryId = session?.batteryId;
-  if (!batteryId || (requestedBatteryId && requestedBatteryId !== batteryId) || !ensureOwner(req, batteryId)) { apiError(res, 409, "NO_ACTIVE_SESSION", "An active session is required."); return; }
-  const csv = csvForBattery(batteryId, session?.id ?? null);
+  if (!batteryId || (requestedBatteryId && requestedBatteryId !== batteryId) || !(await ensureOwner(req, batteryId))) { apiError(res, 409, "NO_ACTIVE_SESSION", "An active session is required."); return; }
+  const csv = await csvForBattery(batteryId, session?.id ?? null);
   res.status(200).type("text/csv").setHeader("Content-Disposition", `attachment; filename="${batteryId}-raw.csv"`).send(csv);
-});
+}));
 
-app.post("/api/exports", requireSession, (req, res) => {
+app.post("/api/exports", requireSession, asyncRoute(async (req, res) => {
   const key = requireIdempotency(req, res);
   if (!key) return;
   const kind = req.body?.kind;
@@ -911,21 +921,21 @@ app.post("/api/exports", requireSession, (req, res) => {
   const to = typeof req.body?.to === "string" ? req.body.to : "";
   if (kind !== "RAW_METRICS_CSV") { apiError(res, 400, "VALIDATION_FAILED", "Only RAW_METRICS_CSV export jobs are supported."); return; }
   const requestBody = { kind, sessionId, from, to };
-  const prior = idempotent(actorId(req), key, requestBody);
+  const prior = await idempotent(actorId(req), key, requestBody);
   if (prior.kind === "conflict") { apiError(res, 409, "IDEMPOTENCY_CONFLICT", "The idempotency key was reused with a different request."); return; }
   if (prior.kind === "replay") { res.status(prior.status ?? 202).json(prior.body); return; }
   try {
-    const job = createExportJob(actorId(req), sessionId, from, to);
+    const job = await createExportJob(actorId(req), sessionId, from, to);
     const response = { id: job.id, status: job.status };
-    rememberIdempotency(actorId(req), key, requestBody, 202, response);
-    scheduleExportCompletion(job.id, (ready) => {
-      broadcast("export.ready", { exportId: ready.id, status: ready.status, expiresAt: ready.expiresAt }, null, ready.batteryId);
+    await rememberIdempotency(actorId(req), key, requestBody, 202, response);
+    scheduleExportCompletion(job.id, async (ready) => {
+      await broadcast("export.ready", { exportId: ready.id, status: ready.status, expiresAt: ready.expiresAt }, null, ready.batteryId);
     });
     res.status(202).json(response);
   } catch (error) {
     errorFromDomain(res, error);
   }
-});
+}));
 
 app.get("/api/exports/:id", requireSession, (req, res) => {
   const job = exportJobById(req.params.id);
@@ -1035,12 +1045,12 @@ function wsEnvelope(type: string, payload: unknown, requestId: string | null = n
   };
 }
 
-function broadcast(type: string, payload: unknown, requestId: string | null = null, batteryId: string | null = null): void {
+async function broadcast(type: string, payload: unknown, requestId: string | null = null, batteryId: string | null = null): Promise<void> {
   const envelope = wsEnvelope(type, payload, requestId);
   const topic = topicForType(type);
   eventLog.record({ sequence: BigInt(envelope.sequence), topic, batteryId, envelope });
   const frame = wsFrame(JSON.stringify(envelope));
-  const active = batteryId ? activeSession() : null;
+  const active = batteryId ? await activeSession() : null;
   for (const client of wsClients) {
     // "session.ended" and "export.ready" are exempted from the "must still be
     // the currently active battery" check below: both describe something that
@@ -1162,15 +1172,15 @@ async function tickActiveBattery(): Promise<void> {
   if (!session) return;
   const battery = await batteryById(session.batteryId);
   if (!battery) return;
-  broadcast("metrics.tick", await dashboardMetrics(battery), null, battery.id);
+  await broadcast("metrics.tick", await dashboardMetrics(battery), null, battery.id);
   const anomaly = anomalyJson(battery);
-  broadcast("anomaly.score", anomaly, null, battery.id);
+  await broadcast("anomaly.score", anomaly, null, battery.id);
   const previousGrade = lastBroadcastGrade.get(battery.id) ?? null;
   const nextGrade = anomaly.grade;
   if (nextGrade) lastBroadcastGrade.set(battery.id, nextGrade);
   const transition = detectGradeTransition(previousGrade, nextGrade);
   if (!transition) return;
-  broadcast("anomaly.gradeChanged", { from: transition.from, to: transition.to, score: anomaly.score, batteryId: battery.id, batteryLabel: battery.label }, null, battery.id);
+  await broadcast("anomaly.gradeChanged", { from: transition.from, to: transition.to, score: anomaly.score, batteryId: battery.id, batteryLabel: battery.label }, null, battery.id);
   if (transition.to !== "WARNING" && transition.to !== "DANGER") return;
   const alert = {
     id: `al_${randomUUID()}`,
@@ -1186,7 +1196,7 @@ async function tickActiveBattery(): Promise<void> {
     ownerId: battery.ownerId
   };
   demoAlerts.unshift(alert);
-  broadcast("alert.created", alertJson(alert), null, battery.id);
+  await broadcast("alert.created", alertJson(alert), null, battery.id);
 }
 
 setInterval(() => {
