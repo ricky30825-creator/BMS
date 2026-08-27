@@ -1,18 +1,27 @@
-# B1 1단계 — store 인터페이스 분리와 비동기 전환 Implementation Plan
+# 백엔드 인수인계 완결 — B1 1단계 · B2 명세 · B3 · B4 Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** `backend/src/store.ts`의 인메모리 도메인 저장소를 교체 가능한 인터페이스 뒤로 옮기고, 전 함수를 `Promise` 반환으로 바꾼 뒤 호출부 80곳과 라우트 57개를 비동기로 전환한다. **PostgreSQL 구현체는 이 계획의 범위가 아니다** — 별도 담당자가 2단계로 만든다.
+**Goal:** 백엔드 담당자의 남은 몫을 **한 번에 끝내고** 인프라 담당자(Kafka·PostgreSQL)에게 넘길 수 있는 상태로 만든다. 구체적으로 B1 1단계(저장소 인터페이스 분리 + 비동기 전환), B2 세션 태깅 명세, B3 Fail-Safe 판정 엔진, B4 에지 명령 포트를 모두 구현하고, **두 개의 구현체(`CellGuardStore` / `DeviceCommandPort`)를 한 벌의 인수인계 문서로 넘긴다.**
 
-**Architecture:** `store.ts`(360줄)는 지금 타입·상수·인메모리 상태·24개 동기 함수를 한 파일에 갖고 있고, `server.ts`·`exports.ts`·`auth/middleware.ts` 세 곳이 이름으로 직접 import한다. 이 계획은 파일을 `store/types.ts`(타입·상수) / `store/contract.ts`(`CellGuardStore` 인터페이스) / `store/memory.ts`(인메모리 구현체)로 쪼개고, `store.ts`는 **이름을 그대로 유지하는 얇은 facade**로 남긴다. 호출부는 함수명을 바꾸지 않고 `await`만 추가하면 되므로 diff가 리뷰 가능한 크기로 유지된다. 마지막에 구현체와 무관하게 도는 계약 테스트 스위트를 만들어, 2단계 담당자가 "이 테스트를 통과시키면 끝"이라는 완료 판정을 갖게 한다.
+**Architecture:** 핵심은 **인터페이스를 이번에 전부 확정하는 것**이다. 인프라 담당자가 구현을 끝낸 뒤 인터페이스가 바뀌면 다시 불러야 하므로, B3가 필요로 하는 `engageFailsafe`와 B4의 `DeviceCommandPort`까지 지금 인터페이스에 넣는다.
+
+- `store.ts`(360줄, 동기)를 `store/types.ts`(타입·상수) / `store/contract.ts`(`CellGuardStore`) / `store/memory.ts`(인메모리 구현체)로 쪼개고, `store.ts`는 **이름을 그대로 유지하는 얇은 facade**로 남긴다 → 호출부 80곳은 `await`만 붙어 diff가 리뷰 가능하다.
+- Express 4가 async 핸들러의 rejection을 흘려보내므로 `asyncRoute` 래퍼를 거쳐 라우트 57개를 전환한다.
+- B3는 **순수 판정 함수**(`judgeFailsafe`)로 만든다. 텔레메트리가 아직 흐르지 않으므로 실제 구독 배선은 Consumer가 생긴 뒤이고, 이번에는 단위 테스트로 규칙을 고정한다(2026-08-27 결정).
+- B4는 `DeviceCommandPort` 인터페이스 + 로그만 남기는 스텁이다. **백엔드는 Kafka 코드를 한 줄도 쓰지 않는다** — 무엇을 언제 발행할지(도메인 판단)만 코드에 박고, 실제 발행은 인프라 담당자가 같은 인터페이스로 구현한다.
+- 구현체 무관 계약 테스트 스위트가 인수인계의 완료 판정이 된다.
 
 **Tech Stack:** Node.js, TypeScript (strict), Express 4, Vitest 4 (backend에 이미 설치됨 — `backend/vitest.config.ts`).
 
-**Spec:** `docs/implementation_status.md` §"3. B군" B1, `docs/backend_contract.md` §3.4(위험 제어 승인 절차), §1.10(에러 code 목록).
+**Spec:** `docs/implementation_status.md` §"3. B군"(B1~B4), `docs/backend_contract.md` §3.3(Fail-Safe 우선순위)·§3.4(위험 제어 승인 절차)·§1.10(에러 code 목록)·§697(에지 음성 안내), `CLAUDE.md` §"Kafka 토픽 규약"·§"배터리 자산과 이력 추적".
 
 ## Global Constraints
 
 - **PostgreSQL 코드를 쓰지 않는다.** `pg` 쿼리, 마이그레이션 실행, `DATA_MODE=postgres` 게이트 해제 전부 범위 밖이다. `server.ts:331`의 503 fail-closed 가드는 **그대로 둔다**.
+- **Kafka 코드를 쓰지 않는다.** `kafkajs` 같은 라이브러리를 설치하지 않고, 브로커 주소·토픽 이름을 코드에 넣지 않는다. B4는 `DeviceCommandPort` 인터페이스와 로그 스텁까지다.
+- **Fail-Safe 문턱값을 추정해 채우지 않는다.** 실측 전이다 — 압력은 `mode1_backend_spec.md` §13 H8, 모드 2 표면온도는 `mode2_powerbank_diagnosis_spec.md` §8 H2. **`0`을 미설정 sentinel로 두고 그 계층을 비활성화**한다(F21의 `Q36 확정` 방식과 동일). `backend_contract.md:746`의 55/60°C는 **지표 배지 표시용이지 차단 문턱이 아니다** — 그 줄에 *"이 상태로 자동 차단하지 않는다"*고 명시돼 있다.
+- **가짜 텔레메트리를 만들지 않는다.** 온도가 스스로 오르는 시뮬레이터, 테스트 주입 엔드포인트 전부 범위 밖이다(2026-08-27 결정). B3는 순수 함수 + 단위 테스트로만 검증한다.
 - **동작이 바뀌면 안 된다.** 이 계획은 순수 리팩터링이다. 모든 단계에서 기존 테스트(백엔드 26건 · 프론트 57건 · E2E 29건)가 통과해야 하며, API 응답 본문·상태코드·에러 code가 하나도 달라지면 안 된다. 유일한 예외는 Task 1(로그인 완화)이다.
 - **함수 이름을 바꾸지 않는다.** `batteryById`는 계속 `batteryById`다. facade가 이름을 유지하므로 호출부는 `await`만 붙는다. 이름을 바꾸면 diff가 폭발해 리뷰가 불가능해진다.
 - **Express 4는 async 핸들러의 rejection을 잡지 못한다.** `app.get("/x", async (req,res) => {...})`에서 throw하면 에러 미들웨어로 가지 않고 프로세스로 샌다. Task 5의 `asyncRoute` 래퍼를 **반드시** 거쳐야 한다. 57개 핸들러에 `try/catch`를 손으로 넣지 말 것.
@@ -33,7 +42,12 @@
 | `backend/src/store.ts` (개편) | facade — 타입 재수출 + 활성 구현체에 위임하는 이름 유지 함수 |
 | `backend/src/server.ts` (수정) | `asyncRoute` 래퍼 도입, 호출부 `await` |
 | `backend/src/auth/middleware.ts` (수정) | `demoUserForToken`·`demoUserFromRequest` 비동기화, 로그인 완화 |
-| `docs/handover/b1-postgres-store.md` (신규) | 2단계 담당자용 인수인계 명세 |
+| `backend/src/device/port.ts` (신규) | `DeviceCommandPort` 인터페이스 (B4) |
+| `backend/src/device/logging.ts` (신규) | `createLoggingDeviceCommandPort()` — 지금의 스텁 구현체 |
+| `backend/src/failsafe.ts` (신규) | `judgeFailsafe()` 순수 판정 함수 + 타입 (B3) |
+| `backend/src/failsafe.test.ts` (신규) | 판정 규칙 단위 테스트 |
+| `docs/handover/infra-implementations.md` (신규) | 인프라 담당자용 인수인계 — `CellGuardStore` + `DeviceCommandPort` 한 벌 |
+| `docs/handover/b2-session-tagging.md` (신규) | `battery_id` 세션 태깅 규칙 명세 (B2) |
 
 ---
 
@@ -348,6 +362,11 @@ export interface CellGuardStore {
   saveMemo(actorId: string, batteryId: string, memo: string, expectedVersion?: number): Promise<DemoBattery>;
   changeUserStatus(actorId: string, userId: string, status: DemoStatus, reason: string): Promise<DemoUser>;
   changeRelay(actorId: string, batteryId: string, action: "cut" | "restore", reason: string): Promise<DemoRelay>;
+  // 서버 Fail-Safe 전용. 사용자 조작(changeRelay)과 달리 인터락을 **건다**.
+  // 지금 저장소에는 interlockEngaged를 런타임에 true로 만드는 경로가 없어서
+  // (store.ts:157의 픽스처가 유일) B3가 이 메서드를 필요로 한다.
+  // 릴레이 상태 전이 + RELAY_AUTO_CUT 감사 기록이 원자적이어야 한다.
+  engageFailsafe(batteryId: string, triggerCode: string, condition: string): Promise<DemoRelay>;
   startDiagnosis(ownerId: string, kind: "QUICK" | "CAPACITY", batteryId: string, input: Record<string, unknown>): Promise<DemoDiagnosis>;
   abortDiagnosis(ownerId: string, batteryId: string): Promise<DemoDiagnosis>;
 
@@ -445,6 +464,42 @@ export function createMemoryStore(): CellGuardStore & { demoUsers: DemoUser[] } 
     // ...
   };
 ```
+
+- [ ] **Step 1b: `engageFailsafe`를 새로 구현한다**
+
+`changeRelay`와 나란히 두되, **인터락을 거는 유일한 경로**다. `changeRelay`를 고쳐서 겸용하지 말 것 — 사용자 차단과 서버 자동 차단은 계약 §3.3에서 구분되는 별개 사건이다.
+
+```ts
+  const engage = (batteryId: string, triggerCode: string, condition: string): DemoRelay => {
+    const battery = findBattery(batteryId);
+    if (!battery) throw new Error("NOT_FOUND");
+    const current = readRelay(batteryId);
+    const next: DemoRelay = {
+      ...current,
+      state: "OPEN",
+      interlockEngaged: true,
+      interlockCondition: condition,
+      reasonCode: triggerCode,
+      reason: null,
+      changedAt: isoNow(),
+      changedBy: "SYSTEM"
+    };
+    demoRelays.set(batteryId, next);
+    // 상태 전이와 감사 기록은 한 덩어리다 — 계약 §3.4.
+    audit({ actorId: "SYSTEM", action: "RELAY_AUTO_CUT", resource: batteryId, result: "SUCCESS", reason: triggerCode });
+    return { ...next };
+  };
+```
+
+반환 객체에 추가:
+
+```ts
+    async engageFailsafe(batteryId, triggerCode, condition) { return engage(batteryId, triggerCode, condition); },
+```
+
+`readRelay`는 기존 `relayByBattery` 본문을 뽑아낸 동기 지역 함수다(기본값 객체를 반환하는 그 로직).
+
+⚠️ **`engageFailsafe`는 멱등이 아니다.** 이미 인터락이 걸린 배터리에 다시 부르면 감사 로그가 또 쌓인다. 중복 차단을 막는 건 호출부(B3 판정 루프)의 책임이며, Task 13에서 처리한다.
 
 - [ ] **Step 2: `store.ts`를 facade로 줄인다**
 
@@ -915,6 +970,24 @@ export function runStoreContractTests(name: string, makeStore: () => Promise<Cel
       await expect(store.changeRelay("hong", blocked.id, "restore", "복구 사유입니다")).rejects.toThrow("INTERLOCK_LOCKED");
     });
 
+    it("engageFailsafe는 인터락을 걸고 릴레이를 연다", async () => {
+      const battery = (await store.batteries()).find((item) => item.opsStatus === "NORMAL")!;
+      const before = (await store.audits()).length;
+      const relay = await store.engageFailsafe(battery.id, "FAILSAFE_TEMP_IR_OVER_CAP", "TEMP_OVER_CAP");
+      expect(relay.state).toBe("OPEN");
+      expect(relay.interlockEngaged).toBe(true);
+      expect(relay.reasonCode).toBe("FAILSAFE_TEMP_IR_OVER_CAP");
+      expect(relay.changedBy).toBe("SYSTEM");
+      expect((await store.audits()).length).toBe(before + 1);
+      expect((await store.audits())[0].action).toBe("RELAY_AUTO_CUT");
+    });
+
+    it("Fail-Safe로 걸린 인터락은 사용자가 복구할 수 없다", async () => {
+      const battery = (await store.batteries()).find((item) => item.opsStatus === "NORMAL")!;
+      await store.engageFailsafe(battery.id, "FAILSAFE_TEMP_IR_OVER_CAP", "TEMP_OVER_CAP");
+      await expect(store.changeRelay("hong", battery.id, "restore", "복구 사유입니다")).rejects.toThrow("INTERLOCK_LOCKED");
+    });
+
     it("사유가 비면 REASON_REQUIRED", async () => {
       const battery = (await store.batteries()).find((item) => item.opsStatus === "NORMAL")!;
       await expect(store.changeOpsStatus("leelab", battery.id, "WATCH", "   ")).rejects.toThrow("REASON_REQUIRED");
@@ -972,12 +1045,12 @@ Run: `cd backend && npx vitest run src/store/contract.test.ts`
 
 **실패하는 테스트가 있으면 테스트가 아니라 기대값을 확인한다.** 이 스위트는 현재 동작을 기술한 것이므로, 실패한다면 (a) 내가 현재 동작을 잘못 읽었거나 (b) Task 4에서 옮기다 로직이 바뀐 것이다. (b)라면 `git diff`로 원본과 대조해 되돌린다.
 
-Expected: PASS (17건)
+Expected: PASS (19건)
 
 - [ ] **Step 3: 전체 테스트**
 
 Run: `cd backend && npm run typecheck && npx vitest run`
-Expected: PASS (51건 — 기존 26 + demoLogin 6 + asyncRoute 2 + contract 17)
+Expected: PASS (53건 — 기존 26 + demoLogin 6 + asyncRoute 2 + contract 19)
 
 - [ ] **Step 4: 커밋**
 
@@ -992,17 +1065,623 @@ interlock, idempotency namespacing, and defensive copying."
 
 ---
 
-## Part E — 인수인계
+## Part E — B4: 에지 명령 포트
 
-### Task 11: 2단계 담당자용 명세를 쓴다
+### Task 11: `DeviceCommandPort`와 로그 스텁
+
+지금 `changeRelay`가 성공해도 **라즈베리파이는 아무것도 모른다.** 화면만 차단된 척한다. 이 태스크는 "에지에 알려야 한다"는 도메인 사실을 코드에 박고, 실제 발행은 인프라 담당자에게 넘길 경계를 만든다.
 
 **Files:**
-- Create: `docs/handover/b1-postgres-store.md`
-- Modify: `docs/implementation_status.md` (B1 항목을 1단계 완료 / 2단계 대기로 갱신)
+- Create: `backend/src/device/port.ts`, `backend/src/device/logging.ts`
+- Create: `backend/src/device/logging.test.ts`
+- Modify: `backend/src/server.ts` (릴레이 뮤테이션·세션 시작 후 포트 호출)
+
+**Interfaces:**
+- Produces: `DeviceCommandPort`, `createLoggingDeviceCommandPort(): DeviceCommandPort`
+
+- [ ] **Step 1: 포트를 정의한다**
+
+`backend/src/device/port.ts`:
+
+```ts
+// 백엔드 → 에지(라즈베리파이) 아웃바운드 명령. 계약상 `battery-events` 토픽으로
+// 나가지만(CLAUDE.md §Kafka 토픽 규약), **이 인터페이스는 전송 수단을 모른다.**
+// 무엇을 언제 보낼지는 도메인 판단이라 백엔드가 정하고, 실제 발행은 인프라
+// 담당자가 같은 인터페이스로 구현한다.
+//
+// 음성 안내도 같은 경로다 — `docs/backend_contract.md:697`:
+//   "세션 시작/종료는 battery-events 토픽으로 발행되어 라즈베리파이가 로컬
+//    음성파일을 재생한다. 이 발행은 백엔드 책임이며 프론트는 관여하지 않는다."
+//
+// 문구를 만들지 않는다. code + params만 보낸다(mode1_backend_spec.md §787).
+export interface DeviceCommandPort {
+  relayCut(batteryId: string, reasonCode: string | null): Promise<void>;
+  relayRestore(batteryId: string): Promise<void>;
+  sessionStarted(sessionId: string, batteryId: string, targetMode: 1 | 2): Promise<void>;
+  sessionEnded(sessionId: string, endReason: string): Promise<void>;
+}
+```
+
+- [ ] **Step 2: 실패하는 테스트를 쓴다**
+
+`backend/src/device/logging.test.ts`:
+
+```ts
+import { describe, expect, it, vi } from "vitest";
+import { createLoggingDeviceCommandPort } from "./logging.js";
+
+describe("logging device command port", () => {
+  it("릴레이 차단을 구조화된 한 줄로 남긴다", async () => {
+    const log = vi.fn();
+    const port = createLoggingDeviceCommandPort(log);
+    await port.relayCut("DEMO-PACK-001", "FAILSAFE_TEMP_IR_OVER_CAP");
+    expect(log).toHaveBeenCalledWith({
+      command: "relayCut",
+      batteryId: "DEMO-PACK-001",
+      reasonCode: "FAILSAFE_TEMP_IR_OVER_CAP",
+    });
+  });
+
+  it("세션 시작·종료도 남긴다", async () => {
+    const log = vi.fn();
+    const port = createLoggingDeviceCommandPort(log);
+    await port.sessionStarted("ses_1", "DEMO-PACK-001", 1);
+    await port.sessionEnded("ses_1", "SUPERSEDED");
+    expect(log).toHaveBeenNthCalledWith(1, { command: "sessionStarted", sessionId: "ses_1", batteryId: "DEMO-PACK-001", targetMode: 1 });
+    expect(log).toHaveBeenNthCalledWith(2, { command: "sessionEnded", sessionId: "ses_1", endReason: "SUPERSEDED" });
+  });
+});
+```
+
+- [ ] **Step 3: 실패를 확인한다**
+
+Run: `cd backend && npx vitest run src/device/logging.test.ts`
+Expected: FAIL — `Failed to resolve import "./logging.js"`
+
+- [ ] **Step 4: 구현한다**
+
+`backend/src/device/logging.ts`:
+
+```ts
+import type { DeviceCommandPort } from "./port.js";
+
+// 인프라 담당자가 Kafka 프로듀서 구현체를 붙이기 전까지 쓰는 스텁.
+// 명령을 실제로 보내지 않으므로 물리 릴레이는 움직이지 않는다.
+export function createLoggingDeviceCommandPort(
+  log: (entry: Record<string, unknown>) => void = (entry) => console.info("[device]", entry)
+): DeviceCommandPort {
+  return {
+    async relayCut(batteryId, reasonCode) { log({ command: "relayCut", batteryId, reasonCode }); },
+    async relayRestore(batteryId) { log({ command: "relayRestore", batteryId }); },
+    async sessionStarted(sessionId, batteryId, targetMode) { log({ command: "sessionStarted", sessionId, batteryId, targetMode }); },
+    async sessionEnded(sessionId, endReason) { log({ command: "sessionEnded", sessionId, endReason }); },
+  };
+}
+```
+
+- [ ] **Step 5: 통과를 확인한다**
+
+Run: `cd backend && npx vitest run src/device/logging.test.ts`
+Expected: PASS (2건)
+
+- [ ] **Step 6: 호출 지점을 박는다**
+
+`server.ts` 상단에 추가:
+
+```ts
+import { createLoggingDeviceCommandPort } from "./device/logging.js";
+const devicePort = createLoggingDeviceCommandPort();
+```
+
+`relayMutation` 안에서 `changeRelay`가 성공한 **직후**, `broadcast("relay.changed", ...)` **앞에** 넣는다:
+
+```ts
+    if (action === "cut") await devicePort.relayCut(battery.id, relay.reasonCode);
+    else await devicePort.relayRestore(battery.id);
+```
+
+`POST /api/sessions` 핸들러에서 `startSession`이 성공한 직후:
+
+```ts
+    await devicePort.sessionStarted(session.id, session.batteryId, session.targetMode);
+```
+
+⚠️ **`sessionEnded`는 이번에 배선하지 않는다.** 세션 종료는 `startSession`(SUPERSEDED)과 `changeOpsStatus`(BLOCKED) **안에서** 일어나 저장소 내부 사건이라, 포트를 저장소에 주입해야 한다. 그건 저장소를 전송 계층에 묶는 설계라 인수인계 문서에 미결정으로 남긴다(Task 15). 인터페이스에는 메서드를 남겨 둔다.
+
+- [ ] **Step 7: 실패 처리를 확인한다**
+
+포트가 reject하면 `asyncRoute`가 `next(error)`로 넘겨 에러 미들웨어가 500을 준다. **이때 릴레이 상태는 이미 바뀐 뒤**라는 점을 인지할 것 — 저장소 커밋과 에지 발행이 원자적이지 않은 dual-write다. 스텁은 절대 실패하지 않으므로 지금은 드러나지 않고, 해법(outbox)은 Task 15의 인수인계 문서에 미결정으로 적는다. **여기서 outbox를 구현하지 말 것.**
+
+- [ ] **Step 8: 전체 테스트 + 커밋**
+
+Run: `cd backend && npm run typecheck && npx vitest run`
+
+```bash
+git add backend/src/device/ backend/src/server.ts
+git commit -m "feat(device): add the outbound edge command port with a logging stub
+
+changeRelay had no call site reaching the edge at all, so the relay state
+changed in the store and the Raspberry Pi never heard about it. The port
+pins what to publish and when; the Kafka implementation is the infra
+owner's, and the backend never imports a Kafka client."
+```
+
+---
+
+## Part F — B3: Fail-Safe 판정 엔진
+
+### Task 12: `judgeFailsafe` 순수 판정 함수
+
+**Files:**
+- Create: `backend/src/failsafe.ts`, `backend/src/failsafe.test.ts`
+
+**Interfaces:**
+- Produces: `FailsafeTriggerCode`, `FailsafeThresholds`, `FailsafeSample`, `FailsafeVerdict`, `judgeFailsafe(profile, sample, thresholds): FailsafeVerdict`
+
+- [ ] **Step 1: 실패하는 테스트를 쓴다**
+
+`backend/src/failsafe.test.ts`:
+
+```ts
+import { describe, expect, it } from "vitest";
+import { UNSET_THRESHOLDS, judgeFailsafe } from "./failsafe.js";
+import type { FailsafeSample, FailsafeThresholds } from "./failsafe.js";
+
+const sample = (overrides: Partial<FailsafeSample> = {}): FailsafeSample => ({
+  tempContact: null,
+  tempIrSurface: null,
+  tempRiseRateCPerMin: null,
+  pressureRaw: null,
+  pressureBaseline: null,
+  gasRaw: null,
+  ...overrides,
+});
+
+const configured: FailsafeThresholds = {
+  tempContactCapC: 60,
+  tempIrCapC: 60,
+  tempRiseRateCPerMin: 5,
+  pressureRisePct: 30,
+  gasRaw: 800,
+};
+
+describe("judgeFailsafe", () => {
+  it("문턱이 전부 0(미설정)이면 무엇을 넣어도 차단하지 않는다", () => {
+    expect(judgeFailsafe("MODE1_EXTERNAL_CELL_V1", sample({ tempIrSurface: 200 }), UNSET_THRESHOLDS)).toBeNull();
+  });
+
+  it("IR 표면온도가 상한을 넘으면 FAILSAFE_TEMP_IR_OVER_CAP", () => {
+    const verdict = judgeFailsafe("MODE1_EXTERNAL_CELL_V1", sample({ tempIrSurface: 61 }), configured);
+    expect(verdict?.triggerCode).toBe("FAILSAFE_TEMP_IR_OVER_CAP");
+  });
+
+  it("상한과 같으면 차단한다 — 경계는 포함", () => {
+    expect(judgeFailsafe("MODE1_EXTERNAL_CELL_V1", sample({ tempIrSurface: 60 }), configured)).not.toBeNull();
+  });
+
+  it("상한 미만이면 차단하지 않는다", () => {
+    expect(judgeFailsafe("MODE1_EXTERNAL_CELL_V1", sample({ tempIrSurface: 59.9 }), configured)).toBeNull();
+  });
+
+  it("접촉온도 상한도 본다", () => {
+    const verdict = judgeFailsafe("MODE1_EXTERNAL_CELL_V1", sample({ tempContact: 60 }), configured);
+    expect(verdict?.triggerCode).toBe("FAILSAFE_TEMP_CONTACT_OVER_CAP");
+  });
+
+  it("모드 2 프로필에는 접촉온도가 없으므로 그 코드를 내지 않는다", () => {
+    expect(judgeFailsafe("COMBINED_EXISTING_PARTS_V1", sample({ tempContact: 200 }), configured)).toBeNull();
+  });
+
+  it("모드 2 프로필에도 IR은 살아 있다", () => {
+    const verdict = judgeFailsafe("COMBINED_EXISTING_PARTS_V1", sample({ tempIrSurface: 70 }), configured);
+    expect(verdict?.triggerCode).toBe("FAILSAFE_TEMP_IR_OVER_CAP");
+  });
+
+  it("모드 1에는 가스 센서가 없으므로 gas 코드를 내지 않는다", () => {
+    expect(judgeFailsafe("MODE1_EXTERNAL_CELL_V1", sample({ gasRaw: 5000 }), configured)).toBeNull();
+  });
+
+  it("온도 상승률이 문턱을 넘으면 FAILSAFE_TEMP_RISE_RATE", () => {
+    const verdict = judgeFailsafe("MODE1_EXTERNAL_CELL_V1", sample({ tempRiseRateCPerMin: 6 }), configured);
+    expect(verdict?.triggerCode).toBe("FAILSAFE_TEMP_RISE_RATE");
+  });
+
+  it("압력은 baseline 대비 상대 상승률로 판정한다", () => {
+    const over = judgeFailsafe("MODE1_EXTERNAL_CELL_V1", sample({ pressureRaw: 1400, pressureBaseline: 1000 }), configured);
+    expect(over?.triggerCode).toBe("FAILSAFE_PRESSURE_RISE");
+    const under = judgeFailsafe("MODE1_EXTERNAL_CELL_V1", sample({ pressureRaw: 1200, pressureBaseline: 1000 }), configured);
+    expect(under).toBeNull();
+  });
+
+  it("baseline이 없으면 압력으로 판정하지 않는다 — 절대값은 무의미하다", () => {
+    expect(judgeFailsafe("MODE1_EXTERNAL_CELL_V1", sample({ pressureRaw: 99999, pressureBaseline: null }), configured)).toBeNull();
+  });
+
+  it("baseline이 0이면 나눗셈을 하지 않는다", () => {
+    expect(judgeFailsafe("MODE1_EXTERNAL_CELL_V1", sample({ pressureRaw: 500, pressureBaseline: 0 }), configured)).toBeNull();
+  });
+
+  it("측정값이 null인 계층은 건너뛴다", () => {
+    expect(judgeFailsafe("MODE1_EXTERNAL_CELL_V1", sample(), configured)).toBeNull();
+  });
+
+  it("문턱이 0인 계층만 개별로 비활성화된다", () => {
+    const onlyIr: FailsafeThresholds = { ...UNSET_THRESHOLDS, tempIrCapC: 60 };
+    expect(judgeFailsafe("MODE1_EXTERNAL_CELL_V1", sample({ tempContact: 200 }), onlyIr)).toBeNull();
+    expect(judgeFailsafe("MODE1_EXTERNAL_CELL_V1", sample({ tempIrSurface: 60 }), onlyIr)).not.toBeNull();
+  });
+
+  it("여러 계층이 동시에 걸리면 절대온도를 우선 보고한다", () => {
+    const verdict = judgeFailsafe("MODE1_EXTERNAL_CELL_V1", sample({ tempIrSurface: 70, tempRiseRateCPerMin: 20 }), configured);
+    expect(verdict?.triggerCode).toBe("FAILSAFE_TEMP_IR_OVER_CAP");
+  });
+
+  it("판정 결과에 인터락 조건 문자열이 함께 온다", () => {
+    const verdict = judgeFailsafe("MODE1_EXTERNAL_CELL_V1", sample({ tempIrSurface: 70 }), configured);
+    expect(verdict?.condition).toBe("TEMP_OVER_CAP");
+  });
+});
+```
+
+- [ ] **Step 2: 실패를 확인한다**
+
+Run: `cd backend && npx vitest run src/failsafe.test.ts`
+Expected: FAIL — `Failed to resolve import "./failsafe.js"`
+
+- [ ] **Step 3: 구현한다**
+
+`backend/src/failsafe.ts`:
+
+```ts
+// 서버 Fail-Safe 판정. AI 점수와 무관하게 동작한다 — 계약 §3.3:
+//   "가스·압력·음향 임계 초과 또는 온도 상한/상승률 초과 시, AI 판정과
+//    무관하게 즉시 릴레이 차단한다."
+//
+// ⚠️ 문턱값은 아직 실측 전이다(mode1 §13 H8, mode2 §8 H2). `0`을 미설정
+// sentinel로 두고 그 계층을 비활성화한다 — F21의 Q36 확정 방식과 같다.
+// backend_contract.md:746의 55/60°C는 지표 배지 표시용이지 차단 문턱이 아니다.
+
+export type HardwareProfile = "MODE1_EXTERNAL_CELL_V1" | "COMBINED_EXISTING_PARTS_V1";
+
+export type FailsafeTriggerCode =
+  | "FAILSAFE_TEMP_CONTACT_OVER_CAP"
+  | "FAILSAFE_TEMP_IR_OVER_CAP"
+  | "FAILSAFE_TEMP_RISE_RATE"
+  | "FAILSAFE_GAS_OVER_THRESHOLD"
+  | "FAILSAFE_PRESSURE_RISE";
+
+export type FailsafeThresholds = {
+  tempContactCapC: number;
+  tempIrCapC: number;
+  tempRiseRateCPerMin: number;
+  pressureRisePct: number;
+  gasRaw: number;
+};
+
+export type FailsafeSample = {
+  tempContact: number | null;
+  tempIrSurface: number | null;
+  tempRiseRateCPerMin: number | null;
+  pressureRaw: number | null;
+  pressureBaseline: number | null;
+  gasRaw: number | null;
+};
+
+export type FailsafeVerdict = { triggerCode: FailsafeTriggerCode; condition: string } | null;
+
+// 실측 전 기본값. 전부 0이므로 어떤 계층도 차단하지 않는다.
+export const UNSET_THRESHOLDS: FailsafeThresholds = Object.freeze({
+  tempContactCapC: 0,
+  tempIrCapC: 0,
+  tempRiseRateCPerMin: 0,
+  pressureRisePct: 0,
+  gasRaw: 0,
+});
+
+// 하드웨어 프로필별로 실제 존재하는 센서. 없는 센서의 코드는 발생시키지
+// 않는다(계약 §3.3). 모드 1에 MQ-2를 안 단 이유는 CLAUDE.md 참조 —
+// 히터가 상시 발열해 같은 셀의 온도 센서 5개를 오염시킨다.
+const AVAILABLE: Record<HardwareProfile, ReadonlySet<FailsafeTriggerCode>> = {
+  MODE1_EXTERNAL_CELL_V1: new Set([
+    "FAILSAFE_TEMP_CONTACT_OVER_CAP",
+    "FAILSAFE_TEMP_IR_OVER_CAP",
+    "FAILSAFE_TEMP_RISE_RATE",
+    "FAILSAFE_PRESSURE_RISE",
+  ]),
+  COMBINED_EXISTING_PARTS_V1: new Set([
+    "FAILSAFE_TEMP_IR_OVER_CAP",
+    "FAILSAFE_TEMP_RISE_RATE",
+  ]),
+};
+
+// 절대 온도 → 가스 → 압력 → 상승률 순으로 본다. 어느 것이든 차단하지만
+// 보고되는 코드는 하나이므로, 근거가 가장 확실한 것을 앞에 둔다.
+export function judgeFailsafe(profile: HardwareProfile, sample: FailsafeSample, thresholds: FailsafeThresholds): FailsafeVerdict {
+  const available = AVAILABLE[profile];
+  const active = (code: FailsafeTriggerCode, threshold: number) => available.has(code) && threshold > 0;
+
+  if (active("FAILSAFE_TEMP_IR_OVER_CAP", thresholds.tempIrCapC) && sample.tempIrSurface !== null && sample.tempIrSurface >= thresholds.tempIrCapC) {
+    return { triggerCode: "FAILSAFE_TEMP_IR_OVER_CAP", condition: "TEMP_OVER_CAP" };
+  }
+  if (active("FAILSAFE_TEMP_CONTACT_OVER_CAP", thresholds.tempContactCapC) && sample.tempContact !== null && sample.tempContact >= thresholds.tempContactCapC) {
+    return { triggerCode: "FAILSAFE_TEMP_CONTACT_OVER_CAP", condition: "TEMP_OVER_CAP" };
+  }
+  if (active("FAILSAFE_GAS_OVER_THRESHOLD", thresholds.gasRaw) && sample.gasRaw !== null && sample.gasRaw >= thresholds.gasRaw) {
+    return { triggerCode: "FAILSAFE_GAS_OVER_THRESHOLD", condition: "GAS_OVER_THRESHOLD" };
+  }
+  // 압력은 절대값이 무의미하다 — FSR은 예압에 따라 baseline이 매번 달라진다.
+  // baseline은 세션마다 시작 10초 중앙값으로 새로 잡는다(CLAUDE.md).
+  if (active("FAILSAFE_PRESSURE_RISE", thresholds.pressureRisePct)
+    && sample.pressureRaw !== null && sample.pressureBaseline !== null && sample.pressureBaseline > 0) {
+    const risePct = ((sample.pressureRaw - sample.pressureBaseline) / sample.pressureBaseline) * 100;
+    if (risePct >= thresholds.pressureRisePct) return { triggerCode: "FAILSAFE_PRESSURE_RISE", condition: "PRESSURE_RISE" };
+  }
+  if (active("FAILSAFE_TEMP_RISE_RATE", thresholds.tempRiseRateCPerMin) && sample.tempRiseRateCPerMin !== null && sample.tempRiseRateCPerMin >= thresholds.tempRiseRateCPerMin) {
+    return { triggerCode: "FAILSAFE_TEMP_RISE_RATE", condition: "TEMP_RISE_RATE" };
+  }
+  return null;
+}
+```
+
+- [ ] **Step 4: 통과를 확인한다**
+
+Run: `cd backend && npx vitest run src/failsafe.test.ts`
+Expected: PASS (16건)
+
+- [ ] **Step 5: 커밋**
+
+```bash
+git add backend/src/failsafe.ts backend/src/failsafe.test.ts
+git commit -m "feat(failsafe): add the server-side trip decision as a pure function
+
+Thresholds stay at the 0 sentinel because none have been measured yet
+(mode1 §13 H8, mode2 §8 H2), so every layer is inert — the 55/60°C pair
+in the contract is a display band and explicitly not a trip point. Codes
+are gated by hardware profile: mode 1 has no gas sensor because the MQ-2
+heater would pollute the five temperature sensors on the same cell."
+```
+
+### Task 13: 판정 결과를 릴레이·알림에 배선한다
+
+판정 함수를 호출해 실제로 차단까지 가는 경로를 만든다. **텔레메트리 구독은 아직 없으므로 진입점은 하나뿐이다** — 나중에 Consumer가 이 함수를 프레임마다 부르면 된다.
+
+**Files:**
+- Create: `backend/src/failsafeRunner.ts`, `backend/src/failsafeRunner.test.ts`
+- Modify: `backend/src/server.ts` (`relay.autoCut` 발신)
+
+**Interfaces:**
+- Consumes: `judgeFailsafe`, `CellGuardStore.engageFailsafe`, `CellGuardStore.relayByBattery`, `DeviceCommandPort.relayCut`
+- Produces: `evaluateFailsafe(deps, batteryId, profile, sample, thresholds): Promise<FailsafeVerdict>`
+
+- [ ] **Step 1: 실패하는 테스트를 쓴다**
+
+`backend/src/failsafeRunner.test.ts`:
+
+```ts
+import { describe, expect, it, vi } from "vitest";
+import { evaluateFailsafe } from "./failsafeRunner.js";
+import type { FailsafeSample, FailsafeThresholds } from "./failsafe.js";
+
+const tripping: FailsafeSample = { tempContact: null, tempIrSurface: 70, tempRiseRateCPerMin: null, pressureRaw: null, pressureBaseline: null, gasRaw: null };
+const calm: FailsafeSample = { ...tripping, tempIrSurface: 20 };
+const thresholds: FailsafeThresholds = { tempContactCapC: 60, tempIrCapC: 60, tempRiseRateCPerMin: 0, pressureRisePct: 0, gasRaw: 0 };
+
+function deps(interlockEngaged = false) {
+  return {
+    relayByBattery: vi.fn().mockResolvedValue({ batteryId: "B1", state: interlockEngaged ? "OPEN" : "CLOSED", interlockEngaged, interlockCondition: null, reasonCode: null, reason: null, changedAt: "", changedBy: "SYSTEM" }),
+    engageFailsafe: vi.fn().mockResolvedValue({ batteryId: "B1", state: "OPEN", interlockEngaged: true, interlockCondition: "TEMP_OVER_CAP", reasonCode: "FAILSAFE_TEMP_IR_OVER_CAP", reason: null, changedAt: "", changedBy: "SYSTEM" }),
+    relayCut: vi.fn().mockResolvedValue(undefined),
+    onAutoCut: vi.fn(),
+  };
+}
+
+describe("evaluateFailsafe", () => {
+  it("조건이 걸리면 인터락을 걸고 에지에 알리고 autoCut을 푸시한다", async () => {
+    const d = deps();
+    const verdict = await evaluateFailsafe(d, "B1", "MODE1_EXTERNAL_CELL_V1", tripping, thresholds);
+    expect(verdict?.triggerCode).toBe("FAILSAFE_TEMP_IR_OVER_CAP");
+    expect(d.engageFailsafe).toHaveBeenCalledWith("B1", "FAILSAFE_TEMP_IR_OVER_CAP", "TEMP_OVER_CAP");
+    expect(d.relayCut).toHaveBeenCalledWith("B1", "FAILSAFE_TEMP_IR_OVER_CAP");
+    expect(d.onAutoCut).toHaveBeenCalledOnce();
+  });
+
+  it("조건이 없으면 아무것도 하지 않는다", async () => {
+    const d = deps();
+    expect(await evaluateFailsafe(d, "B1", "MODE1_EXTERNAL_CELL_V1", calm, thresholds)).toBeNull();
+    expect(d.engageFailsafe).not.toHaveBeenCalled();
+    expect(d.relayCut).not.toHaveBeenCalled();
+    expect(d.onAutoCut).not.toHaveBeenCalled();
+  });
+
+  it("이미 인터락이 걸려 있으면 다시 차단하지 않는다 — 감사 로그 폭주 방지", async () => {
+    const d = deps(true);
+    expect(await evaluateFailsafe(d, "B1", "MODE1_EXTERNAL_CELL_V1", tripping, thresholds)).toBeNull();
+    expect(d.engageFailsafe).not.toHaveBeenCalled();
+  });
+
+  it("에지 명령이 실패해도 인터락은 유지된다", async () => {
+    const d = deps();
+    d.relayCut.mockRejectedValue(new Error("broker down"));
+    await expect(evaluateFailsafe(d, "B1", "MODE1_EXTERNAL_CELL_V1", tripping, thresholds)).rejects.toThrow("broker down");
+    expect(d.engageFailsafe).toHaveBeenCalledOnce();
+  });
+});
+```
+
+- [ ] **Step 2: 실패를 확인한다**
+
+Run: `cd backend && npx vitest run src/failsafeRunner.test.ts`
+Expected: FAIL — `Failed to resolve import "./failsafeRunner.js"`
+
+- [ ] **Step 3: 구현한다**
+
+`backend/src/failsafeRunner.ts`:
+
+```ts
+import { judgeFailsafe } from "./failsafe.js";
+import type { FailsafeSample, FailsafeThresholds, FailsafeVerdict, HardwareProfile } from "./failsafe.js";
+import type { DemoRelay } from "./store.js";
+
+export type FailsafeDeps = {
+  relayByBattery(batteryId: string): Promise<DemoRelay>;
+  engageFailsafe(batteryId: string, triggerCode: string, condition: string): Promise<DemoRelay>;
+  relayCut(batteryId: string, reasonCode: string | null): Promise<void>;
+  onAutoCut(relay: DemoRelay, verdict: NonNullable<FailsafeVerdict>): void;
+};
+
+// 판정 → 차단 → 에지 통보 → WS 푸시. 텔레메트리 프레임마다 불릴 자리이며,
+// 지금은 Consumer가 없어 호출부가 없다(2026-08-27 결정 — 순수 로직만 만들고
+// 구독 배선은 Kafka Consumer가 생긴 뒤).
+export async function evaluateFailsafe(
+  deps: FailsafeDeps,
+  batteryId: string,
+  profile: HardwareProfile,
+  sample: FailsafeSample,
+  thresholds: FailsafeThresholds
+): Promise<FailsafeVerdict> {
+  const verdict = judgeFailsafe(profile, sample, thresholds);
+  if (!verdict) return null;
+  // 이미 걸려 있으면 재차단하지 않는다. engageFailsafe는 멱등이 아니라서
+  // 매 프레임 부르면 감사 로그가 초당 10건씩 쌓인다.
+  const current = await deps.relayByBattery(batteryId);
+  if (current.interlockEngaged) return null;
+  const relay = await deps.engageFailsafe(batteryId, verdict.triggerCode, verdict.condition);
+  // 인터락을 먼저 세운 뒤 에지에 알린다. 순서가 뒤바뀌면 에지 명령이 실패했을 때
+  // 서버는 안전하다고 믿는데 실제로는 차단되지 않은 상태가 된다.
+  await deps.relayCut(batteryId, verdict.triggerCode);
+  deps.onAutoCut(relay, verdict);
+  return verdict;
+}
+```
+
+- [ ] **Step 4: 통과를 확인한다**
+
+Run: `cd backend && npx vitest run src/failsafeRunner.test.ts`
+Expected: PASS (4건)
+
+- [ ] **Step 5: `relay.autoCut` 발신 함수를 만든다**
+
+`server.ts`에 아래를 추가한다. 페이로드는 계약 `backend_contract.md:1628`이 정본이다.
+
+```ts
+// 계약 §1628: { batteryId, batteryLabel, representativeTempC,
+//               representativeTempSource, triggerCode, cutAt }
+// relay.changed에 섞지 않는다(§1646) — 사용자 차단과 구분이 안 된다.
+function broadcastAutoCut(battery: DemoBattery, relay: DemoRelay, triggerCode: string): void {
+  const payload = batteryJson(battery)!;
+  broadcast("relay.autoCut", {
+    batteryId: battery.id,
+    batteryLabel: battery.label,
+    representativeTempC: payload.latest.representativeTempC,
+    representativeTempSource: payload.latest.representativeTempSource,
+    triggerCode,
+    cutAt: relay.changedAt
+  }, null, battery.id);
+}
+```
+
+⚠️ `batteryJson`이 Part C에서 async가 됐다면 이 함수도 `async`가 되고 호출부에 `await`가 필요하다. 타입체커가 짚어준다.
+
+- [ ] **Step 5b: Consumer가 부를 진입점 하나를 내보낸다**
+
+`broadcastAutoCut`을 쓰지 않는 채로 두면 죽은 코드가 되어 리뷰에서 지워질 수 있다. 대신 **배선이 끝난 진입점 하나**로 묶어 내보낸다 — 나중에 Consumer가 이것만 부르면 된다.
+
+`server.ts`에 추가:
+
+```ts
+// 텔레메트리 Consumer가 생기면 프레임마다 이 함수를 부른다. 지금은 호출부가
+// 없다(2026-08-27 결정 — 순수 로직만 만들고 구독 배선은 Consumer 담당자 몫).
+// docs/handover/infra-implementations.md가 이 함수를 진입점으로 명시한다.
+export async function runFailsafe(
+  batteryId: string,
+  profile: HardwareProfile,
+  sample: FailsafeSample,
+  thresholds: FailsafeThresholds
+): Promise<FailsafeVerdict> {
+  const battery = await batteryById(batteryId);
+  if (!battery) return null;
+  return evaluateFailsafe({
+    relayByBattery,
+    engageFailsafe,
+    relayCut: (id, code) => devicePort.relayCut(id, code),
+    onAutoCut: (relay, verdict) => { void broadcastAutoCut(battery, relay, verdict.triggerCode); }
+  }, batteryId, profile, sample, thresholds);
+}
+```
+
+필요한 import를 `server.ts` 상단에 추가한다:
+
+```ts
+import { evaluateFailsafe } from "./failsafeRunner.js";
+import { UNSET_THRESHOLDS } from "./failsafe.js";
+import type { FailsafeSample, FailsafeThresholds, FailsafeVerdict, HardwareProfile } from "./failsafe.js";
+```
+
+⚠️ **`UNSET_THRESHOLDS`를 기본값으로 박아 넣지 말 것.** `runFailsafe`는 문턱을 인자로 받는다 — 실측값이 나왔을 때 설정에서 주입할 자리를 열어두기 위해서다.
+
+- [ ] **Step 6: 전체 테스트 + 커밋**
+
+Run: `cd backend && npm run typecheck && npx vitest run`
+
+```bash
+git add backend/src/failsafeRunner.ts backend/src/failsafeRunner.test.ts backend/src/server.ts
+git commit -m "feat(failsafe): wire the trip decision to interlock, edge, and WS
+
+Engages the interlock before telling the edge, so a failed edge command
+cannot leave the server believing it is safe. Skips batteries already
+interlocked because engageFailsafe is not idempotent and a 10Hz frame
+loop would otherwise flood the audit log."
+```
+
+---
+
+## Part G — B2: 세션 태깅 명세
+
+### Task 14: `battery_id` 태깅 규칙 문서
+
+코드가 아니라 **인프라 담당자의 Consumer가 필요로 하는 규칙**이다. 에지는 `device_id`만 싣고 `battery_id`를 모르므로(CLAUDE.md), 적재 시점에 백엔드 세션 정보로 귀속해야 한다. 그 적재 코드가 Consumer 안에 있어서 규칙만 넘긴다.
+
+**Files:**
+- Create: `docs/handover/b2-session-tagging.md`
 
 - [ ] **Step 1: 명세를 쓴다**
 
-`docs/handover/b1-postgres-store.md`에 아래 내용을 담는다. **각 항목을 실제 값으로 채워 쓸 것 — "적절히", "필요시" 같은 표현 금지.**
+아래 5개 항목을 **실제 값으로** 채워 쓴다. 판단이 필요한 곳은 결정을 내리고 근거를 적는다.
+
+1. **왜 필요한가** — 에지 JSON에 `device_id`만 있고 `battery_id`가 없다(CLAUDE.md 센서 스키마). `telemetry_metric.battery_id`는 적재 시점에 채워야 한다.
+2. **활성 세션 조회 방법** — Consumer가 `measurement_session`을 직접 읽는다. 조건은 `device_id = <프레임의 device_id> and status = 'ACTIVE'`. **사용자당 진단기 1대·설비당 활성 세션 1개**로 확정돼 있으므로(계약 §3.2) 결과는 0건 또는 1건이다. 프레임마다 조회하면 100ms × N이라 부담이므로 **`device_id → 세션` 캐시를 두고 세션 시작·종료 시 무효화**한다.
+3. **활성 세션이 없을 때** — `battery_id = null`로 적재한다. 버리지 않는다. 스키마가 이미 `battery_id text references battery_asset(id) on delete set null`로 nullable이다. 세션 밖 프레임은 진단기가 켜져 있고 배터리를 안 물린 상태라 정상이며, 나중에 원인 분석에 쓸 수 있다.
+4. **세션 전환 경계 프레임** — 세션 종료 시각 이후 도착한 늦은 프레임을 이전 세션에 붙이지 않는다. **판정 기준은 프레임의 `measured_at`(에지 시각)이 아니라 적재 시점의 활성 세션**이다. 이유: 에지와 서버의 시계가 동기화돼 있지 않고(NTP 미확정), 시계 차이로 세션이 뒤섞이면 이력이 오염된다. 대가로 순단 시 최대 수 프레임이 다음 세션에 붙을 수 있으나, 100ms 프레임 몇 개는 분석에 영향이 없다.
+5. **완료 판정** — 세션 시작~종료 사이 프레임의 `battery_id`가 100% 채워지고, 세션 밖 프레임이 어떤 배터리에도 귀속되지 않는다.
+
+- [ ] **Step 2: 커밋**
+
+```bash
+git add docs/handover/b2-session-tagging.md
+git commit -m "docs: specify battery_id session tagging for the consumer
+
+The edge only knows device_id, so attribution happens at ingest — inside
+the consumer, which is the infra owner's code. This pins the four rules
+that are domain decisions: how to look up the session, what to do with
+frames outside one, which clock decides, and the cache invalidation
+points."
+```
+
+---
+
+## Part H — 인수인계
+
+### Task 15: 인프라 담당자용 명세를 쓴다
+
+**Files:**
+- Create: `docs/handover/infra-implementations.md`
+- Modify: `docs/implementation_status.md` (B1~B4 상태 갱신)
+
+- [ ] **Step 1: 명세를 쓴다**
+
+`docs/handover/infra-implementations.md`에 아래 내용을 담는다. **각 항목을 실제 값으로 채워 쓸 것 — "적절히", "필요시" 같은 표현 금지.**
+
+문서를 두 부로 나눈다: **1부 `CellGuardStore`(PostgreSQL)**, **2부 `DeviceCommandPort`(Kafka)**. 아래 1~10은 1부, 11~14는 2부다.
 
 1. **무엇을 만드나** — `backend/src/store/postgres.ts`에 `createPostgresStore(pool: pg.Pool): CellGuardStore`를 구현한다. 인터페이스는 `backend/src/store/contract.ts`가 정본이다.
 2. **완료 판정** — `backend/src/store/contract.test.ts` 맨 아래에 아래 한 줄을 추가하고 전부 통과시킨다.
@@ -1013,7 +1692,8 @@ interlock, idempotency namespacing, and defensive copying."
 4. **⚠️ 먼저 풀어야 할 외래키 문제** — `battery_asset.owner_user_id`와 `measurement_session.owner_user_id`가 `not null references "user"(id)`인데, `"user"`는 Better Auth 코어 테이블이라 **아직 생성되지 않았고**(`npm run auth:generate` 미실행), 데모 사용자 `hong`·`kimeng`·`leelab`·`parktest`는 `store/memory.ts` 안에만 있다. 둘 중 하나를 골라야 한다.
    - (a) Better Auth 스키마를 생성·적용한 뒤, `AUTH_MODE=demo`로 부팅할 때 데모 4명을 `user`+`app_user_profile`에 `on conflict do nothing`으로 seed한다 — **권장**. 참조무결성이 유지되고 나중에 `AUTH_MODE=betterauth`로 바꿔도 스키마를 안 건드린다.
    - (b) 두 FK를 제거하고 `text` 컬럼으로 둔다 — 선행 작업이 없지만 고아 row를 DB가 막지 못한다.
-5. **반드시 한 트랜잭션에 넣어야 하는 메서드 5개** — `changeRelay`, `changeOpsStatus`, `saveMemo`, `changeUserStatus`, `startSession`. 전부 도메인 변경 + `audit_log` 쓰기를 함께 하며, 계약 §3.4가 *"승인 후 명령 실행과 감사 기록을 원자적으로 처리"*를 요구한다. `backend/src/db.ts`의 `inTransaction()`을 쓴다.
+5. **반드시 한 트랜잭션에 넣어야 하는 메서드 6개** — `changeRelay`, `engageFailsafe`, `changeOpsStatus`, `saveMemo`, `changeUserStatus`, `startSession`. 전부 도메인 변경 + `audit_log` 쓰기를 함께 하며, 계약 §3.4가 *"승인 후 명령 실행과 감사 기록을 원자적으로 처리"*를 요구한다. `backend/src/db.ts`의 `inTransaction()`을 쓴다.
+   ⚠️ **`engageFailsafe`가 가장 중요하다.** 서버 Fail-Safe가 릴레이를 끊는 유일한 경로이며, 상태만 바뀌고 감사 로그가 없으면 안전 사고 조사가 불가능하다.
 6. **애플리케이션 체크에 의존하지 말 것** — 마이그레이션에 부분 유니크 인덱스가 이미 있다.
    ```sql
    unique (device_id)  where status = 'ACTIVE'    -- measurement_session
@@ -1024,16 +1704,31 @@ interlock, idempotency namespacing, and defensive copying."
 7. **에러 code는 새로 만들지 않는다** — `docs/backend_contract.md` §1.10 목록이 고정이다. `server.ts`의 `errorFromDomain()`이 code→HTTP 상태를 매핑한다.
 8. **방어 복사** — 반환한 객체를 호출부가 고쳐도 저장소가 오염되면 안 된다. SQL은 매번 새 객체를 만들므로 자연히 지켜지지만, 캐시를 넣는다면 이 규칙을 깨지 않아야 한다.
 9. **게이트를 여는 시점** — 구현이 끝나면 `backend/src/server.ts:331`의 `DATA_MODE=postgres` 503 가드를 풀고, `backend/src/store.ts`의 `createMemoryStore()` 선택을 `DATA_MODE`에 따라 분기한다. **그전까지는 503이 정상이다.**
-10. **최종 확인** — `AUTH_MODE=demo DATA_MODE=postgres`로 띄워 브라우저에서 로그인 → 배터리 연결 → 대시보드 → 릴레이 차단까지 돌고, **프로세스를 재시작해도 데이터가 남아 있을 것.**
+10. **최종 확인** — `AUTH_MODE=demo DATA_MODE=postgres`로 띄워 브라우저에서 로그인 → 배터리 연결 → 대시보드 → 릴레이 차단까지 돌고, **프로세스를 재시작해도 데이터가 남아 있을 것.** 특히 `engageFailsafe`로 걸린 인터락이 재시작 후에도 유지되어 `409 INTERLOCK_LOCKED`가 그대로 나와야 한다 — 이게 Fail-Safe가 안전 기능으로 성립하는 조건이다.
+
+**2부 — `DeviceCommandPort` (Kafka)**
+
+11. **무엇을 만드나** — `backend/src/device/kafka.ts`에 `createKafkaDeviceCommandPort(...)`를 구현하고 `backend/src/device/logging.ts`의 스텁을 대체한다. 인터페이스는 `backend/src/device/port.ts`가 정본이며 메서드 4개다. `battery-events` 토픽으로 발행한다(CLAUDE.md §Kafka 토픽 규약).
+12. **메시지에 문구를 넣지 않는다** — `code` + `params`만 보낸다(`mode1_backend_spec.md:787`). 라즈베리파이가 로컬 음성 파일을 고르는 데 쓰므로 한국어 문장을 서버가 만들지 않는다.
+13. **⚠️ 미결정 — dual-write 원자성.** 지금은 저장소 커밋 후 포트를 부른다. 브로커가 죽으면 **릴레이 상태는 바뀌었는데 에지는 모르는** 상태가 된다. 계약 §3.4는 *"승인 후 명령 실행과 감사 기록을 원자적으로 처리하고 실패 시 성공 응답이나 성공 이벤트를 내보내지 않는다"*를 요구하므로 이대로는 계약 위반이다. **권장 해법은 outbox 테이블** — 저장소 트랜잭션 안에 발행할 메시지를 같이 INSERT하고, 별도 워커가 그걸 읽어 Kafka로 보낸 뒤 지운다. 이러면 DB 트랜잭션 하나로 원자성이 확보된다. **이 결정은 인프라 담당자가 내리되, 백엔드 담당자와 합의한다** — 도메인 코드의 호출 지점이 바뀔 수 있다.
+14. **Fail-Safe 구독 진입점** — Consumer가 `battery-raw-metrics` 프레임을 처리할 때 `backend/src/server.ts`가 내보내는 `runFailsafe(batteryId, profile, sample, thresholds)`를 프레임마다 부르면 된다. 판정·인터락·에지 통보·WS 푸시가 그 안에 이미 배선돼 있다. **`thresholds`는 인자로 받는다** — 현재 값은 전부 `0`(미설정)이라 어떤 계층도 차단하지 않으며, 하드웨어 실측 후 설정에서 주입한다. `sample`을 만들려면 `FailsafeSample`의 6개 필드를 프레임에서 채워야 하고, 그중 `pressureBaseline`은 **세션마다 시작 10초 중앙값으로 새로 잡은 값**이다(CLAUDE.md — FSR은 예압에 따라 baseline이 매번 달라져 절대값이 무의미하다).
+15. **⚠️ 미결정 — `sessionEnded` 배선 지점.** 세션 종료는 `startSession`(SUPERSEDED)과 `changeOpsStatus`(BLOCKED) **안에서** 일어나는 저장소 내부 사건이라, 지금 라우트 레벨에서는 훅을 걸 수 없다. 선택지는 ① 저장소에 포트를 주입한다(저장소가 전송 계층을 알게 되어 계층이 섞인다) ② 저장소가 "종료된 세션 목록"을 반환하고 라우트가 발행한다(시그니처 변경) ③ outbox를 쓰면 저장소가 outbox에 넣기만 하므로 자연히 해결된다. **13번을 outbox로 정하면 14번도 같이 풀린다.**
 
 - [ ] **Step 2: 상태 문서를 갱신한다**
 
-`docs/implementation_status.md`의 §3 B1 항목에 아래를 반영한다.
+`docs/implementation_status.md`의 §3 B군 네 항목을 전부 갱신한다.
 
-- 제목을 `### B1. store.ts → PostgreSQL 리포지토리 교체 — **1단계 완료(2026-08-27) / 2단계 대기**`로 바꾼다
-- 1단계 결과를 적는다: 인터페이스 `store/contract.ts`, 인메모리 구현체 `store/memory.ts`, facade `store.ts`, 계약 테스트 16건, 라우트 57개 async 전환, `asyncRoute` 래퍼
-- 2단계는 별도 담당자이며 명세가 `docs/handover/b1-postgres-store.md`에 있다고 링크한다
-- §"현재 저장소 상태" 표의 `백엔드 도메인 데이터 저장` 행을 `미착수` → `인터페이스 분리 완료 / PostgreSQL 구현체 대기`로 고친다
+- **B1** — 제목을 `### B1. store.ts → PostgreSQL 리포지토리 교체 — **1단계 완료(2026-08-27) / 2단계 인계**`로. 1단계 결과를 적는다: 인터페이스 `store/contract.ts`, 인메모리 구현체 `store/memory.ts`, facade `store.ts`, 계약 테스트 19건, 라우트 57개 async 전환, `asyncRoute` 래퍼.
+- **B2** — `**명세 완료(2026-08-27) / Consumer 구현 인계**`. 규칙 문서를 `docs/handover/b2-session-tagging.md`로 링크한다.
+- **B3** — `**판정 엔진 완료(2026-08-27) / 문턱 실측·구독 배선 대기**`. `judgeFailsafe`·`evaluateFailsafe`·`engageFailsafe`·`relay.autoCut` 발신이 구현됐고, **문턱값이 전부 `0`이라 현재 어떤 계층도 차단하지 않는다**는 점과, 텔레메트리 구독 배선은 Consumer가 생긴 뒤라는 점을 명시한다.
+- **B4** — `**포트 완료(2026-08-27) / Kafka 구현체 인계**`. `DeviceCommandPort` + 로그 스텁이며 dual-write 원자성과 `sessionEnded` 배선이 미결정이라고 적는다.
+- §"현재 저장소 상태" 표에서:
+  - `백엔드 도메인 데이터 저장` 행을 `미착수` → `인터페이스 분리 완료 / PostgreSQL 구현체 대기`
+  - `백엔드 실시간 스트림 (WS 발신)` 행의 `relay.autoCut` 미발신 서술을 `구현됨(문턱 미설정이라 휴면)`으로
+  - 새 행 `에지 명령 경로` 추가 — `DeviceCommandPort + 로그 스텁 / Kafka 구현체 대기`
+- §4 C1 표의 `relay.autoCut` 줄을 `✗` → `✓ (문턱 미설정이라 휴면)`으로 고친다.
+
+⚠️ **`diagnosis.progress`/`.done`/`.aborted`는 여전히 `✗`다.** F21이 `SAFETY_PROFILE_NOT_READY`로 fail-closed라 도달 가능한 코드 경로가 없다 — 이 계획에서 건드리지 않는다.
 
 - [ ] **Step 3: 문서 린터를 돌린다**
 
@@ -1043,12 +1738,15 @@ Expected: `위반 0건`
 - [ ] **Step 4: 커밋**
 
 ```bash
-git add docs/handover/b1-postgres-store.md docs/implementation_status.md
-git commit -m "docs: hand the PostgreSQL store implementation over as stage 2
+git add docs/handover/infra-implementations.md docs/implementation_status.md
+git commit -m "docs: hand both infra implementations over in one spec
 
-The contract test suite is the acceptance criterion. Flags the user-table
-foreign key that blocks any insert under AUTH_MODE=demo, and names the
-five methods that must stay atomic with their audit-log write."
+CellGuardStore (PostgreSQL) and DeviceCommandPort (Kafka) share one
+handover so the boundary is stated once. The contract test suite is the
+store's acceptance criterion. Flags the user-table foreign key that
+blocks any insert under AUTH_MODE=demo, the six methods that must stay
+atomic with their audit write, and the dual-write gap that an outbox
+would close."
 ```
 
 ---
@@ -1056,16 +1754,30 @@ five methods that must stay atomic with their audit-log write."
 ## 완료 판정 (전체)
 
 - [ ] `cd backend && npm run typecheck` — 오류 0건
-- [ ] `cd backend && npx vitest run` — 51건 PASS
+- [ ] `cd backend && npx vitest run` — **75건 PASS** (기존 26 + demoLogin 6 + asyncRoute 2 + contract 19 + device 2 + failsafe 16 + failsafeRunner 4)
 - [ ] `cd frontend && npm run typecheck && npx vitest run && npx playwright test` — 57건 + 29건 PASS, **프론트 소스는 한 줄도 안 고쳤을 것**
 - [ ] 단일 오리진(`localhost:3005`)에서 로그인 → 배터리 연결 → 대시보드 → 릴레이 차단까지 손으로 동작, 브라우저 콘솔 에러 0
 - [ ] 아무 비밀번호로 로그인되고, 릴레이 재인증은 **로그인 때 친 값만** 통과
-- [ ] `docs/handover/b1-postgres-store.md`가 존재하고 FK 문제·트랜잭션 5개·완료 판정을 담고 있음
+- [ ] 릴레이를 차단하면 서버 로그에 `[device] { command: 'relayCut', ... }`가 찍힌다
+- [ ] `docs/handover/infra-implementations.md`가 존재하고 FK 문제·원자 메서드 6개·dual-write 미결정·완료 판정을 담고 있음
+- [ ] `docs/handover/b2-session-tagging.md`가 존재하고 규칙 5개를 실제 값으로 담고 있음
+- [ ] `docs/implementation_status.md`의 B1~B4 상태가 갱신돼 있음
+
+## 인계 후 남는 것 (백엔드 담당자 몫 아님 / 또는 실측 대기)
+
+- **PostgreSQL 구현체** — 인프라 담당자, 명세 1부
+- **Kafka 구현체 + outbox 결정** — 인프라 담당자, 명세 2부
+- **Consumer의 `battery_id` 태깅** — 인프라 담당자, `b2-session-tagging.md`
+- **Fail-Safe 문턱값** — 하드웨어 실측 후. `mode1_backend_spec.md` §13 H8(압력 baseline·상승률), `mode2_powerbank_diagnosis_spec.md` §8 H2(모드 2 표면온도). 값이 나오면 `UNSET_THRESHOLDS`를 설정값으로 바꾸는 것만으로 계층이 살아난다.
+- **텔레메트리 구독 배선** — `evaluateFailsafe`를 프레임마다 부르는 호출부. Consumer가 생긴 뒤.
 
 ## 범위 밖 (건드리지 말 것)
 
-- PostgreSQL 구현체, 마이그레이션 실행, `DATA_MODE=postgres` 게이트 해제 — 2단계
-- B3 Fail-Safe 판정 — B1 이후
+- PostgreSQL 구현체, 마이그레이션 실행, `DATA_MODE=postgres` 게이트 해제
+- Kafka 클라이언트 코드, 브로커 주소, 토픽 이름
+- Fail-Safe 문턱값을 추정해 채우는 것, 가짜 텔레메트리 생성
+- outbox 테이블 구현 — 인수인계 문서에 미결정으로만 남긴다
 - Better Auth 실인증(C2b), WS upgrade의 `DATA_MODE` 체크 — 보류 항목
 - 카카오톡 발송 — 보류 항목
+- `diagnosis.*` WS 발신 — F21이 fail-closed라 도달 불가
 - `GET /api/trends/export.pdf` — 범위 밖 확정
