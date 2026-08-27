@@ -10,6 +10,7 @@ import { fromNodeHeaders, toNodeHandler } from "better-auth/node";
 import { auth } from "./auth.js";
 import { corsOrigins, env } from "./config/env.js";
 import { demoPasswordMatches, demoUserForToken, issueDemoToken, requireRole, requireSession, revokeDemoToken, setDemoPassword } from "./auth/middleware.js";
+import { resolveDemoUser } from "./demoLogin.js";
 import { writeAuditLog } from "./auth/audit.js";
 import { detectGradeTransition, gradeForScore, type Grade } from "./realtime/grade.js";
 import { createEventLog } from "./realtime/eventLog.js";
@@ -308,10 +309,12 @@ app.post("/api/demo/login", (req, res) => {
     apiError(res, 404, "NOT_FOUND", "Demo authentication is disabled.");
     return;
   }
-  const email = typeof req.body?.email === "string" ? req.body.email.trim().toLowerCase() : "";
+  const email = typeof req.body?.email === "string" ? req.body.email : "";
   const password = typeof req.body?.password === "string" ? req.body.password : "";
-  const user = demoUsers.find((candidate) => candidate.email === email);
-  if (!user || !demoPasswordMatches(user.id, password)) {
+  // 비밀번호는 검증하지 않고 기억만 한다. 재인증(릴레이 차단·비밀번호 변경)은
+  // 계속 진짜로 검사하므로, 로그인 때 친 값을 그대로 쳐야 통과한다.
+  const user = resolveDemoUser(email, demoUsers);
+  if (!user) {
     apiError(res, 401, "UNAUTHENTICATED", "Demo credentials are invalid.");
     return;
   }
@@ -319,6 +322,7 @@ app.post("/api/demo/login", (req, res) => {
     apiError(res, 403, "ACCOUNT_SUSPENDED", "The demo account is suspended.");
     return;
   }
+  setDemoPassword(user.id, password);
   const token = issueDemoToken({ id: user.id, email: user.email, name: user.name, role: user.role, status: user.status });
   recordAudit({ actorId: user.id, action: "ADMIN_LOGIN", resource: "/api/demo/login", result: "SUCCESS", reason: null });
   res.json({ token, user: { id: user.id, name: user.name, email: user.email, role: user.role, status: user.status } });
