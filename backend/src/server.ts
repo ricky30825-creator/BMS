@@ -16,6 +16,7 @@ import { detectGradeTransition, gradeForScore, type Grade } from "./realtime/gra
 import { createEventLog } from "./realtime/eventLog.js";
 import { createExportJob, exportJobById, scheduleExportCompletion, signDownload, verifyDownload } from "./exports.js";
 import { DEFAULT_VOICE_ALERT_SETTINGS, applyVoiceAlertPatch } from "./voiceAlert.js";
+import { asyncRoute } from "./asyncRoute.js";
 import {
   F21_THRESHOLDS,
   abortDiagnosis,
@@ -453,12 +454,12 @@ app.patch("/api/settings/voice-alert", requireSession, (req, res) => {
   } catch (error) { errorFromDomain(res, error); }
 });
 
-app.get("/api/batteries", requireSession, (req, res) => {
+app.get("/api/batteries", requireSession, asyncRoute(async (req, res) => {
   const mode = req.query.mode === "1" || req.query.mode === "2" ? Number(req.query.mode) : null;
-  const list = batteries(req.userRole === "ADMIN" ? undefined : actorId(req)).filter((battery) => !mode || battery.targetMode === mode);
-  const connectedBatteryId = activeSession(actorId(req))?.batteryId;
+  const list = (await batteries(req.userRole === "ADMIN" ? undefined : actorId(req))).filter((battery) => !mode || battery.targetMode === mode);
+  const connectedBatteryId = (await activeSession(actorId(req)))?.batteryId;
   res.json({ items: list.map((battery) => ({ ...batteryJson(battery), isConnected: battery.id === connectedBatteryId })), page: { number: 1, size: list.length || 20, total: list.length, totalPages: list.length ? 1 : 0 } });
-});
+}));
 
 app.post("/api/batteries", requireSession, (req, res) => {
   const targetMode = req.body?.targetMode === 1 || req.body?.targetMode === 2 ? req.body.targetMode : null;
