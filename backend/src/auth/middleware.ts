@@ -45,10 +45,10 @@ export function issueDemoToken(user: AppUser): string {
   return token;
 }
 
-export function demoUserForToken(token: string | null | undefined): AppUser | null {
+export async function demoUserForToken(token: string | null | undefined): Promise<AppUser | null> {
   if (env.AUTH_MODE !== "demo" || !token) return null;
   const userId = demoTokens.get(token);
-  const user = userId ? userById(userId) : undefined;
+  const user = userId ? await userById(userId) : undefined;
   return user ? { id: user.id, email: user.email, name: user.name, role: user.role, status: user.status } : null;
 }
 
@@ -64,7 +64,7 @@ export function setDemoPassword(userId: string, password: string): void {
   demoPasswords.set(userId, password);
 }
 
-function demoUserFromRequest(req: Request): AppUser | null {
+async function demoUserFromRequest(req: Request): Promise<AppUser | null> {
   if (env.AUTH_MODE !== "demo") return null;
   const token = req.get("authorization")?.match(/^Demo\s+(.+)$/i)?.[1];
   return demoUserForToken(token);
@@ -77,10 +77,10 @@ async function getSessionFromRequest(req: Request): Promise<AuthSession> {
 }
 
 export async function requireSession(req: Request, res: Response, next: NextFunction): Promise<void> {
-  const demoUser = demoUserFromRequest(req);
+  const demoUser = await demoUserFromRequest(req);
   if (demoUser) {
     if (demoUser.status === "SUSPENDED") {
-      recordAudit({ actorId: demoUser.id, action: "SUSPENDED_ACCESS_DENIED", resource: req.originalUrl, result: "DENIED", reason: "account suspended" });
+      await recordAudit({ actorId: demoUser.id, action: "SUSPENDED_ACCESS_DENIED", resource: req.originalUrl, result: "DENIED", reason: "account suspended" });
       res.status(403).json({ error: { code: "ACCOUNT_SUSPENDED", message: "The account is suspended." } });
       return;
     }
@@ -120,17 +120,17 @@ export async function requireSession(req: Request, res: Response, next: NextFunc
 
 export function requireRole(role: AppRole) {
   return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
-    const demoUser = demoUserFromRequest(req);
+    const demoUser = await demoUserFromRequest(req);
     if (demoUser) {
       if (demoUser.status === "SUSPENDED") {
-        recordAudit({ actorId: demoUser.id, action: "SUSPENDED_ACCESS_DENIED", resource: req.originalUrl, result: "DENIED", reason: "account suspended" });
+        await recordAudit({ actorId: demoUser.id, action: "SUSPENDED_ACCESS_DENIED", resource: req.originalUrl, result: "DENIED", reason: "account suspended" });
         res.status(403).json({ error: { code: "ACCOUNT_SUSPENDED", message: "The account is suspended." } });
         return;
       }
       req.appUser = demoUser;
       req.userRole = demoUser.role;
       if (demoUser.role !== role) {
-        recordAudit({ actorId: demoUser.id, action: "ADMIN_ACCESS_DENIED", resource: req.originalUrl, result: "DENIED", reason: `required role ${role}` });
+        await recordAudit({ actorId: demoUser.id, action: "ADMIN_ACCESS_DENIED", resource: req.originalUrl, result: "DENIED", reason: `required role ${role}` });
         res.status(403).json({ error: { code: "FORBIDDEN", message: "Required role is not present." } });
         return;
       }

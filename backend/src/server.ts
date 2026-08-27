@@ -305,7 +305,7 @@ app.get("/health", (_req, res) => {
   res.json({ status: "ok", auth: env.AUTH_MODE, data: env.DATA_MODE });
 });
 
-app.post("/api/demo/login", (req, res) => {
+app.post("/api/demo/login", asyncRoute(async (req, res) => {
   if (env.AUTH_MODE !== "demo") {
     apiError(res, 404, "NOT_FOUND", "Demo authentication is disabled.");
     return;
@@ -325,23 +325,23 @@ app.post("/api/demo/login", (req, res) => {
   }
   setDemoPassword(user.id, password);
   const token = issueDemoToken({ id: user.id, email: user.email, name: user.name, role: user.role, status: user.status });
-  recordAudit({ actorId: user.id, action: "ADMIN_LOGIN", resource: "/api/demo/login", result: "SUCCESS", reason: null });
+  await recordAudit({ actorId: user.id, action: "ADMIN_LOGIN", resource: "/api/demo/login", result: "SUCCESS", reason: null });
   res.json({ token, user: { id: user.id, name: user.name, email: user.email, role: user.role, status: user.status } });
-});
+}));
 
-app.post("/api/demo/logout", (req, res) => {
+app.post("/api/demo/logout", asyncRoute(async (req, res) => {
   if (env.AUTH_MODE !== "demo") {
     apiError(res, 404, "NOT_FOUND", "Demo authentication is disabled.");
     return;
   }
   const token = req.get("authorization")?.match(/^Demo\s+(.+)$/i)?.[1];
-  if (!demoUserForToken(token)) {
+  if (!(await demoUserForToken(token))) {
     apiError(res, 401, "UNAUTHENTICATED", "The demo token is invalid.");
     return;
   }
   revokeDemoToken(token);
   res.status(204).send();
-});
+}));
 
 // DATA_MODE=memory serves the explicit in-memory demo store (store.ts).
 // DATA_MODE=postgres stays fail-closed until the real repository (B1) exists
@@ -1078,7 +1078,7 @@ httpServer.on("upgrade", async (req: IncomingMessage, socket: Socket) => {
   let userId: string;
   let role: "USER" | "ADMIN";
   if (env.AUTH_MODE === "demo") {
-    const demoUser = demoUserForToken(url.searchParams.get("access_token"));
+    const demoUser = await demoUserForToken(url.searchParams.get("access_token"));
     if (!demoUser || demoUser.status === "SUSPENDED") { closeUnauthenticated(socket, demoUser ? 403 : 401, demoUser ? "Forbidden" : "Unauthorized"); return; }
     userId = demoUser.id;
     role = demoUser.role;
@@ -1100,7 +1100,7 @@ httpServer.on("upgrade", async (req: IncomingMessage, socket: Socket) => {
   }
   const accept = createHash("sha1").update(`${key}258EAFA5-E914-47DA-95CA-C5AB0DC85B11`).digest("base64");
   socket.write(`HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${accept}\r\n\r\n`);
-  const client: WsClient = { socket, batteryId: activeSession(userId)?.batteryId ?? null, userId, role, topics: new Set<WsTopic>(), subscribed: false };
+  const client: WsClient = { socket, batteryId: (await activeSession(userId))?.batteryId ?? null, userId, role, topics: new Set<WsTopic>(), subscribed: false };
   wsClients.add(client);
   socket.write(wsFrame(JSON.stringify(wsEnvelope("sync", { snapshotCursor: String(wsSequence), asOf: new Date().toISOString() }))));
   socket.on("data", (chunk) => {
