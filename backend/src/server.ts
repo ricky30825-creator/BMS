@@ -103,11 +103,11 @@ function maskEmail(email: string): string {
   return `${local.slice(0, 2)}${"*".repeat(Math.max(2, local.length - 2))}@${domain}`;
 }
 
-function relayJson(batteryId: string) {
-  const relay = relayByBattery(batteryId);
+async function relayJson(batteryId: string) {
+  const relay = await relayByBattery(batteryId);
   const changedBy = relay.changedBy === "SYSTEM"
     ? { type: "SYSTEM", systemCode: relay.reasonCode === "FAILSAFE_TEMP_IR_OVER_CAP" ? "FAILSAFE" : "SYSTEM" }
-    : { type: "USER", id: relay.changedBy, name: userById(relay.changedBy)?.name ?? relay.changedBy };
+    : { type: "USER", id: relay.changedBy, name: (await userById(relay.changedBy))?.name ?? relay.changedBy };
   return {
     batteryId: relay.batteryId,
     state: relay.state,
@@ -178,8 +178,8 @@ async function sessionJson(session: NonNullable<Awaited<ReturnType<typeof active
   return { ...session, batteryLabel: battery?.label ?? session.batteryId, mode: session.targetMode, targetMode: session.targetMode };
 }
 
-function dashboardMetrics(battery: NonNullable<ReturnType<typeof batteryById>>) {
-  const payload = batteryJson(battery)!;
+async function dashboardMetrics(battery: NonNullable<Awaited<ReturnType<typeof batteryById>>>) {
+  const payload = (await batteryJson(battery))!;
   const latest = payload.latest;
   return {
     voltageV: metric(latest.voltageV, null),
@@ -194,29 +194,29 @@ function dashboardMetrics(battery: NonNullable<ReturnType<typeof batteryById>>) 
   };
 }
 
-function anomalyJson(battery: NonNullable<ReturnType<typeof batteryById>>) {
+function anomalyJson(battery: NonNullable<Awaited<ReturnType<typeof batteryById>>>) {
   const score = battery.latest.score;
   return { score, grade: gradeForScore(score), aeScore: null, informerScore: null, evaluatedAt: battery.latest.measuredAt };
 }
 
-function quickTrend(battery: NonNullable<ReturnType<typeof batteryById>>, metricName: string) {
-  const latest = batteryJson(battery)!.latest;
+async function quickTrend(battery: NonNullable<Awaited<ReturnType<typeof batteryById>>>, metricName: string) {
+  const latest = (await batteryJson(battery))!.latest;
   const values: Record<string, number | null> = { volt: latest.voltageV, curr: latest.currentA, temp: latest.representativeTempC, soc: latest.socPct };
   const metricKey = metricName === "volt" || metricName === "curr" || metricName === "temp" || metricName === "soc" ? metricName : "temp";
   return { metric: metricKey, points: [{ at: latest.measuredAt, value: values[metricKey] ?? null }] };
 }
 
-function dashboardJson(session: NonNullable<ReturnType<typeof activeSession>>, battery: NonNullable<ReturnType<typeof batteryById>>, metricName: string) {
-  const payload = batteryJson(battery)!;
+async function dashboardJson(session: NonNullable<Awaited<ReturnType<typeof activeSession>>>, battery: NonNullable<Awaited<ReturnType<typeof batteryById>>>, metricName: string) {
+  const payload = (await batteryJson(battery))!;
   const snapshotCursor = String(wsSequence);
   return {
-    session: sessionJson(session),
+    session: await sessionJson(session),
     battery: payload,
-    metrics: dashboardMetrics(battery),
+    metrics: await dashboardMetrics(battery),
     anomaly: anomalyJson(battery),
-    relay: relayJson(battery.id),
+    relay: await relayJson(battery.id),
     notices: demoNotices.slice(0, 3).map(({ body: _body, status: _status, views: _views, ...notice }) => notice),
-    quickTrend: quickTrend(battery, metricName),
+    quickTrend: await quickTrend(battery, metricName),
     sync: { streamId: wsStreamId, snapshotCursor, asOf: new Date().toISOString() },
     snapshotCursor
   };
@@ -228,8 +228,8 @@ function pageEnvelope<T>(items: T[], page = 1, size = 20) {
   return { items: paged, page: { number: page, size, total: items.length, totalPages: items.length ? Math.ceil(items.length / size) : 0 } };
 }
 
-function ownerBatteries(req: Request): ReturnType<typeof batteries> {
-  return batteries(req.userRole === "ADMIN" ? undefined : actorId(req));
+async function ownerBatteries(req: Request): Promise<Awaited<ReturnType<typeof batteries>>> {
+  return await batteries(req.userRole === "ADMIN" ? undefined : actorId(req));
 }
 
 function diagnosisJson(diagnosis: NonNullable<ReturnType<typeof diagnosisById>>) {
@@ -531,66 +531,66 @@ app.post("/api/sessions", requireSession, asyncRoute(async (req, res) => {
   }
 }));
 
-app.get("/api/dashboard", requireSession, (req, res) => {
-  const session = activeSession(actorId(req));
-  const battery = session ? batteryById(session.batteryId) : null;
+app.get("/api/dashboard", requireSession, asyncRoute(async (req, res) => {
+  const session = await activeSession(actorId(req));
+  const battery = session ? await batteryById(session.batteryId) : null;
   if (!session || !battery) {
     apiError(res, 409, "NO_ACTIVE_SESSION", "An active session is required.");
     return;
   }
-  res.json(dashboardJson(session, battery, typeof req.query.metric === "string" ? req.query.metric : "temp"));
-});
+  res.json(await dashboardJson(session, battery, typeof req.query.metric === "string" ? req.query.metric : "temp"));
+}));
 
-app.get("/api/relay", requireSession, (req, res) => {
-  const session = activeSession(actorId(req));
+app.get("/api/relay", requireSession, asyncRoute(async (req, res) => {
+  const session = await activeSession(actorId(req));
   const requestedBatteryId = typeof req.query.batteryId === "string" ? req.query.batteryId : null;
   const batteryId = session?.batteryId;
-  if (!batteryId || (requestedBatteryId && requestedBatteryId !== batteryId) || !ensureOwner(req, batteryId)) {
+  if (!batteryId || (requestedBatteryId && requestedBatteryId !== batteryId) || !(await ensureOwner(req, batteryId))) {
     apiError(res, 409, "NO_ACTIVE_SESSION", "An active session is required.");
     return;
   }
-  res.json(relayJson(batteryId));
-});
+  res.json(await relayJson(batteryId));
+}));
 
 async function relayMutation(req: Request, res: Response, action: "cut" | "restore"): Promise<void> {
   const key = requireIdempotency(req, res);
   if (!key) return;
-  const batteryId = typeof req.body?.batteryId === "string" ? req.body.batteryId : activeSession(actorId(req))?.batteryId;
-  const battery = batteryId ? ensureOwner(req, batteryId) : null;
-  const session = activeSession(actorId(req));
+  const batteryId = typeof req.body?.batteryId === "string" ? req.body.batteryId : (await activeSession(actorId(req)))?.batteryId;
+  const battery = batteryId ? await ensureOwner(req, batteryId) : null;
+  const session = await activeSession(actorId(req));
   const reason = typeof req.body?.reason === "string" ? req.body.reason.trim() : "";
   const password = typeof req.body?.password === "string" ? req.body.password : "";
   if (!battery || !session || session.batteryId !== battery.id) { apiError(res, 409, "NO_ACTIVE_SESSION", "An active session is required."); return; }
   if (!reason) { apiError(res, 422, "REASON_REQUIRED", "A reason is required."); return; }
   if (!demoPasswordMatches(actorId(req), password)) { apiError(res, 401, "REAUTH_REQUIRED", "Password re-authentication is required."); return; }
   const requestBody = { batteryId, reason, password, action };
-  const prior = idempotent(actorId(req), key, requestBody);
+  const prior = await idempotent(actorId(req), key, requestBody);
   if (prior.kind === "conflict") { apiError(res, 409, "IDEMPOTENCY_CONFLICT", "The idempotency key was reused with a different request."); return; }
   if (prior.kind === "replay") { res.status(prior.status ?? 200).json(prior.body); return; }
   try {
-    const relay = changeRelay(actorId(req), battery.id, action, reason);
-    const response = { decision: "APPROVED", requestId: `relay_${randomUUID()}`, relay: relayJson(battery.id) };
-    rememberIdempotency(actorId(req), key, requestBody, 200, response);
-    broadcast("relay.changed", relayJson(battery.id), response.requestId, battery.id);
-    const latestAudit = audits().find((audit) => audit.resource === battery.id && audit.action === (action === "cut" ? "RELAY_CUT" : "RELAY_RESTORE"));
-    if (latestAudit) broadcast("event.created", auditToEvent(latestAudit), response.requestId, battery.id);
+    await changeRelay(actorId(req), battery.id, action, reason);
+    const response = { decision: "APPROVED", requestId: `relay_${randomUUID()}`, relay: await relayJson(battery.id) };
+    await rememberIdempotency(actorId(req), key, requestBody, 200, response);
+    broadcast("relay.changed", await relayJson(battery.id), response.requestId, battery.id);
+    const latestAudit = (await audits()).find((audit) => audit.resource === battery.id && audit.action === (action === "cut" ? "RELAY_CUT" : "RELAY_RESTORE"));
+    if (latestAudit) broadcast("event.created", await auditToEvent(latestAudit), response.requestId, battery.id);
     res.json(response);
   } catch (error) {
     errorFromDomain(res, error);
   }
 }
 
-app.post("/api/relay/cut", requireSession, async (req, res) => relayMutation(req, res, "cut"));
-app.post("/api/relay/restore", requireSession, async (req, res) => relayMutation(req, res, "restore"));
+app.post("/api/relay/cut", requireSession, asyncRoute(async (req, res) => relayMutation(req, res, "cut")));
+app.post("/api/relay/restore", requireSession, asyncRoute(async (req, res) => relayMutation(req, res, "restore")));
 
-function sessionBattery(req: Request): { session: NonNullable<ReturnType<typeof activeSession>>; battery: NonNullable<ReturnType<typeof batteryById>> } | null {
-  const session = activeSession(actorId(req));
-  const battery = session ? batteryById(session.batteryId) : undefined;
+async function sessionBattery(req: Request): Promise<{ session: NonNullable<Awaited<ReturnType<typeof activeSession>>>; battery: NonNullable<Awaited<ReturnType<typeof batteryById>>> } | null> {
+  const session = await activeSession(actorId(req));
+  const battery = session ? await batteryById(session.batteryId) : undefined;
   return session && battery ? { session, battery } : null;
 }
 
-function auditToEvent(audit: ReturnType<typeof audits>[number]) {
-  const battery = batteryById(audit.resource);
+async function auditToEvent(audit: Awaited<ReturnType<typeof audits>>[number]) {
+  const battery = await batteryById(audit.resource);
   const autoCut = audit.action === "RELAY_AUTO_CUT";
   return {
     id: audit.id,
@@ -609,44 +609,43 @@ function auditToEvent(audit: ReturnType<typeof audits>[number]) {
   } as const;
 }
 
-function eventItems(req: Request) {
-  const owned = new Set(ownerBatteries(req).map((battery) => battery.id));
-  return audits()
-    .filter((audit) => ["RELAY_CUT", "RELAY_RESTORE", "RELAY_AUTO_CUT"].includes(audit.action) && owned.has(audit.resource))
-    .map(auditToEvent);
+async function eventItems(req: Request) {
+  const owned = new Set((await ownerBatteries(req)).map((battery) => battery.id));
+  const matching = (await audits()).filter((audit) => ["RELAY_CUT", "RELAY_RESTORE", "RELAY_AUTO_CUT"].includes(audit.action) && owned.has(audit.resource));
+  return Promise.all(matching.map(auditToEvent));
 }
 
-app.get("/api/anomaly/summary", requireSession, (req, res) => {
-  const scoped = sessionBattery(req);
+app.get("/api/anomaly/summary", requireSession, asyncRoute(async (req, res) => {
+  const scoped = await sessionBattery(req);
   if (!scoped) { apiError(res, 409, "NO_ACTIVE_SESSION", "An active session is required."); return; }
-  const owned = ownerBatteries(req);
+  const owned = await ownerBatteries(req);
   const distribution = { NORMAL: 0, CAUTION: 0, WARNING: 0, DANGER: 0 };
   for (const battery of owned) distribution[gradeForScore(battery.latest.score) ?? "NORMAL"] += 1;
   res.json({ activeCount: owned.filter((battery) => (gradeForScore(battery.latest.score) ?? "NORMAL") !== "NORMAL").length, todayCount: 0, peakScore: scoped.battery.latest.score, peakAt: scoped.battery.latest.measuredAt, model: { status: "DEGRADED", lastInferenceAt: scoped.battery.latest.measuredAt, version: "demo-fixture-no-provider" }, riskDistribution: distribution });
-});
+}));
 
-app.get("/api/anomaly/evidence", requireSession, (req, res) => {
-  const scoped = sessionBattery(req);
+app.get("/api/anomaly/evidence", requireSession, asyncRoute(async (req, res) => {
+  const scoped = await sessionBattery(req);
   if (!scoped) { apiError(res, 409, "NO_ACTIVE_SESSION", "An active session is required."); return; }
   if (typeof req.query.batteryId === "string" && req.query.batteryId !== scoped.battery.id) { apiError(res, 404, "NOT_FOUND", "Battery was not found."); return; }
   res.json({ batteryId: scoped.battery.id, score: scoped.battery.latest.score, evaluatedAt: scoped.battery.latest.measuredAt, contributions: [] });
-});
+}));
 
-app.get("/api/anomaly/events", requireSession, (req, res) => {
-  const scoped = sessionBattery(req);
+app.get("/api/anomaly/events", requireSession, asyncRoute(async (req, res) => {
+  const scoped = await sessionBattery(req);
   if (!scoped) { apiError(res, 409, "NO_ACTIVE_SESSION", "An active session is required."); return; }
-  res.json(pageEnvelope(eventItems(req), Number(req.query.page) || 1, Number(req.query.size) || 20));
-});
+  res.json(pageEnvelope(await eventItems(req), Number(req.query.page) || 1, Number(req.query.size) || 20));
+}));
 
-app.get("/api/events", requireSession, (req, res) => {
+app.get("/api/events", requireSession, asyncRoute(async (req, res) => {
   const severity = typeof req.query.severity === "string" ? req.query.severity.split(",") : [];
   const q = typeof req.query.q === "string" ? req.query.q.toLowerCase() : "";
   const batteryId = typeof req.query.batteryId === "string" ? req.query.batteryId : null;
-  const items = eventItems(req).filter((event) => (!severity.length || severity.includes(event.severity)) && (!batteryId || event.batteryId === batteryId) && (!q || (event.batteryLabel ?? "").toLowerCase().includes(q)));
+  const items = (await eventItems(req)).filter((event) => (!severity.length || severity.includes(event.severity)) && (!batteryId || event.batteryId === batteryId) && (!q || (event.batteryLabel ?? "").toLowerCase().includes(q)));
   res.json(pageEnvelope(items, Number(req.query.page) || 1, Number(req.query.size) || 20));
-});
+}));
 
-function trendForBattery(battery: NonNullable<ReturnType<typeof batteryById>>, period: "24h" | "7d" | "30d") {
+function trendForBattery(battery: NonNullable<Awaited<ReturnType<typeof batteryById>>>, period: "24h" | "7d" | "30d") {
   const count = period === "24h" ? 25 : period === "30d" ? 30 : 7;
   const stepMs = period === "24h" ? 60 * 60 * 1000 : 24 * 60 * 60 * 1000;
   const end = new Date(battery.latest.measuredAt).getTime();
@@ -660,17 +659,24 @@ function trendForBattery(battery: NonNullable<ReturnType<typeof batteryById>>, p
   ] };
 }
 
-app.get("/api/trends", requireSession, (req, res) => {
+app.get("/api/trends", requireSession, asyncRoute(async (req, res) => {
   const period = req.query.period === "24h" || req.query.period === "30d" ? req.query.period : "7d";
   const requested = typeof req.query.batteryIds === "string" ? req.query.batteryIds.split(",").filter(Boolean).slice(0, 5) : [];
-  const candidates = requested.length ? requested.map((id) => ensureOwner(req, id)).filter((battery): battery is NonNullable<ReturnType<typeof batteryById>> => Boolean(battery)) : (() => { const scoped = sessionBattery(req); return scoped ? [scoped.battery] : []; })();
+  let candidates: Array<NonNullable<Awaited<ReturnType<typeof batteryById>>>>;
+  if (requested.length) {
+    const resolved = await Promise.all(requested.map((id) => ensureOwner(req, id)));
+    candidates = resolved.filter((battery): battery is NonNullable<Awaited<ReturnType<typeof batteryById>>> => Boolean(battery));
+  } else {
+    const scoped = await sessionBattery(req);
+    candidates = scoped ? [scoped.battery] : [];
+  }
   if (requested.length && candidates.length !== requested.length) { apiError(res, 404, "NOT_FOUND", "One or more batteries were not found."); return; }
   const first = candidates[0];
   if (!first) { res.json({ period, buckets: [], series: [] }); return; }
   const base = trendForBattery(first, period);
   const series = candidates.flatMap((battery) => trendForBattery(battery, period).series);
   res.json({ period, buckets: base.buckets, series });
-});
+}));
 
 const demoAlerts: Array<Record<string, unknown>> = [];
 function ownerAlerts(req: Request): Array<Record<string, unknown>> {
@@ -815,19 +821,24 @@ app.get("/api/admin/overview", requireRole("ADMIN"), (_req, res) => {
   res.json({ users: demoUsers.length, batteries: allBatteries.length, activeSessions: activeSession() ? 1 : 0, blockedBatteries: allBatteries.filter((item) => item.opsStatus === "BLOCKED").length, relayOpen: allBatteries.filter((item) => relayByBattery(item.id).state === "OPEN").length });
 });
 
-app.get("/api/relay/history", requireSession, (req, res) => {
-  const session = activeSession(actorId(req));
+app.get("/api/relay/history", requireSession, asyncRoute(async (req, res) => {
+  const session = await activeSession(actorId(req));
   const requestedBatteryId = typeof req.query.batteryId === "string" ? req.query.batteryId : null;
   const batteryId = session?.batteryId;
-  if (!batteryId || (requestedBatteryId && requestedBatteryId !== batteryId) || !ensureOwner(req, batteryId)) { apiError(res, 404, "NOT_FOUND", "Battery was not found."); return; }
-  res.json({ items: audits().filter((audit) => audit.resource === batteryId && audit.action.startsWith("RELAY_")).map((audit) => ({
-    id: audit.id,
-    action: audit.action,
-    at: audit.at,
-    actor: audit.actorId && userById(audit.actorId) ? { type: "USER", id: audit.actorId, name: userById(audit.actorId)!.name } : { type: "SYSTEM", systemCode: "FAILSAFE" },
-    ...(audit.action === "RELAY_AUTO_CUT" ? { reasonCode: audit.reason ?? undefined } : { reason: audit.reason ?? undefined })
-  })) });
-});
+  if (!batteryId || (requestedBatteryId && requestedBatteryId !== batteryId) || !(await ensureOwner(req, batteryId))) { apiError(res, 404, "NOT_FOUND", "Battery was not found."); return; }
+  const matching = (await audits()).filter((audit) => audit.resource === batteryId && audit.action.startsWith("RELAY_"));
+  const items = await Promise.all(matching.map(async (audit) => {
+    const actorUser = audit.actorId ? await userById(audit.actorId) : undefined;
+    return {
+      id: audit.id,
+      action: audit.action,
+      at: audit.at,
+      actor: audit.actorId && actorUser ? { type: "USER", id: audit.actorId, name: actorUser.name } : { type: "SYSTEM", systemCode: "FAILSAFE" },
+      ...(audit.action === "RELAY_AUTO_CUT" ? { reasonCode: audit.reason ?? undefined } : { reason: audit.reason ?? undefined })
+    };
+  }));
+  res.json({ items });
+}));
 
 function diagnosisStart(req: Request, res: Response, kind: "QUICK" | "CAPACITY"): void {
   const session = activeSession(actorId(req));
@@ -1146,12 +1157,12 @@ httpServer.on("upgrade", async (req: IncomingMessage, socket: Socket) => {
 
 const lastBroadcastGrade = new Map<string, Grade>();
 
-function tickActiveBattery(): void {
-  const session = activeSession();
+async function tickActiveBattery(): Promise<void> {
+  const session = await activeSession();
   if (!session) return;
-  const battery = batteryById(session.batteryId);
+  const battery = await batteryById(session.batteryId);
   if (!battery) return;
-  broadcast("metrics.tick", dashboardMetrics(battery), null, battery.id);
+  broadcast("metrics.tick", await dashboardMetrics(battery), null, battery.id);
   const anomaly = anomalyJson(battery);
   broadcast("anomaly.score", anomaly, null, battery.id);
   const previousGrade = lastBroadcastGrade.get(battery.id) ?? null;
@@ -1178,7 +1189,9 @@ function tickActiveBattery(): void {
   broadcast("alert.created", alertJson(alert), null, battery.id);
 }
 
-setInterval(tickActiveBattery, 1000);
+setInterval(() => {
+  void tickActiveBattery().catch((error) => { console.error("tickActiveBattery failed", error); });
+}, 1000);
 
 httpServer.listen(env.PORT, () => {
   console.log(`CellGuard backend listening on ${env.PORT} (auth=${env.AUTH_MODE} data=${env.DATA_MODE})`);
