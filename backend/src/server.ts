@@ -124,7 +124,7 @@ function relayJson(batteryId: string) {
   };
 }
 
-function batteryJson(battery: ReturnType<typeof batteryById>) {
+async function batteryJson(battery: Awaited<ReturnType<typeof batteryById>>) {
   if (!battery) return null;
   const tempCandidates = [battery.latest.tempContact, battery.latest.tempIrSurface].filter((value): value is number => value !== null);
   const representativeTempC = tempCandidates.length ? Math.max(...tempCandidates) : null;
@@ -160,7 +160,7 @@ function batteryJson(battery: ReturnType<typeof batteryById>) {
       measuredAt: battery.latest.measuredAt
     },
     memo: battery.memo,
-    health: mode1Health(battery),
+    health: await mode1Health(battery),
     diagnosisCapability: battery.targetMode === 2
       ? { executionAllowed: false, reasonCode: "SAFETY_PROFILE_NOT_READY" }
       : { executionAllowed: false, reasonCode: "MODE_NOT_SUPPORTED" }
@@ -173,8 +173,8 @@ const demoNotices = [
   { id: "notice-info", category: "INFO", title: "모드 2 진단 안전 프로필 안내", summary: "실측 전까지 보조배터리 진단은 실행 잠금 상태입니다.", body: "현재 연결 부품 프로필은 안전 문턱과 연속 감시가 준비되지 않아 F21 진단을 실행할 수 없습니다.", publishedAt: "2026-06-20T00:00:00.000Z", status: "PUBLISHED", views: 431 }
 ] as const;
 
-function sessionJson(session: NonNullable<ReturnType<typeof activeSession>>) {
-  const battery = batteryById(session.batteryId);
+async function sessionJson(session: NonNullable<Awaited<ReturnType<typeof activeSession>>>) {
+  const battery = await batteryById(session.batteryId);
   return { ...session, batteryLabel: battery?.label ?? session.batteryId, mode: session.targetMode, targetMode: session.targetMode };
 }
 
@@ -258,8 +258,8 @@ function diagnosisJson(diagnosis: NonNullable<ReturnType<typeof diagnosisById>>)
   };
 }
 
-function ensureOwner(req: Request, batteryId: string): ReturnType<typeof batteryById> | null {
-  const battery = batteryById(batteryId);
+async function ensureOwner(req: Request, batteryId: string): Promise<Awaited<ReturnType<typeof batteryById>> | null> {
+  const battery = await batteryById(batteryId);
   if (!battery) return null;
   if (req.userRole === "ADMIN" || battery.ownerId === actorId(req)) return battery;
   return null;
@@ -369,27 +369,27 @@ app.post("/api/account/email-availability", (req, res) => {
   res.json({ available: !taken });
 });
 
-app.get("/api/me", requireSession, (req, res) => {
+app.get("/api/me", requireSession, asyncRoute(async (req, res) => {
   const user = req.appUser;
   if (!user) {
     res.json({ user: req.authSession?.user ?? null, activeSession: null, preferences: { theme: "light", lang: "ko" } });
     return;
   }
-  const storedUser = userById(user.id);
-  const session = activeSession(user.id);
-  const sessionBattery = session ? batteryById(session.batteryId) : null;
-  const owned = batteries(user.id);
+  const storedUser = await userById(user.id);
+  const session = await activeSession(user.id);
+  const sessionBattery = session ? await batteryById(session.batteryId) : null;
+  const owned = await batteries(user.id);
   res.json({
     user: { ...user, ...(storedUser ? { name: storedUser.name, email: storedUser.email, phone: storedUser.phone, role: storedUser.role, status: storedUser.status, joinedAt: storedUser.joinedAt } : {}), loginId: user.id },
-    activeSession: session && sessionBattery ? sessionJson(session) : null,
+    activeSession: session && sessionBattery ? await sessionJson(session) : null,
     unreadAlertCount: 0,
     activeAnomalyCount: owned.filter((battery) => (gradeForScore(battery.latest.score) ?? "NORMAL") !== "NORMAL").length,
     preferences: demoPreferences.get(user.id) ?? { theme: "light", lang: "ko" }
   });
-});
+}));
 
-app.patch("/api/me", requireSession, (req, res) => {
-  const user = userById(actorId(req));
+app.patch("/api/me", requireSession, asyncRoute(async (req, res) => {
+  const user = await userById(actorId(req));
   if (!user) { apiError(res, 404, "NOT_FOUND", "User was not found."); return; }
   const allowed = new Set(["name", "email", "phone"]);
   const unknown = Object.keys(req.body ?? {}).filter((key) => !allowed.has(key));
@@ -401,9 +401,9 @@ app.patch("/api/me", requireSession, (req, res) => {
   user.name = name;
   user.email = email;
   user.phone = phone;
-  recordAudit({ actorId: actorId(req), action: "USER_UPDATE", resource: user.id, result: "SUCCESS", reason: null });
+  await recordAudit({ actorId: actorId(req), action: "USER_UPDATE", resource: user.id, result: "SUCCESS", reason: null });
   res.json({ id: user.id, name: user.name, loginId: user.id, email: user.email, phone: user.phone, role: user.role, status: user.status, joinedAt: user.joinedAt });
-});
+}));
 
 app.post("/api/me/password", requireSession, (req, res) => {
   const userId = actorId(req);
@@ -458,51 +458,52 @@ app.get("/api/batteries", requireSession, asyncRoute(async (req, res) => {
   const mode = req.query.mode === "1" || req.query.mode === "2" ? Number(req.query.mode) : null;
   const list = (await batteries(req.userRole === "ADMIN" ? undefined : actorId(req))).filter((battery) => !mode || battery.targetMode === mode);
   const connectedBatteryId = (await activeSession(actorId(req)))?.batteryId;
-  res.json({ items: list.map((battery) => ({ ...batteryJson(battery), isConnected: battery.id === connectedBatteryId })), page: { number: 1, size: list.length || 20, total: list.length, totalPages: list.length ? 1 : 0 } });
+  const items = await Promise.all(list.map(async (battery) => ({ ...(await batteryJson(battery)), isConnected: battery.id === connectedBatteryId })));
+  res.json({ items, page: { number: 1, size: list.length || 20, total: list.length, totalPages: list.length ? 1 : 0 } });
 }));
 
-app.post("/api/batteries", requireSession, (req, res) => {
+app.post("/api/batteries", requireSession, asyncRoute(async (req, res) => {
   const targetMode = req.body?.targetMode === 1 || req.body?.targetMode === 2 ? req.body.targetMode : null;
   const chemistry = req.body?.chemistry === "LI_ION" || req.body?.chemistry === "LI_PO" ? req.body.chemistry : null;
   if (!targetMode || !chemistry) { apiError(res, 400, "VALIDATION_FAILED", "targetMode and chemistry are required."); return; }
   try {
-    const battery = createBattery(actorId(req), { label: String(req.body?.label ?? ""), maker: req.body?.maker ?? null, model: req.body?.model ?? null, targetMode, chemistry, seriesCount: req.body?.seriesCount == null ? null : Number(req.body.seriesCount), capacityWh: req.body?.capacityWh == null ? null : Number(req.body.capacityWh), ratedOutputCurrentA: req.body?.ratedOutputCurrentA == null ? null : Number(req.body.ratedOutputCurrentA) });
-    recordAudit({ actorId: actorId(req), action: "BATTERY_CREATE", resource: battery.id, result: "SUCCESS", reason: null });
-    res.status(201).json(batteryJson(battery));
+    const battery = await createBattery(actorId(req), { label: String(req.body?.label ?? ""), maker: req.body?.maker ?? null, model: req.body?.model ?? null, targetMode, chemistry, seriesCount: req.body?.seriesCount == null ? null : Number(req.body.seriesCount), capacityWh: req.body?.capacityWh == null ? null : Number(req.body.capacityWh), ratedOutputCurrentA: req.body?.ratedOutputCurrentA == null ? null : Number(req.body.ratedOutputCurrentA) });
+    await recordAudit({ actorId: actorId(req), action: "BATTERY_CREATE", resource: battery.id, result: "SUCCESS", reason: null });
+    res.status(201).json(await batteryJson(battery));
   } catch (error) { errorFromDomain(res, error); }
-});
+}));
 
-app.patch("/api/batteries/:id", requireSession, (req, res) => {
-  const current = ensureOwner(req, req.params.id);
+app.patch("/api/batteries/:id", requireSession, asyncRoute(async (req, res) => {
+  const current = await ensureOwner(req, req.params.id);
   if (!current) { apiError(res, 404, "NOT_FOUND", "Battery was not found."); return; }
   const allowed = new Set(["label", "maker", "model", "seriesCount", "memo"]);
   const unknown = Object.keys(req.body ?? {}).filter((key) => !allowed.has(key));
   if (unknown.length) { apiError(res, 400, "VALIDATION_FAILED", "Battery identity and mode cannot be changed."); return; }
   try {
-    const updated = updateBattery(current.ownerId, current.id, {
+    const updated = await updateBattery(current.ownerId, current.id, {
       label: req.body?.label,
       maker: req.body?.maker,
       model: req.body?.model,
       seriesCount: req.body?.seriesCount == null ? req.body?.seriesCount : Number(req.body.seriesCount),
       memo: req.body?.memo
     });
-    res.json(batteryJson(updated));
+    res.json(await batteryJson(updated));
   } catch (error) { errorFromDomain(res, error); }
-});
+}));
 
-app.get("/api/batteries/:id", requireSession, (req, res) => {
-  const battery = ensureOwner(req, req.params.id);
+app.get("/api/batteries/:id", requireSession, asyncRoute(async (req, res) => {
+  const battery = await ensureOwner(req, req.params.id);
   if (!battery) {
     apiError(res, 404, "NOT_FOUND", "Battery was not found.");
     return;
   }
-  res.json({ ...batteryJson(battery), isConnected: activeSession(actorId(req))?.batteryId === battery.id });
-});
+  res.json({ ...(await batteryJson(battery)), isConnected: (await activeSession(actorId(req)))?.batteryId === battery.id });
+}));
 
-app.get("/api/batteries/:id/sessions", requireSession, (req, res) => {
-  const battery = ensureOwner(req, req.params.id);
+app.get("/api/batteries/:id/sessions", requireSession, asyncRoute(async (req, res) => {
+  const battery = await ensureOwner(req, req.params.id);
   if (!battery) { apiError(res, 404, "NOT_FOUND", "Battery was not found."); return; }
-  const items = sessionsForBattery(battery.id).map((session) => ({
+  const items = (await sessionsForBattery(battery.id)).map((session) => ({
     id: session.id,
     label: battery.label,
     startedAt: session.startedAt,
@@ -512,23 +513,23 @@ app.get("/api/batteries/:id/sessions", requireSession, (req, res) => {
     status: session.status
   }));
   res.json(pageEnvelope(items, Number(req.query.page) || 1, Number(req.query.size) || 20));
-});
+}));
 
-app.post("/api/sessions", requireSession, (req, res) => {
+app.post("/api/sessions", requireSession, asyncRoute(async (req, res) => {
   try {
-    const battery = ensureOwner(req, req.body?.batteryId);
+    const battery = await ensureOwner(req, req.body?.batteryId);
     if (!battery) throw new Error("NOT_FOUND");
-    const priorSession = activeSession();
-    const session = startSession(actorId(req), battery.id);
+    const priorSession = await activeSession();
+    const session = await startSession(actorId(req), battery.id);
     if (priorSession && priorSession.id !== session.id) {
       broadcast("session.ended", { sessionId: priorSession.id, endReason: "SUPERSEDED" }, null, priorSession.batteryId);
     }
-    recordAudit({ actorId: actorId(req), action: "SESSION_START", resource: session.id, result: "SUCCESS", reason: null });
-    res.status(201).json(sessionJson(session));
+    await recordAudit({ actorId: actorId(req), action: "SESSION_START", resource: session.id, result: "SUCCESS", reason: null });
+    res.status(201).json(await sessionJson(session));
   } catch (error) {
     errorFromDomain(res, error);
   }
-});
+}));
 
 app.get("/api/dashboard", requireSession, (req, res) => {
   const session = activeSession(actorId(req));
