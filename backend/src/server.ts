@@ -17,6 +17,7 @@ import { createEventLog } from "./realtime/eventLog.js";
 import { createExportJob, exportJobById, scheduleExportCompletion, signDownload, verifyDownload } from "./exports.js";
 import { DEFAULT_VOICE_ALERT_SETTINGS, applyVoiceAlertPatch } from "./voiceAlert.js";
 import { asyncRoute } from "./asyncRoute.js";
+import { createLoggingDeviceCommandPort } from "./device/logging.js";
 import {
   F21_THRESHOLDS,
   abortDiagnosis,
@@ -48,6 +49,7 @@ import {
 
 const app = express();
 const httpServer = createServer(app);
+const devicePort = createLoggingDeviceCommandPort();
 type WsTopic = "metrics" | "anomaly" | "relay" | "alert" | "event" | "session" | "diagnosis";
 type WsClient = { socket: Socket; batteryId: string | null; userId: string; role: "USER" | "ADMIN"; topics: Set<WsTopic>; subscribed: boolean };
 const wsClients = new Set<WsClient>();
@@ -521,6 +523,7 @@ app.post("/api/sessions", requireSession, asyncRoute(async (req, res) => {
     if (!battery) throw new Error("NOT_FOUND");
     const priorSession = await activeSession();
     const session = await startSession(actorId(req), battery.id);
+    await devicePort.sessionStarted(session.id, session.batteryId, session.targetMode);
     if (priorSession && priorSession.id !== session.id) {
       await broadcast("session.ended", { sessionId: priorSession.id, endReason: "SUPERSEDED" }, null, priorSession.batteryId);
     }
@@ -570,6 +573,8 @@ async function relayMutation(req: Request, res: Response, action: "cut" | "resto
   try {
     await changeRelay(actorId(req), battery.id, action, reason);
     const response = { decision: "APPROVED", requestId: `relay_${randomUUID()}`, relay: await relayJson(battery.id) };
+    if (action === "cut") await devicePort.relayCut(battery.id, response.relay.reasonCode);
+    else await devicePort.relayRestore(battery.id);
     await rememberIdempotency(actorId(req), key, requestBody, 200, response);
     await broadcast("relay.changed", await relayJson(battery.id), response.requestId, battery.id);
     const latestAudit = (await audits()).find((audit) => audit.resource === battery.id && audit.action === (action === "cut" ? "RELAY_CUT" : "RELAY_RESTORE"));
