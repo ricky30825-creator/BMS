@@ -7,6 +7,17 @@ import type { Alert, BatteryEvent, Dashboard, Diagnosis, Grade, MeResponse, Rela
 export type RealtimeState = "idle" | "loading" | "connecting" | "live" | "reconnecting" | "offline" | "expired" | "resyncing";
 export type ReconnectIntent = "initial" | "resume" | "resync";
 
+// `afterCursor` must always be a cursor the server actually issued. Sending a
+// placeholder like "0" reads as "replay from the beginning", so the server
+// pushes its entire ring buffer (up to 10k events) instead of just the gap
+// between the snapshot and the socket opening. A resume that lost its cursor
+// therefore has to re-anchor on a fresh snapshot first; `resync` is exempt
+// because resyncQueries() refetches the snapshot on its own.
+export function requiresSnapshotAnchor(intent: ReconnectIntent, cursor: string | null): boolean {
+  if (intent === "resync") return false;
+  return intent === "initial" || cursor === null;
+}
+
 export const realtimeTopics = ["metrics", "anomaly", "relay", "alert", "event", "session", "diagnosis"] as const;
 
 export type ClientWsMessage =
@@ -204,10 +215,13 @@ export function useRealtime({ enabled, sessionKey, onAutoCut, onSessionEnded, on
       if (disposed) return;
       try {
         setState(intent === "initial" ? "loading" : intent === "resync" ? "resyncing" : "reconnecting");
-        if (intent === "initial") await fetchSnapshot();
         if (intent === "resync") await resyncQueries();
+        else if (requiresSnapshotAnchor(intent, cursorRef.current)) await fetchSnapshot();
         if (disposed) return;
-        const afterCursor = cursorRef.current ?? "0";
+        // normalizeDashboard() throws when the response has no snapshotCursor,
+        // so a successful anchor always leaves a real cursor behind.
+        const afterCursor = cursorRef.current;
+        if (afterCursor === null) throw new Error("MISSING_SNAPSHOT_CURSOR");
         setState("connecting");
         const ws = new WebSocket(socketUrl());
         socketRef.current = ws;
@@ -310,9 +324,10 @@ export function useRealtime({ enabled, sessionKey, onAutoCut, onSessionEnded, on
           else if (envelope.type === "resync.required") {
             setState("resyncing");
             void resyncQueries().then(() => {
-              if (!disposed) {
+              const resyncCursor = cursorRef.current;
+              if (!disposed && resyncCursor !== null) {
                 setState("live");
-                send(buildSubscribeMessage(cursorRef.current ?? "0", `resync-${Date.now()}`));
+                send(buildSubscribeMessage(resyncCursor, `resync-${Date.now()}`));
               }
             }).catch((error) => {
               if (!disposed) {

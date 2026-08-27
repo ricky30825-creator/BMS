@@ -27,7 +27,7 @@ const adminNav: NavItem[] = [
   { path: "/adminAudit", label: "감사 로그", icon: ClipboardList },
 ];
 
-const pageMeta: Record<string, [string, string]> = {
+export const pageMeta: Record<string, [string, string]> = {
   "/dashboard": ["실시간 관제", ""],
   "/battery": ["배터리 관리", "저장된 배터리 선택 · 새 배터리 등록"],
   "/anomaly": ["이상 탐지 관리", "AI 이상점수 · 위험도 분포"],
@@ -37,7 +37,7 @@ const pageMeta: Record<string, [string, string]> = {
   "/notices": ["공지사항", "서비스 소식과 점검 안내"],
   "/powerbankDiag": ["보조배터리 진단", "모드 2 · 열화 진단과 안전 상태"],
   "/relay": ["릴레이 제어 · Kill-Switch", "원격 차단·복구와 Fail-Safe 상태"],
-  "/settings": ["설정", "알림 수신 · 계정 정보 · 테마"],
+  "/settings": ["설정", "알림 수신 · 계정 정보 · 테마 · 음성 안내"],
   "/admin": ["관리자 대시보드", "전체 운영 현황과 위험 이벤트"],
   "/adminUsers": ["유저 계정 관리", "계정 상태와 등록 배터리"],
   "/adminBattery": ["배터리 운영 관리", "운영 상태와 관리자 메모"],
