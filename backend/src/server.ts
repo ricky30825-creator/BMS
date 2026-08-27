@@ -18,6 +18,8 @@ import { createExportJob, exportJobById, scheduleExportCompletion, signDownload,
 import { DEFAULT_VOICE_ALERT_SETTINGS, applyVoiceAlertPatch } from "./voiceAlert.js";
 import { asyncRoute } from "./asyncRoute.js";
 import { createLoggingDeviceCommandPort } from "./device/logging.js";
+import { evaluateFailsafe } from "./failsafeRunner.js";
+import type { FailsafeSample, FailsafeThresholds, FailsafeVerdict, HardwareProfile } from "./failsafe.js";
 import {
   F21_THRESHOLDS,
   abortDiagnosis,
@@ -34,6 +36,7 @@ import {
   diagnosisById,
   diagnosesForBattery,
   demoUsers,
+  engageFailsafe,
   idempotent,
   mode1Health,
   recordAudit,
@@ -46,6 +49,7 @@ import {
   updateBattery,
   userById
 } from "./store.js";
+import type { DemoBattery, DemoRelay } from "./store.js";
 
 const app = express();
 const httpServer = createServer(app);
@@ -1207,6 +1211,40 @@ async function tickActiveBattery(): Promise<void> {
 setInterval(() => {
   void tickActiveBattery().catch((error) => { console.error("tickActiveBattery failed", error); });
 }, 1000);
+
+// 계약 §1628: { batteryId, batteryLabel, representativeTempC,
+//               representativeTempSource, triggerCode, cutAt }
+// relay.changed에 섞지 않는다(§1646) — 사용자 차단과 구분이 안 된다.
+async function broadcastAutoCut(battery: DemoBattery, relay: DemoRelay, triggerCode: string): Promise<void> {
+  const payload = (await batteryJson(battery))!;
+  await broadcast("relay.autoCut", {
+    batteryId: battery.id,
+    batteryLabel: battery.label,
+    representativeTempC: payload.latest.representativeTempC,
+    representativeTempSource: payload.latest.representativeTempSource,
+    triggerCode,
+    cutAt: relay.changedAt
+  }, null, battery.id);
+}
+
+// 텔레메트리 Consumer가 생기면 프레임마다 이 함수를 부른다. 지금은 호출부가
+// 없다(2026-08-27 결정 — 순수 로직만 만들고 구독 배선은 Consumer 담당자 몫).
+// docs/handover/infra-implementations.md가 이 함수를 진입점으로 명시한다.
+export async function runFailsafe(
+  batteryId: string,
+  profile: HardwareProfile,
+  sample: FailsafeSample,
+  thresholds: FailsafeThresholds
+): Promise<FailsafeVerdict> {
+  const battery = await batteryById(batteryId);
+  if (!battery) return null;
+  return evaluateFailsafe({
+    relayByBattery,
+    engageFailsafe,
+    relayCut: (id, code) => devicePort.relayCut(id, code),
+    onAutoCut: (relay, verdict) => { void broadcastAutoCut(battery, relay, verdict.triggerCode); }
+  }, batteryId, profile, sample, thresholds);
+}
 
 httpServer.listen(env.PORT, () => {
   console.log(`CellGuard backend listening on ${env.PORT} (auth=${env.AUTH_MODE} data=${env.DATA_MODE})`);
