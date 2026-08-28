@@ -29,10 +29,10 @@
 | 요구사항·제품 계약 | [`PLAN.md`](../PLAN.md), [`docs/product_contract.md`](product_contract.md), 기능정의서·유저플로우 | 구현 기준 문서 있음 |
 | 백엔드 인증 골격 | `backend/src/auth.ts`, 세션 미들웨어, 감사 로그, DB 연결, Better Auth `/api/auth/*`. 데모 토큰 인증으로 RBAC·정지 계정 차단까지 실동작 | 골격 구현 / **실인증 전환은 보류(의도적)** |
 | 백엔드 데모 도메인 API | `backend/src/server.ts`(991줄): 발급 토큰 인증, 사용자·관리자 REST 56개 라우트(`/health`·`/api/demo/*` 포함), 계약형 대시보드, F21 fail-closed, 릴레이 승인·재인증·멱등성, Raw CSV. 게이트 실동작 확인(`409 BATTERY_BLOCKED`/`NO_ACTIVE_SESSION`, `401 REAUTH_REQUIRED`, `ACK_REQUIRED`, 관리자 `403`) | **데모 런타임 구현·실 REST 브라우저 검증 완료** |
-| 백엔드 도메인 데이터 저장 | `backend/src/store/contract.ts`(비동기 `CellGuardStore` 인터페이스) + `backend/src/store/memory.ts`(인메모리 구현체, 계약 테스트 19건 통과) + `backend/src/store.ts`(facade). `backend/src/db.ts`의 풀은 아직 `auth.ts`(Better Auth)만 사용. `DATA_MODE=postgres` PostgreSQL 구현체는 인프라 인계(`docs/handover/infra-implementations.md` 1부) | **인터페이스 분리 완료 / PostgreSQL 구현체 대기** (→ B1) |
+| 백엔드 도메인 데이터 저장 | `backend/src/store/contract.ts`(비동기 `CellGuardStore` 인터페이스) + `backend/src/store/memory.ts`(인메모리 구현체, 계약 테스트 20건 통과) + `backend/src/store.ts`(facade). `backend/src/db.ts`의 풀은 아직 `auth.ts`(Better Auth)만 사용. `DATA_MODE=postgres` PostgreSQL 구현체는 인프라 인계(`docs/handover/infra-implementations.md` 1부) | **인터페이스 분리 완료 / PostgreSQL 구현체 대기** (→ B1) |
 | 백엔드 실시간 스트림 (WS 발신) | **C1 완료(2026-08-25).** 프론트가 처리하는 11종 중 `metrics.tick`·`anomaly.score`·`anomaly.gradeChanged`·`relay.changed`·`alert.created`·`event.created`·`session.ended`·`resync.required` 8종이 실제로 발신되고, `subscribe`/`resume`이 1만 건 링버퍼로 실제 재전송을 수행한다. 단 `metrics.tick`·`anomaly.score`·`anomaly.gradeChanged`·`alert.created`는 이 저장소 안에 `battery.latest.score`를 사후에 바꾸는 코드가 아직 없어 **매초 같은 값을 반복 push하는 휴면 상태**다(AI 추론 연동 후 살아난다) — 이는 버그가 아니라 현재 범위의 자연스러운 결과다. `relay.autoCut`은 **구현됨(문턱 미설정이라 휴면)**(B3 완료, §4 C1 참조), `diagnosis.progress`/`.done`/`.aborted`는 여전히 미발신 | **구현됨(부분 휴면)** — 잔여 `diagnosis.*`(→ F21 안전 프로필) |
 | 에지 명령 경로 | `backend/src/device/port.ts`(`DeviceCommandPort` 인터페이스, 메서드 4개) + `backend/src/device/logging.ts`(로깅 스텁 — 콘솔에만 남기고 실제 전송 없음). `battery-events` 발행을 실제로 수행하는 Kafka 구현체는 인프라 인계(`docs/handover/infra-implementations.md` 2부) — dual-write 원자성·`sessionEnded` 배선 지점 미결정 | **DeviceCommandPort + 로그 스텁 / Kafka 구현체 대기** (→ B4) |
-| 백엔드 DB 도메인 provider·Consumer·TimescaleDB | `backend/migrations/001_app_auth.sql`에 자산/세션/릴레이/텔레메트리/진단/멱등성 스키마가 있고 컬럼이 `store/types.ts` 타입과 1:1로 맞으나, production repository·Kafka Consumer·시계열 적재는 없음. `DATA_MODE=postgres`에서는 `/api/*` 전체가 `RUNTIME_NOT_READY`(503)로 fail-closed(C2, 2026-08-25 실측), `AUTH_MODE=betterauth`에서는 WS도 `socket.destroy()`(C2b, 보류) — 단 WS upgrade는 `DATA_MODE`를 보지 않는 갭이 있다(§4 C2 참조) | 스키마만 있음 / provider 미착수 |
+| 백엔드 DB 도메인 provider·Consumer·TimescaleDB | `backend/migrations/001_app_auth.sql`에 자산/세션/릴레이/텔레메트리/진단/멱등성 스키마가 있고 컬럼이 `store/types.ts` 타입에 대응하나(완전한 1:1은 아니다 — `docs/handover/schema-open-questions.md` §0), production repository·Kafka Consumer·시계열 적재는 없음. `DATA_MODE=postgres`에서는 `/api/*` 전체가 `RUNTIME_NOT_READY`(503)로 fail-closed(C2, 2026-08-25 실측), `AUTH_MODE=betterauth`에서는 WS도 `socket.destroy()`(C2b, 보류) — 단 WS upgrade는 `DATA_MODE`를 보지 않는 갭이 있다(§4 C2 참조) | 스키마만 있음 / provider 미착수 |
 | 알림 발송 (카카오·SMS·메일) | 채널 ON/OFF 토글과 policy 응답만 있고(`server.ts:405`·`:409`), **실제로 메시지를 보내는 코드는 `backend/src`에 없다** | **보류(의도적)** — 토글 현행 유지, 추가 작업 없음 |
 | AI 로컬 추론 프로세스 | 코드 없음. `ai/` 디렉터리도 없다. 학습(Colab)·체크포인트 반출 절차·추론 프로세스 모두 미착수 | 미착수 — **별도 담당자** |
 | 로컬 실행 패키징 | **C8 완료(2026-08-25)** — 단일 오리진(`:3005`), `start-local.bat`(Windows, 수동 실행), `docs/local_run.md`. memory 모드 한정(Kafka·PostgreSQL·추론은 별도) | 완료 (memory 모드) |
@@ -165,9 +165,9 @@ v3 프로토타입과 정본 문서에는 모드 1/2, 대표 온도 최댓값, s
 
 > ⚠️ **`advertised.listeners`를 `localhost`로 두면 라즈베리파이가 못 붙는다.** 브로커가 클라이언트에게 자기 주소를 되돌려주는 값이라, `localhost`면 에지가 자기 자신에게 접속을 시도하며 조용히 실패한다. 호스트의 LAN IP로 잡는다.
 
-> **⚠️ 위 A2~A5에 필요한 스키마 중 5건이 아직 없다** — 추론 결과(A4) 적재 테이블, `age_ms`·`temp_points` 자리, TimescaleDB 하이퍼테이블(A3, 지금 PK로는 `create_hypertable`이 실패한다), 진단기(`device`) 테이블, 중복 방지 키(A5). 선택지와 결정 순서는 [`docs/handover/schema-open-questions.md`](handover/schema-open-questions.md).
+> **⚠️ A2~A5에 필요한 스키마 6건이 아직 없다** — 추론 결과(A4) 적재 테이블, `age_ms`·`temp_points`·`mode`·`soc_basis` 자리, TimescaleDB 하이퍼테이블(A3, 지금 PK로는 `create_hypertable`이 실패한다), 진단기(`device`) 테이블, 중복 방지 키(A5), 그리고 **B1 작업 중에 바로 막히는 `battery_asset.memo`**. 선택지와 결정 순서는 [`docs/handover/schema-open-questions.md`](handover/schema-open-questions.md).
 
-> 스키마 자체는 이미 `backend/migrations/001_app_auth.sql`에 있다 — `battery_asset`(38) / `measurement_session`(62) / `relay_state`(77) / `telemetry_metric`(88) / `diagnosis`(110) / `idempotency_key`(127) / `audit_log`(20) / `app_user_profile`(1). 컬럼은 `store.ts`의 타입과 이미 1:1로 맞는다. **스키마를 바꾸면 `store.ts` 타입도 같이 바뀌므로 반드시 합의 후 변경한다.**
+> 스키마 자체는 이미 `backend/migrations/001_app_auth.sql`에 있다 — `battery_asset`(38) / `measurement_session`(62) / `relay_state`(77) / `telemetry_metric`(88) / `diagnosis`(110) / `idempotency_key`(127) / `audit_log`(20) / `app_user_profile`(1). 컬럼은 `store.ts`의 타입에 대응한다(**완전한 1:1은 아니다** — `DemoBattery.memo`를 저장할 컬럼이 아예 없는 등 어긋나는 곳이 있다, `docs/handover/schema-open-questions.md` §0·Q6). **스키마를 바꾸면 `store.ts` 타입도 같이 바뀌므로 반드시 합의 후 변경한다.**
 
 ### A-2. AI 담당
 
@@ -196,12 +196,12 @@ v3 프로토타입과 정본 문서에는 모드 1/2, 대표 온도 최댓값, s
 - 인터페이스 `backend/src/store/contract.ts` — `CellGuardStore`. 에러는 `throw new Error("<CODE>")`, 반환값 방어 복사, 감사 로그 동반 메서드(`changeRelay`·`engageFailsafe`·`changeOpsStatus`·`saveMemo`·`changeUserStatus`·`startSession`)는 원자적이어야 한다는 규칙을 명문화.
 - 인메모리 구현체 `backend/src/store/memory.ts` — 위 인터페이스를 만족하는 참조 구현. 데모 시드(`hong`/`kimeng`/`leelab`/`parktest`, `PACK-001`~`005`, `DEMO-PACK-001`)를 포함.
 - facade `backend/src/store.ts` — 기존 호출부 이름을 유지한 채 `active.<method>.bind(active)`로 위임. `DATA_MODE`에 따른 구현체 분기는 아직 없음(2단계 몫, 지금은 무조건 `createMemoryStore()`).
-- 계약 테스트 19건 — `backend/src/store/contract.test.ts`의 `runStoreContractTests()`. 소유자 스코프, `BATTERY_BLOCKED` 게이트, 세션 SUPERSEDED 전이, 버전 충돌 등 도메인 불변식을 인메모리 구현체로 검증 완료. **PostgreSQL 구현체도 같은 스위트를 통과해야 한다**(2단계 완료 판정).
+- 계약 테스트 20건 — `backend/src/store/contract.test.ts`의 `runStoreContractTests()`. 소유자 스코프, `BATTERY_BLOCKED` 게이트, 세션 SUPERSEDED 전이, 버전 충돌 등 도메인 불변식을 인메모리 구현체로 검증 완료. **PostgreSQL 구현체도 같은 스위트를 통과해야 한다**(2단계 완료 판정).
 - 라우트 57개 async 전환 + `asyncRoute` 래퍼(`backend/src/asyncRoute.ts`) — `store.ts`의 모든 메서드가 `Promise`를 반환하도록 바뀌었으므로 `server.ts`의 호출부 전체가 `await`로 전환됐고, 각 라우트 핸들러를 `asyncRoute(async (req, res) => { ... })`로 감싸 에러를 `errorFromDomain()`으로 일괄 처리한다.
 
 **2단계(인프라 담당, 인계) — 정본은 `docs/handover/infra-implementations.md` 1부**:
 - `backend/src/store/postgres.ts`에 `createPostgresStore(pool: pg.Pool): CellGuardStore` 구현.
-- 계약 테스트 19건에 PostgreSQL 구현체를 추가로 통과시키고, 부분 유니크 인덱스 경합을 노리는 동시성 테스트를 별도로 추가.
+- 계약 테스트 20건에 PostgreSQL 구현체를 추가로 통과시키고, 부분 유니크 인덱스 경합을 노리는 동시성 테스트를 별도로 추가.
 - `battery_asset`/`measurement_session`의 `owner_user_id` FK가 아직 없는 Better Auth `user` 테이블을 참조하는 문제를 먼저 푼다(seed 또는 FK 제거 중 택1).
 - 완료 후 `server.ts`의 `DATA_MODE` 503 가드와 `store.ts`의 구현체 분기를 연다.
 

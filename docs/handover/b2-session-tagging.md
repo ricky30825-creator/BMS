@@ -49,10 +49,13 @@ status = 'ACTIVE'
 
 결과는 **0건 또는 1건**이다. 이유:
 
-- **사용자당 진단기는 1대** (`docs/product_contract.md` §3.2) — 한 사용자는 최대 1개의 device_id를 소유.
-- **설비당 활성 세션은 1개** — 같은 device_id로는 동시에 2개 이상의 활성 세션을 만들 수 없다(애플리케이션 레벨에서 인터락으로 보증).
+- **`device_id`당 활성 세션은 1개** — 이걸 보증하는 것은 애플리케이션 코드가 아니라 **DB의 부분 유니크 인덱스**다: `uq_active_session_device on measurement_session (device_id) where status = 'ACTIVE'`(`backend/migrations/001_app_auth.sql:74-75`). 즉 경합이 나도 DB가 막아 준다.
 
 따라서 결과가 항상 유일하고, "어느 배터리 세션인가"는 그 행의 `battery_id`로 바로 결정된다.
+
+> **⚠️ "사용자당 진단기 1대"를 근거로 삼지 말 것.** `docs/product_contract.md` §3.2가 그렇게 정하고 있고 `backend_contract.md:667`이 *"서버가 계정에 묶인 진단기를 자동 선택한다"*고 하지만, **user → device 매핑이 스키마에 아직 없다**(`device` 테이블 부재 — `schema-open-questions.md` Q4). 지금 유효한 보증은 위 유니크 인덱스 하나뿐이다.
+>
+> 그리고 **활성 세션의 범위가 "진단기별"인지 "설비 전체"인지 계약과 참조 구현이 갈린다** — `backend_contract.md:342`는 `device_id`당 1개, `backend/src/store/memory.ts:145-146` 주석은 *"for the whole installation, not one session per user"*(전역)다. 진단기가 1대뿐이라 지금은 결과가 같지만 2대가 되는 순간 갈린다. **Consumer 코드를 짜기 전에 백엔드와 확정할 것**(`infra-implementations.md` §2 참조).
 
 ### 2.2 캐싱 전략
 
@@ -70,7 +73,7 @@ status = 'ACTIVE'
   
 - **초기화 시**: 부팅 직후 Consumer는 데이터베이스에서 모든 device_id의 현재 활성 세션을 읽어 캐시를 채운다.
 
-> **⚠️ `status`는 `'ACTIVE'` / `'ENDED'` 두 값뿐이다.** `measurement_session_status_check` 제약이 그렇게 잡혀 있어(`backend/migrations/001_app_auth.sql:70`) `'COMPLETED'`·`'FAILED'`를 쓰면 INSERT/UPDATE가 거부된다. 종료 **사유**는 별도 컬럼 `end_reason`에 들어가며, 현재 백엔드가 쓰는 값은 두 개뿐이다(`backend/src/store/memory.ts:150`·`:172`):
+> **⚠️ `status`는 `'ACTIVE'` / `'ENDED'` 두 값뿐이다.** `measurement_session_status_check` 제약이 그렇게 잡혀 있어(`backend/migrations/001_app_auth.sql:68`) `'COMPLETED'`·`'FAILED'`를 쓰면 INSERT/UPDATE가 거부된다. 종료 **사유**는 별도 컬럼 `end_reason`에 들어가며, 현재 백엔드가 쓰는 값은 두 개뿐이다(`backend/src/store/memory.ts:150`·`:172`):
 >
 > | `end_reason` | 언제 |
 > |---|---|

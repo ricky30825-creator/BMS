@@ -358,7 +358,7 @@ ADS1115          LAN          battery-anomaly-alerts ◀─ alerts 발행 ─┤
 | S-DPVOCW | I2C/1-Wire/아날로그(ADS1115) 통신 드라이버 추상화 |
 | S-QPLAYR | 모드별 릴레이 채널 매핑 |
 | S-LWVJRY | 인터락(상호배제) 로직 — 모드 + active 측정 세션 단일성 |
-| S-IBQMVJ | 센서 메시지 JSON 스키마 (Raw 값만 에지 전송, `battery_id`는 백엔드 태깅) — 모드별 가용 필드 `gas_raw`(1·2)·`pressure_raw`(1)·`acoustic_raw`(1) 포함 |
+| S-IBQMVJ | 센서 메시지 JSON 스키마 (Raw 값만 에지 전송, `battery_id`는 백엔드 태깅) — 모드별 가용 필드는 **`gas_raw`(모드 2만)·`pressure_raw`(모드 1만)·`acoustic_raw`(항상 `null`, 센서 미도입)**. 정본은 CLAUDE.md 센서 표이며 회로가 그 근거다(2026-07-28) |
 | S-MVDKKZ | 오류/예외 이벤트 기록 |
 | S-BATAST | 배터리 자산관리(등록/선택) (`battery_id` UUID 발급, `target_mode` 고정, `chemistry` 필수·`series_count` 선택, 수동 매칭) |
 | S-MSESSN | 측정 세션 관리 및 백엔드 `battery_id` 태깅 (active 세션 1개, 미배정 데이터 경고) |
@@ -379,7 +379,7 @@ ADS1115          LAN          battery-anomaly-alerts ◀─ alerts 발행 ─┤
 
 > `battery_asset`, `measurement_session` 관계 테이블은 PostgreSQL(비시계열)에 두고, 시계열 하이퍼테이블은 `battery_id` FK로 참조한다.
 >
-> **⚠️ 위 두 스펙은 "설계"가 아니라 "이미 있는 스키마 위의 남은 작업"이다.** 실제 컬럼·제약의 정본은 `backend/migrations/001_app_auth.sql`이며 테이블 8개(`app_user_profile`·`audit_log`·`battery_asset`·`measurement_session`·`relay_state`·`telemetry_metric`·`diagnosis`·`idempotency_key`)가 이미 있다. **이 문서가 "시계열 하이퍼테이블"이라 부르는 테이블의 실제 이름은 `telemetry_metric`이다.** 아직 스키마가 없는 5건(추론 결과 적재 테이블·`age_ms`/`temp_points` 자리·하이퍼테이블 전환·진단기 테이블·중복 방지 키)은 `docs/handover/schema-open-questions.md`.
+> **⚠️ 위 두 스펙은 "설계"가 아니라 "이미 있는 스키마 위의 남은 작업"이다.** 실제 컬럼·제약의 정본은 `backend/migrations/001_app_auth.sql`이며 테이블 8개(`app_user_profile`·`audit_log`·`battery_asset`·`measurement_session`·`relay_state`·`telemetry_metric`·`diagnosis`·`idempotency_key`)가 이미 있다. **이 문서가 "시계열 하이퍼테이블"이라 부르는 테이블의 실제 이름은 `telemetry_metric`이다.** 아직 스키마가 없는 6건(추론 결과 적재 테이블·`age_ms`/`temp_points`/`mode`/`soc_basis` 자리·하이퍼테이블 전환·진단기 테이블·중복 방지 키·`battery_asset.memo`)은 `docs/handover/schema-open-questions.md`.
 
 ### AI 모델 (4개)
 | ID | 스펙 |
@@ -612,9 +612,10 @@ ADS1115          LAN          battery-anomaly-alerts ◀─ alerts 발행 ─┤
 > |---|---|---|
 > | 1 | `docs/implementation_status.md` §2 A-1 | 담당 경계와 완료 판정. **A1~A5가 곧 작업표다.** §3 B군은 백엔드가 어디까지 해뒀고 어디부터 넘어오는지 |
 > | 2 | `CLAUDE.md` §Kafka 토픽 규약 · §센서 데이터 JSON 스키마 | 토픽 3개의 발행자·용도, 에지 프레임의 필드와 부호 규약. ⚠️ `advertised.listeners`를 `localhost`로 두면 라즈베리파이가 **조용히** 못 붙는다 |
-> | 3 | `docs/handover/infra-implementations.md` | **구현 명세 정본.** 1부 `CellGuardStore`(PostgreSQL) / 2부 `DeviceCommandPort`(Kafka). 완료 판정은 계약 테스트 19건 통과 |
+> | 3 | `docs/handover/infra-implementations.md` | **구현 명세 정본.** 1부 `CellGuardStore`(PostgreSQL) / 2부 `DeviceCommandPort`(Kafka). 완료 판정은 계약 테스트 20건 통과 |
 > | 4 | `docs/handover/b2-session-tagging.md` | Consumer가 `device_id` → `battery_id`로 귀속하는 규칙 5개 + 완료 판정 SQL 2건 |
-> | 5 | `docs/handover/schema-open-questions.md` | **아직 스키마가 없는 5건.** 추론 결과 적재 테이블·`age_ms`/`temp_points` 자리·하이퍼테이블·진단기 테이블·중복 방지 키. Consumer 착수 전 백엔드(·AI)와 합의할 것 |
+> | 5 | `docs/handover/schema-open-questions.md` | **아직 스키마가 없는 6건.** 추론 결과 적재 테이블·`age_ms`/`temp_points`/`mode`/`soc_basis` 자리·하이퍼테이블·진단기 테이블·중복 방지 키·`battery_asset.memo`. Consumer 착수 전 백엔드(·AI)와 합의할 것. **Q6만은 1부 작업 중에 바로 막히므로 먼저 본다** |
+> | 6 | `docs/verification_matrix.md` | 무엇을 어떻게 검증하면 끝난 것으로 치는지. 백엔드 typecheck·빌드·`/health`·테스트 명령이 여기 있다 |
 >
 > 세부 계약이 필요해지면 — 에러 코드는 `docs/backend_contract.md` §1.10, 원자성 요구는 §3.4, 에지 프레임 정의와 `battery-events`의 code+params는 `docs/hardware/mode1_backend_spec.md` §9·§11이다.
 >
@@ -626,7 +627,7 @@ ADS1115          LAN          battery-anomaly-alerts ◀─ alerts 발행 ─┤
 
 - [ ] 호스트 PC에 Kafka 설치·토픽 3개 생성, LAN 한정 PLAINTEXT 구성 (S-BYYPVQ) — `advertised.listeners`를 호스트 LAN IP로 잡아야 에지가 붙는다
 - [ ] 브로커·DB 포트를 방화벽에서 LAN으로 제한
-- [ ] PostgreSQL + TimescaleDB 설치, `telemetry_metric` 하이퍼테이블 전환·압축·보존정책 (S-NFEETD) — ⚠️ **스키마를 새로 설계하지 않는다.** 테이블 8개가 이미 `backend/migrations/001_app_auth.sql`에 있고 `backend/src/store/types.ts`의 타입과 1:1이다(한 쌍이라 한쪽만 바꾸면 런타임에서 조용히 깨진다). 하이퍼테이블 전환은 **지금 PK로는 `create_hypertable`이 거부되므로** `docs/handover/schema-open-questions.md` Q3을 먼저 읽는다
+- [ ] PostgreSQL + TimescaleDB 설치, `telemetry_metric` 하이퍼테이블 전환·압축·보존정책 (S-NFEETD) — ⚠️ **스키마를 새로 설계하지 않는다.** 테이블 8개가 이미 `backend/migrations/001_app_auth.sql`에 있고 `backend/src/store/types.ts`의 도메인 타입에 대응한다(둘은 한 쌍이라 한쪽만 바꾸면 런타임에서 조용히 깨진다 — 다만 완전한 1:1은 아니고 어긋나는 컬럼이 있다, `schema-open-questions.md` §0). 하이퍼테이블 전환은 **지금 PK로는 `create_hypertable`이 거부되므로** `docs/handover/schema-open-questions.md` Q3을 먼저 읽는다
 - [x] 백엔드 프로젝트 초기화 (Node.js + TypeScript + Express)
 - [x] Better Auth 기반 사용자 인증 골격 구현 (R-HBLCDS — F-SDSVND, F-TFJKKF, F-HUYIXC)
 - [ ] ~~Better Auth 실인증 전환~~ — **보류(2026-08-25 결정).** 코드는 그대로 두고 `AUTH_MODE=demo`로 꺼둔다. 나중에 환경변수만 바꿔 켠다. 데모 계정에 ADMIN이 있어 RBAC·감사로그 시연에는 지장이 없다

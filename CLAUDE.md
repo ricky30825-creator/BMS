@@ -33,6 +33,7 @@ Raspberry Pi              Kafka → Consumer → PostgreSQL + TimescaleDB
 | 기능·유저플로우 (디자인 무관) | `docs/product_contract.md` — 새 디자인 작업의 입력 |
 | REST·WebSocket 인터페이스 | `docs/backend_contract.md` |
 | DB 스키마 (실제 컬럼·제약) | `backend/migrations/001_app_auth.sql` — 테이블 8개. `backend/src/store/types.ts`와 **한 쌍**이라 한쪽만 고치면 조용히 깨진다 |
+| 검증·테스트·중단 조건 | `docs/verification_matrix.md` |
 | 인프라(Kafka·PostgreSQL) 인계 — 구현 경계·태깅 규칙·미결정 스키마 | `docs/handover/infra-implementations.md`, `docs/handover/b2-session-tagging.md`, `docs/handover/schema-open-questions.md` |
 | 관리자 기능·플로우 | `docs/admin_feature_definition.md`, `docs/admin_userflow.md` |
 | 사용자 기능·플로우 | `docs/feature_definition.md`(v3 커밋 `9bb6d8e` 기준), `docs/userflow.md` |
@@ -231,7 +232,7 @@ LSTM-AutoEncoder(재구성 오차 = 현재 이상)와 Informer(예측 오차 = �
 
 - 실제 마크업은 **210번 줄의 JSON 문자열 하나**(약 30만 자 / 2,372줄)에 들어 있다. 반드시 `tools/bundle_io.py`의 `unpack`/`pack`/`backup`으로만 읽고 쓴다.
 - **202번 줄은 22MB base64 자산 매니페스트다. 절대 건드리지 않는다.**
-- `설계 산출물/`은 `.gitignore` 대상이라 되돌리기가 불가능하다. 편집 전 `backup`을 부른다.
+- **편집 전 `backup`을 부른다.** ⚠️ *"`설계 산출물/`은 `.gitignore` 대상이라 되돌리기가 불가능하다"*는 옛 서술은 **틀렸다** — 이 파일들은 `.gitignore` 규칙보다 먼저 추적에 들어가 무시 규칙이 적용되지 않는다(`git ls-files "설계 산출물"`로 확인). `git restore`로 복구된다. 백업 습관은 그대로 유지한다.
 - 마크업은 `{{ 바인딩 }}` 자리표시자를 쓰므로 한국어 문자열로 grep하면 안 나온다. **바인딩 이름으로 찾는다.** 어떤 화면이 무엇을 보여주는지 확인할 때 이 방법이 유일하게 신뢰할 수 있다.
 - 브라우저로 확인할 때는 `file://`이 확장에 차단되므로 로컬 HTTP 서버로 띄운다 — `설계 산출물/`에서 `python3 -m http.server 8807 --bind 127.0.0.1`.
 
@@ -268,6 +269,9 @@ LSTM-AutoEncoder(재구성 오차 = 현재 이상)와 Informer(예측 오차 = �
 - 사용자당 진단기는 **1대 고정**이다. `deviceId`를 API로 받지 않고 서버가 자동 선택한다.
 - **기능정의서의 화면 위치는 v3와 어긋난 게 있다.** REQ-WEB-026(최근 이벤트)은 대시보드가 아니라 이상 탐지 화면, REQ-WEB-051(정렬)은 이벤트가 아니라 배터리 관리 화면, REQ-WEB-054/055(CSV·PDF)는 이벤트가 아니라 추세 화면, REQ-WEB-037의 제조사/모델 입력은 등록 폼에 없음. 충돌 시 v3 HTML이 우선한다.
 
-- **`DATA_MODE=postgres`면 `/api/*`가 전부 `503 RUNTIME_NOT_READY`다 — 고장이 아니라 의도된 fail-closed다.** PostgreSQL 저장소 구현체(`backend/src/store/postgres.ts`)가 아직 없어서, 게이트를 열면 "실 DB" 라벨을 달고 인메모리 데모 데이터가 나간다. **구현이 끝나기 전에 `backend/src/server.ts`의 이 가드를 열지 않는다.** 정본은 `docs/handover/infra-implementations.md` §9. ⚠️ WebSocket은 이 게이트를 공유하지 않는다 — upgrade 핸들러가 `AUTH_MODE`만 보고 `DATA_MODE`를 안 봐서, `DATA_MODE=postgres`여도 WS는 열려 데모 데이터를 계속 흘린다(알려진 갭, 미수정).
+- **`DATA_MODE=postgres`면 도메인 `/api/*`가 `503 RUNTIME_NOT_READY`다 — 고장이 아니라 의도된 fail-closed다.** PostgreSQL 저장소 구현체(`backend/src/store/postgres.ts`)가 아직 없어서, 게이트를 열면 "실 DB" 라벨을 달고 인메모리 데모 데이터가 나간다. **구현이 끝나기 전에 `backend/src/server.ts`의 이 가드를 열지 않는다.** 정본은 `docs/handover/infra-implementations.md` §9.
+  - **"전부"는 아니다** — `POST /api/demo/login`·`/api/demo/logout`이 이 가드보다 **먼저** 등록돼(`backend/src/server.ts:314`·`:338` vs 가드 `:356`) `DATA_MODE=postgres`에서도 그대로 응답한다.
+  - ⚠️ **WebSocket도 이 게이트를 공유하지 않는다** — upgrade 핸들러가 `AUTH_MODE`만 보고 `DATA_MODE`를 안 본다(`:1102-1131`).
+  - ⚠️ **둘을 합치면 fail-closed가 뚫린다**: `DATA_MODE=postgres`에서도 데모 토큰을 발급받아 WS로 인메모리 데모 데이터를 끝까지 흘리는 완결된 경로가 있다. **"503이니 안전하다"고 가정하지 마라.** 알려진 갭이며 아직 고치지 않았다(C2b와 같은 지점).
 
 > 미결정 항목은 `docs/backend_contract.md` §9. 37건 중 32건이 닫혔고, 열린 것은 지표 임계값(Q27)·문구 코드 목록(Q34)·세션 타임아웃 분수(Q35)·보조배터리 진단 부하 수단과 문턱값(Q36)뿐이다. Q6(SOH/RUL 산출 주체)은 **모드 2만 확정**이고 모드 1은 보류다.

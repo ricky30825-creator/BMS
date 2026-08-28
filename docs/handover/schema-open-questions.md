@@ -1,14 +1,16 @@
-# 인프라 담당자 인계 — 미결정 스키마 5건
+# 인프라 담당자 인계 — 미결정 스키마 6건
 
-> 작성 2026-08-28. `docs/handover/infra-implementations.md`(구현 명세)와 `docs/handover/b2-session-tagging.md`(태깅 규칙)가 **이미 있는 스키마 위에서** 무엇을 만들지 정한 문서라면, 이 문서는 **아직 스키마 자체가 없는 5개 지점**을 모아 둔 것이다.
+> 작성 2026-08-28. `docs/handover/infra-implementations.md`(구현 명세)와 `docs/handover/b2-session-tagging.md`(태깅 규칙)가 **이미 있는 스키마 위에서** 무엇을 만들지 정한 문서라면, 이 문서는 **아직 스키마 자체가 없는 6개 지점**을 모아 둔 것이다.
 >
 > 저장소 실측(`backend/migrations/001_app_auth.sql` 135줄, `backend/src/store/types.ts`, `docs/backend_contract.md`) 기준이다.
 
 ## 0. 이 문서를 쓰는 법
 
-`backend/migrations/001_app_auth.sql`에는 테이블이 8개 있다 — `app_user_profile`, `audit_log`, `battery_asset`, `measurement_session`, `relay_state`, `telemetry_metric`, `diagnosis`, `idempotency_key`. 이 8개는 `backend/src/store/types.ts`의 타입과 1:1로 맞춰져 있고, `CellGuardStore`(PostgreSQL) 구현에 필요한 것은 **전부 여기 있다.**
+`backend/migrations/001_app_auth.sql`에는 테이블이 8개 있다 — `app_user_profile`, `audit_log`, `battery_asset`, `measurement_session`, `relay_state`, `telemetry_metric`, `diagnosis`, `idempotency_key`. 이 8개가 `backend/src/store/types.ts`의 도메인 타입에 대응하며, `CellGuardStore`(PostgreSQL) 구현에 필요한 것은 **대체로 여기 있다.**
 
-없는 것은 **에지·AI 파이프라인이 실제로 흐르기 시작할 때 필요해지는 것들**이다. 그래서 백엔드 담당자가 인메모리 데모를 만드는 동안에는 한 번도 부딪히지 않았고, Consumer를 붙이는 순간 5건이 동시에 드러난다.
+> **⚠️ "1:1로 맞다"는 서술은 과장이다.** 컬럼과 타입이 정확히 일치하는 것은 `measurement_session` ↔ `DemoSession` 하나뿐이다. 어긋나는 곳: `telemetry_metric`·`idempotency_key`에 대응하는 행 타입이 아예 없고, `DemoBattery.latest`(8필드, `score` 포함)·`mode1Health`(6필드)·`battery_asset.capacity_mah`·`relay_state.reason_params`·`diagnosis.completed_at`·`app_user_profile.is_active`·`audit_log.ip_address`/`user_agent`가 한쪽에만 있다. 그중 **저장할 곳이 아예 없어 구현을 막는 것 하나**는 Q6으로 따로 뺐다.
+
+없는 것은 **에지·AI 파이프라인이 실제로 흐르기 시작할 때 필요해지는 것들**이다. 그래서 백엔드 담당자가 인메모리 데모를 만드는 동안에는 한 번도 부딪히지 않았고, Consumer를 붙이는 순간 6건이 동시에 드러난다.
 
 각 항목은 **현재 상태 → 왜 막히는가 → 이미 정해져 있는 것 → 선택지 → 권장 → 결정하면 같이 바뀌는 것** 순서다.
 
@@ -18,7 +20,7 @@
 
 > **스키마를 바꾸면 `backend/src/store/types.ts`도 같이 바뀐다.** 마이그레이션과 타입 정의는 한 쌍이므로, 컬럼을 추가·삭제·이름 변경하기 전에 반드시 백엔드 담당자와 합의한다.
 
-**아래 5건은 전부 "새 테이블·새 컬럼"이므로 예외 없이 합의 대상이다.** 혼자 정하고 진행하면, 백엔드가 그 테이블을 읽는 코드를 다른 모양으로 짜서 통합 시점에 드러난다.
+**아래 6건은 전부 "새 테이블·새 컬럼"이므로 예외 없이 합의 대상이다.** 혼자 정하고 진행하면, 백엔드가 그 테이블을 읽는 코드를 다른 모양으로 짜서 통합 시점에 드러난다.
 
 ### 결정 기록
 
@@ -31,6 +33,7 @@
 | Q3 | TimescaleDB 하이퍼테이블 전환 | | | |
 | Q4 | 진단기(`device`) 테이블 | | | |
 | Q5 | 텔레메트리 중복 방지 키 | | | |
+| Q6 | `battery_asset.memo` 컬럼 | | | |
 
 ---
 
@@ -42,7 +45,7 @@
 
 - 마이그레이션 8개 테이블 어디에도 `score`·`grade`·`ae_score`·`informer_score` 컬럼이 없다.
 - `telemetry_metric`(`:88`)은 센서 Raw 전용이라 점수 컬럼이 없다.
-- 백엔드는 이 값을 `DemoBattery.latest.score`(`backend/src/store/types.ts:42`) **하나의 최신값**으로만 들고 있고, 그것도 인메모리다. 이력이 없다.
+- 백엔드는 이 값을 `DemoBattery.latest.score`(`backend/src/store/types.ts:40`) **하나의 최신값**으로만 들고 있고, 그것도 인메모리다. 이력이 없다.
 
 ### 왜 막히는가
 
@@ -64,7 +67,7 @@ Consumer가 alerts 토픽을 구독해도 `INSERT` 대상이 없어서 A4를 시
 - **점수는 0.0–1.0 실수다**(`backend_contract.md` §1.6). 0–100 정수는 프론트 표시용이며 DB에 그 형태로 넣지 않는다.
 - **`grade`는 저장값이 아니라 계산값이다**(CLAUDE.md §이상점수와 등급). 0.3/0.6/0.8 고정 임계로 **서버가 계산**한다. 컬럼으로 둘 수는 있으나, 두면 점수와 어긋날 수 있는 중복 상태가 생긴다.
 - **`aeScore`/`informerScore`는 `null`을 허용한다**(`:753`).
-- `peakScore`·`todayCount`·`riskDistribution`은 **소유자 스코프 집계**다(`:774`) — `battery_asset.owner_user_id`까지 조인이 필요하다.
+- `peakScore`·`todayCount`·`riskDistribution`은 **소유자 스코프 집계**다(`:775`) — `battery_asset.owner_user_id`까지 조인이 필요하다.
 
 ### 선택지
 
@@ -75,7 +78,7 @@ Consumer가 alerts 토픽을 구독해도 `INSERT` 대상이 없어서 A4를 시
 ### 결정하면 같이 바뀌는 것
 
 - `backend/src/store/types.ts` — `DemoBattery.latest.score` 단일값 외에 이력 조회 타입이 필요해진다.
-- `backend/src/store/contract.ts` — `CellGuardStore`에 조회 메서드가 는다(예: `latestAnomaly`, `anomalySummary`). **인터페이스 변경이므로 백엔드 합의 필수**이고, 계약 테스트 19건에도 항목이 붙는다.
+- `backend/src/store/contract.ts` — `CellGuardStore`에 조회 메서드가 는다(예: `latestAnomaly`, `anomalySummary`). **인터페이스 변경이므로 백엔드 합의 필수**이고, 계약 테스트 20건에도 항목이 붙는다.
 - `model.version`(`ae-1.3+informer-0.9`)은 AI 담당자의 체크포인트 반출 절차(A7 — *"특징 버전 표기"*)와 같은 값이어야 한다. **3자 합의 지점이다.**
 
 ---
@@ -93,13 +96,22 @@ Consumer가 alerts 토픽을 구독해도 `INSERT` 대상이 없어서 A4를 시
 
 `telemetry_metric`에는 **둘 다 없다.** 스칼라 `temp_contact`·`temp_ir_surface`만 있다.
 
+**그리고 같은 성격으로 두 열이 더 빠져 있다 — `mode`와 `soc_basis`다.** `CSV_HEADER`(`backend/src/store/types.ts:110`)와 `docs/backend_contract.md:903`이 CSV 열로 약속하는데 컬럼이 없다:
+
+```
+CSV_HEADER            : ...,session_id,mode,voltage_v,...,soc_pct,soc_basis,gas_raw,...,age_ms
+telemetry_metric 컬럼 :  mode ✗   soc_basis ✗   age_ms ✗   temp_points ✗
+```
+
+⚠️ **`mode`는 조인으로 복구할 수 없는 경우가 있다.** `battery_id`가 채워진 프레임이면 `battery_asset.target_mode`로 유도되지만, **§3이 활성 세션 없는 프레임을 `battery_id = null`로 반드시 적재하라고 규정하므로** 그 프레임들의 `mode`는 영구히 복구 불가능하다. 에지 프레임에는 `mode`가 실려 온다(CLAUDE.md 센서 스키마, `docs/hardware/mode1_backend_spec.md:726`). `soc_basis`는 모드 2의 상대 SOC 여부라 **모드 1의 절대 SOC와 같은 값으로 취급하면 안 되는** 구분값이다(CLAUDE.md). Q2를 결정할 때 이 두 열을 같이 올린다.
+
 ### 왜 막히는가
 
 둘 다 버려도 되는 값이 아니다.
 
 - **`age_ms`는 AI 정확도에 직접 걸린다.** CLAUDE.md가 이 필드를 도입한 이유가 *"센서마다 갱신 주기가 달라 100ms 프레임의 절반 이상이 재탕 값인데, 이걸 모르면 AI가 계단 파형을 실제 온도 변화율로 착각한다"*이다. `dT_dt`·`d2T_dt2`가 두 모델의 공통 입력 특징이므로, 이 값이 없으면 학습 데이터셋 자체가 오염된다.
 - **`temp_points`는 AI 특징용이다**(`mode1_backend_spec.md` §9-2 "소비자: **AI 특징용이다.** 프론트엔드에 노출하지 않는다"). 지점 간 온도차를 특징으로 쓰기 위한 값이다.
-- 그리고 **`CSV_HEADER`에 이미 `age_ms`가 들어 있다**(`backend/src/store/types.ts:104`, `backend_contract.md:903`). Raw CSV 내보내기가 이 열을 약속하고 있는데 저장하지 않으면 영원히 빈 칸이다.
+- 그리고 **`CSV_HEADER`에 이미 `age_ms`가 들어 있다**(`backend/src/store/types.ts:110`, `backend_contract.md:903`). Raw CSV 내보내기가 이 열을 약속하고 있는데 저장하지 않으면 영원히 빈 칸이다.
 
 ### 이미 정해져 있는 것
 
@@ -115,7 +127,7 @@ Consumer가 alerts 토픽을 구독해도 `INSERT` 대상이 없어서 A4를 시
 
 ### 결정하면 같이 바뀌는 것
 
-- `backend/src/store/types.ts`의 `csvRow()`(`:106`)가 지금 `age_ms` 자리에 빈 문자열을 넣고 있다. 실제 값을 채우려면 이 함수도 바뀐다.
+- `backend/src/store/types.ts`의 `csvRow()`(`:112`)가 지금 `age_ms` 자리에 빈 문자열을 넣고 있다. 실제 값을 채우려면 이 함수도 바뀐다.
 - `COMBINED_EXISTING_PARTS_V1` 프로필에서는 `temp_points.contact`가 통째로 `null`이다(`backend_contract.md:1414`). 적재 코드가 이 경우를 견뎌야 한다.
 
 ---
@@ -164,7 +176,7 @@ TimescaleDB는 **모든 UNIQUE 인덱스(기본키 포함)가 파티셔닝 컬�
 
 ### 현재 상태
 
-`measurement_session.device_id`는 `text not null`이며 **어떤 테이블도 참조하지 않는다**(`001_app_auth.sql:67`). 진단기를 나타내는 테이블이 없기 때문이다. 인메모리 구현은 이 값을 `"demo-device-01"` 문자열로 **하드코딩**한다(`backend/src/store/memory.ts:154`).
+`measurement_session.device_id`는 `text not null`이며 **어떤 테이블도 참조하지 않는다**(`001_app_auth.sql:66`). 진단기를 나타내는 테이블이 없기 때문이다. 인메모리 구현은 이 값을 `"demo-device-01"` 문자열로 **하드코딩**한다(`backend/src/store/memory.ts:154`).
 
 그런데 계약은 진단기를 1급 개체로 다룬다:
 
@@ -223,11 +235,44 @@ Consumer의 **모든 조회가 `device_id`를 키로 한다**(`b2-session-taggin
 
 ---
 
+## Q6. `DemoBattery.memo`를 저장할 컬럼이 없다
+
+### 현재 상태
+
+`backend/src/store/types.ts:30-31`에는 메모가 **두 개**다:
+
+```ts
+memo: string;        // 사용자 메모
+adminMemo: string;   // 관리자 메모
+```
+
+그런데 `battery_asset` DDL에는 **`admin_memo`만 있다**(`backend/migrations/001_app_auth.sql:51`). 사용자 메모를 넣을 컬럼이 없다.
+
+### 왜 막히는가
+
+`memo`는 죽은 필드가 아니다 — `backend/src/server.ts:168`이 응답에 실어 내리고 `:494`가 `PATCH`로 수정한다(`UpdateBatteryInput.memo`, `contract.ts`). **즉 `createPostgresStore`를 짜는 순간 `updateBattery`에서 저장할 곳이 없어 막힌다.** 인메모리 구현에서는 그냥 객체 필드라 여태 드러나지 않았다.
+
+이건 Q1~Q5와 성격이 다르다 — **"나중에 필요해지는 것"이 아니라 1부(PostgreSQL 저장소) 작업 중에 바로 부딪히는 것**이다.
+
+### 선택지
+
+- **(a) 권장 — `battery_asset`에 `memo text not null default ''` 추가.** `admin_memo`와 대칭이고 한 줄이면 끝난다. 관리자 메모와 사용자 메모를 분리해 저장하는 현재 계약(`saveMemo`는 관리자용·감사 로그 동반, `updateBattery`는 소유자용)이 그대로 유지된다.
+- **(b) `admin_memo` 하나로 합친다.** 컬럼이 늘지 않지만 **계약 위반이다** — 두 메모는 권한이 다르고(§5의 `saveMemo`는 원자적 감사 기록 대상), 합치면 소유자가 관리자 메모를 덮어쓴다.
+- **(c) `memo`를 제거한다.** 프론트·라우트·타입을 같이 걷어내야 하므로 **백엔드 몫이고 인프라가 결정할 사안이 아니다.**
+
+### 결정하면 같이 바뀌는 것
+
+마이그레이션만 바뀌고 `store/types.ts`는 그대로다 — **이 문서에서 유일하게 타입 변경이 필요 없는 항목**이라 (a)가 가장 싸다.
+
+---
+
 ## 요약 — 결정 순서 제안
 
 1. **Q3 + Q5를 함께 정한다.** PK 모양과 중복 방지 키가 같은 결정이라 따로 풀면 두 번 마이그레이션한다.
 2. **Q4를 정한다.** Consumer의 조회 키(`device_id`)의 출처가 정해져야 태깅 규칙(`b2-session-tagging.md`)이 실제 값 위에서 돈다.
 3. **Q1을 정한다.** A4 착수 조건이고, `CellGuardStore` 인터페이스가 늘어나므로 백엔드 합의가 가장 크게 필요하다.
 4. **Q2를 정한다.** 위 셋보다 급하지 않지만, **데이터를 모으기 시작하기 전에** 정해야 한다 — 나중에 정하면 그때까지 쌓인 데이터에는 그 값이 없다.
+
+> **Q6은 이 순서 밖이다 — 가장 먼저, 그리고 가장 싸게 끝난다.** 1부(PostgreSQL 저장소) 작업 중에 바로 막히는 항목이고 컬럼 한 줄이면 해결된다.
 
 > Q1·Q2는 **AI 담당자와도 걸린다**(`model.version` 표기, `age_ms` 필요 여부, 보존 기간 = 데이터셋 상한). 백엔드 2자 합의로 끝내지 말 것.

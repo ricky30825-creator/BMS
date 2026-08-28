@@ -2,7 +2,7 @@
 
 > 작성일 2026-08-27 (Task 15, 백엔드 인계 계획의 마지막 태스크). 이 문서 하나로 두 구현체의 경계를 함께 정의한다 — 저장소 커밋과 에지 명령 발행이 서로 맞물려 있어서(§13·§14), 따로 인계하면 그 경계가 두 문서에 나뉘어 드리프트가 난다.
 >
-> 백엔드가 이미 끝낸 것: 비동기 `CellGuardStore` 인터페이스(`backend/src/store/contract.ts`) + 인메모리 구현체(`backend/src/store/memory.ts`) + 계약 테스트 19건, `DeviceCommandPort` 인터페이스(`backend/src/device/port.ts`) + 로깅 스텁(`backend/src/device/logging.ts`), 순수 `judgeFailsafe` 판정 함수(`backend/src/failsafe.ts`) + 그 저장소/에지/WS 배선(`backend/src/failsafeRunner.ts`, `backend/src/server.ts`).
+> 백엔드가 이미 끝낸 것: 비동기 `CellGuardStore` 인터페이스(`backend/src/store/contract.ts`) + 인메모리 구현체(`backend/src/store/memory.ts`) + 계약 테스트 20건, `DeviceCommandPort` 인터페이스(`backend/src/device/port.ts`) + 로깅 스텁(`backend/src/device/logging.ts`), 순수 `judgeFailsafe` 판정 함수(`backend/src/failsafe.ts`) + 그 저장소/에지/WS 배선(`backend/src/failsafeRunner.ts`, `backend/src/server.ts`).
 > 인프라 담당자가 할 것: 두 인터페이스의 **실제 구현체**(PostgreSQL, Kafka)와 그 사이 원자성 결정.
 
 ---
@@ -24,21 +24,31 @@ export function createPostgresStore(pool: pg.Pool): CellGuardStore { /* ... */ }
 
 ### 2. 완료 판정
 
-`backend/src/store/contract.test.ts` 맨 아래(152번째 줄, `runStoreContractTests("memory", ...)` 다음)에 아래 한 줄을 추가하고 계약 테스트 19건을 전부 통과시킨다.
+`backend/src/store/contract.test.ts` 맨 아래(164번째 줄, `runStoreContractTests("memory", ...)` 다음)에 아래 한 줄을 추가하고 계약 테스트 20건을 전부 통과시킨다.
 
 ```ts
 runStoreContractTests("postgres", async () => createPostgresStore(testPool));
 ```
 
-`testPool`은 테스트 전용 PostgreSQL 인스턴스(또는 트랜잭션 롤백 방식의 격리)를 가리키는 `pg.Pool`이며, 이 명세 밖에서 인프라 담당자가 준비한다. 19건은 인메모리 구현체가 이미 통과하고 있는 계약이므로, PostgreSQL 구현체가 이 중 하나라도 다르게 행동하면 계약 위반이다.
+`testPool`은 테스트 전용 PostgreSQL 인스턴스(또는 트랜잭션 롤백 방식의 격리)를 가리키는 `pg.Pool`이며, 이 명세 밖에서 인프라 담당자가 준비한다. 20건은 인메모리 구현체가 이미 통과하고 있는 계약이므로, PostgreSQL 구현체가 이 중 하나라도 다르게 행동하면 계약 위반이다.
+
+> **⚠️ 이 20건은 "활성 세션이 진단기별인가 설비 전체인가"를 검출하지 못한다 — 착수 전에 백엔드와 확정할 것.**
+>
+> 계약과 참조 구현이 갈려 있다. `docs/backend_contract.md:342`는 **`device_id`당 `ACTIVE` 세션 최대 1개**(per-device), `backend/src/store/memory.ts:145-146` 주석은 *"one active battery and one active session **for the whole installation**, not one session per user"*(전역)다. DB가 실제로 보증하는 것은 per-device다(`uq_active_session_device`, §6).
+>
+> 지금 둘이 같아 보이는 이유는 `memory.ts:154`가 `deviceId: "demo-device-01"`을 상수로 박아 진단기가 1대뿐이기 때문이다(Q4 — `device` 테이블이 없다). **진단기가 2대가 되는 순간 갈린다.**
+>
+> 그리고 이 차이를 계약 테스트가 못 잡는다 — `contract.test.ts:31-40`의 *"설비 전체에 활성 세션은 하나뿐"* 테스트가 제목과 달리 **같은 사용자·같은 진단기로만** `startSession`을 두 번 부른다. per-device로 짜든 전역으로 짜든 양쪽 다 통과하므로, **"20건 통과"를 완료 판정으로 삼으면 이 항목만 통합 시점까지 살아남는다.**
 
 ### 3. 스키마
 
-`backend/migrations/001_app_auth.sql`에 8개 테이블이 이미 있다: `app_user_profile`, `audit_log`, `battery_asset`, `measurement_session`, `relay_state`, `telemetry_metric`, `diagnosis`, `idempotency_key`. 컬럼은 `backend/src/store/types.ts`의 타입과 1:1로 맞다.
+`backend/migrations/001_app_auth.sql`에 8개 테이블이 이미 있다: `app_user_profile`, `audit_log`, `battery_asset`, `measurement_session`, `relay_state`, `telemetry_metric`, `diagnosis`, `idempotency_key`. 컬럼은 `backend/src/store/types.ts`의 도메인 타입에 대응한다 — **다만 완전한 1:1은 아니다**(어긋나는 목록은 `schema-open-questions.md` §0).
 
 **⚠️ 스키마를 바꾸면 `store/types.ts`도 같이 바뀐다.** 마이그레이션과 타입 정의는 한 쌍이므로, 컬럼을 추가·삭제·이름 변경하기 전에 반드시 백엔드 담당자와 합의한다. 합의 없이 한쪽만 바꾸면 타입은 컴파일되는데 런타임에서 컬럼이 없어 조용히 깨지거나, 반대로 타입에 없는 컬럼이 방치된다.
 
-> **이 8개 테이블은 `CellGuardStore` 구현에 필요한 것을 전부 담고 있다.** 반면 에지·AI 파이프라인(A2~A5)에 필요한 스키마는 아직 **없는 것이 5건** 있다 — 추론 결과 적재 테이블, `age_ms`·`temp_points` 자리, TimescaleDB 하이퍼테이블, 진단기(`device`) 테이블, 중복 방지 키. 전부 위 규칙에 따라 합의 대상이므로 [`docs/handover/schema-open-questions.md`](schema-open-questions.md)에 선택지와 함께 따로 모아 두었다. **1부(PostgreSQL 저장소) 작업만 할 때는 읽지 않아도 되고, Consumer를 붙이기 전에 읽는다.**
+> **이 8개 테이블은 `CellGuardStore` 구현에 필요한 것을 전부 담고 있다.** 반면 아직 **없는 스키마가 6건** 있다 — 추론 결과 적재 테이블, `age_ms`·`temp_points`·`mode`·`soc_basis` 자리, TimescaleDB 하이퍼테이블, 진단기(`device`) 테이블, 중복 방지 키, 그리고 `battery_asset.memo`. 전부 위 규칙에 따라 합의 대상이므로 [`docs/handover/schema-open-questions.md`](schema-open-questions.md)에 선택지와 함께 따로 모아 두었다.
+
+> ⚠️ **그중 Q6(`battery_asset.memo`)은 1부 작업 중에 바로 막힌다.** 나머지 5건은 Consumer(2부)를 붙일 때 필요해지지만, Q6은 `updateBattery`가 저장할 컬럼이 없어 **PostgreSQL 저장소를 짜는 도중에 부딪힌다.** 1부만 할 계획이어도 Q6은 먼저 읽는다.
 
 ### 4. ⚠️ 먼저 풀어야 할 외래키 문제
 
@@ -46,8 +56,10 @@ runStoreContractTests("postgres", async () => createPostgresStore(testPool));
 
 두 선택지 중 하나를 반드시 고른다 — 아무것도 안 고르면 첫 배터리 등록에서 막힌다.
 
-- **(a) 권장.** Better Auth 스키마를 생성·적용한 뒤(`npm run auth:generate`), `AUTH_MODE=demo`로 부팅할 때 데모 4명을 `user`+`app_user_profile`에 `on conflict do nothing`으로 seed한다. 참조무결성이 그대로 유지되고, 나중에 `AUTH_MODE=betterauth`로 전환해도 스키마를 다시 안 건드린다.
+- **(a) 권장.** Better Auth 스키마를 생성·적용한 뒤(`npm run auth:generate` — ⚠️ **아래 경고를 먼저 읽을 것**), `AUTH_MODE=demo`로 부팅할 때 데모 4명을 `user`+`app_user_profile`에 `on conflict do nothing`으로 seed한다. 참조무결성이 그대로 유지되고, 나중에 `AUTH_MODE=betterauth`로 전환해도 스키마를 다시 안 건드린다.
 - **(b) 대안.** 두 FK(`battery_asset.owner_user_id`, `measurement_session.owner_user_id`)를 제거하고 `text` 컬럼으로 둔다. 선행 작업이 없어 더 빠르지만, DB가 고아 row(존재하지 않는 owner_user_id)를 더 이상 막지 못한다.
+
+> **⚠️ `npm run auth:generate`는 지금 그대로는 실패한다.** `backend/package.json:14`가 `"auth:generate": "auth generate"`인데 `auth` 바이너리가 없다 — `better-auth` 패키지는 `bin`을 제공하지 않고, CLI는 **별도 패키지 `@better-auth/cli`**다. 현재 `backend/node_modules/.bin`에도 `dependencies`/`devDependencies` 어디에도 없다(`@better-auth/core`·`drizzle-adapter`만 설치돼 있다). **(a)를 택했다면 `@better-auth/cli` 설치가 선행돼야 한다.** `backend/README.md`의 Local Setup 5단계도 같은 명령을 안내하므로 함께 어긋나 있다.
 
 이 결정은 인프라 담당자가 내리되, 마이그레이션 파일을 고치는 쪽이므로 백엔드 담당자에게 어느 쪽을 택했는지 알린다.
 
@@ -124,6 +136,10 @@ export function createKafkaDeviceCommandPort(/* producer, topic 등 */): DeviceC
 
 인터페이스는 `backend/src/device/port.ts`가 정본이며 메서드 4개다 — `relayCut(batteryId, reasonCode)`, `relayRestore(batteryId)`, `sessionStarted(sessionId, batteryId, targetMode)`, `sessionEnded(sessionId, endReason)`. 전부 `battery-events` 토픽으로 발행한다(CLAUDE.md §Kafka 토픽 규약 — `battery-events`는 "에지/백엔드가 발행, 센서 오류·인터락 발생·릴레이 제어 이벤트·음성 안내 대상 이벤트"용). 이 인터페이스는 전송 수단을 모르는 채로 설계돼 있으므로 파일 안에 Kafka 클라이언트 세부사항(브로커 주소, 파티션 키, 직렬화 포맷)을 감춰도 된다 — 도메인 코드(`server.ts`, `failsafeRunner.ts`)는 이 4개 메서드 시그니처만 안다.
 
+> **⚠️ Kafka 클라이언트도 브로커 주소를 놓을 자리도 아직 없다.** `backend/package.json`의 의존성은 `better-auth`·`cors`·`dotenv`·`express`·`pg`·`zod`뿐이라 **`kafkajs` 같은 클라이언트를 직접 추가해야 하고**(어느 것을 쓸지도 정해진 바 없다), `backend/.env.example`과 `backend/src/config/env.ts`의 zod 스키마에 `KAFKA_*` 항목이 하나도 없다.
+>
+> **즉 §9의 "건드리지 말 것" 두 지점과 달리 `backend/src/config/env.ts`는 고쳐야 한다.** 브로커 주소·토픽 이름을 코드에 상수로 박지 말고 이 스키마에 추가한다(`DATABASE_URL`이 이미 같은 방식이다). 백엔드 파일이므로 변경 사실을 백엔드 담당자에게 알린다.
+
 ### 12. 메시지에 문구를 넣지 않는다
 
 발행하는 페이로드는 `code` + `params`만 담는다(`docs/hardware/mode1_backend_spec.md:787`). 라즈베리파이가 이 `code`로 로컬에 미리 저장된 한국어 음성 파일(MP3/WAV)을 선택해 재생하므로, 서버가 한국어 문장을 조립해서 보내면 안 된다 — CLAUDE.md의 "서버는 사용자에게 보일 문구를 만들지 않는다" 규칙이 여기도 적용된다. 예: `relayCut`은 `{ code: "RELAY_CUT", params: { batteryId, reasonCode } }` 형태로 나가야지, `{ message: "배터리 PACK-001의 릴레이가 차단되었습니다" }` 형태로 나가면 안 된다.
@@ -150,6 +166,20 @@ export async function runFailsafe(
 ```
 
 판정(`judgeFailsafe`)·인터락(`engageFailsafe`)·에지 통보(`devicePort.relayCut`)·WS 푸시(`broadcastAutoCut` → `relay.autoCut`)가 이미 그 안에 배선돼 있다(`backend/src/failsafeRunner.ts`의 `evaluateFailsafe`가 실체). Consumer가 할 일은 프레임마다 이 함수를 호출하는 것뿐이다.
+
+#### 14a. ⚠️ 미결정 — Consumer가 백엔드와 같은 프로세스인가
+
+**`runFailsafe`를 별도 프로세스에서 `import`하면 서버가 하나 더 뜬다.** `backend/src/server.ts:1233`이 이 함수를 export하는데, **같은 파일 톱레벨 `:1249`에 `httpServer.listen(env.PORT, ...)`이 있다.** ES 모듈은 import 시 톱레벨이 실행되므로 `import { runFailsafe } from "./server.js"` 한 줄에 두 번째 HTTP 서버가 같은 포트로 뜨고 `EADDRINUSE`가 난다.
+
+그런데 `docs/handover/b2-session-tagging.md` 헤더는 Consumer를 *"대상 구성요소: Kafka Consumer (인프라 코드) — **이 저장소 밖**"*으로 규정하고, CLAUDE.md 아키텍처 그림도 Consumer를 백엔드와 별개 상자로 그린다. **두 서술이 그대로는 양립하지 않는다.**
+
+선택지 세 가지 — **아무것도 고르지 않으면 §14를 구현할 수 없다**:
+
+1. **Consumer를 백엔드 프로세스 안에서 돌린다.** 코드 변경이 가장 적다(같은 모듈이라 그냥 부르면 된다). 대신 적재 부하와 API 서빙이 한 프로세스를 공유하고, Consumer가 죽으면 API도 같이 죽는다.
+2. **`runFailsafe`를 `server.ts` 밖으로 뺀다** — 예: `backend/src/failsafeEntry.ts`. 순수 로직은 이미 `failsafe.ts`·`failsafeRunner.ts`에 분리돼 있고 `server.ts:1233`은 저장소·포트·WS를 묶는 얇은 래퍼일 뿐이라, 그 래퍼만 옮기면 된다. **백엔드 파일을 고치는 일이므로 합의 대상이다.**
+3. **Consumer가 HTTP로 백엔드를 부른다.** 프로세스가 완전히 분리되지만 프레임마다 왕복이 생겨 100ms 주기에 부담이고, 새 내부 엔드포인트가 필요하다(계약에 없다).
+
+**2번을 권장한다** — Consumer를 "이 저장소 밖"으로 둔 기존 서술을 지키면서 포트 충돌만 없앤다.
 
 - **`thresholds`는 인자로 받는다.** 현재 값(`backend/src/failsafe.ts`의 `UNSET_THRESHOLDS`)은 전부 `0`(미설정 sentinel)이라 어떤 계층도 차단하지 않는다. 하드웨어 실측 후(`mode1_backend_spec.md` §13 H8, `mode2_powerbank_diagnosis_spec.md` §8 H2) 나온 값을 설정에서 주입한다 — 값을 추정해 미리 채우지 않는다.
 - **`sample`(`FailsafeSample`)의 6개 필드**를 프레임에서 채운다: `tempContact`, `tempIrSurface`, `tempRiseRateCPerMin`, `pressureRaw`, `pressureBaseline`, `gasRaw`. 그중 **`pressureBaseline`은 프레임에 없는 값이다** — **세션마다 시작 10초 중앙값으로 새로 계산해 Consumer가 직접 들고 있어야 한다**(CLAUDE.md — FSR은 예압에 따라 baseline이 매번 달라져 절대값이 무의미하다). 세션이 바뀌면 이 값도 다시 계산한다.
@@ -193,9 +223,9 @@ onAutoCut: (relay, verdict) => { void broadcastAutoCut(battery, relay, verdict.t
 
 ## 인계 후 남는 것 (요약)
 
-- **PostgreSQL 구현체** — 본 문서 1부. `backend/src/store/postgres.ts` 신규 작성 + 계약 테스트 19건 통과 + FK 결정(§4) + 동시성 테스트(§6) 추가.
+- **PostgreSQL 구현체** — 본 문서 1부. `backend/src/store/postgres.ts` 신규 작성 + 계약 테스트 20건 통과 + FK 결정(§4) + 동시성 테스트(§6) 추가.
 - **Kafka 구현체 + outbox 결정** — 본 문서 2부. `backend/src/device/kafka.ts` 신규 작성 + dual-write 원자성 결정(§13, 백엔드와 합의) + `sessionEnded` 배선(§15).
 - **Consumer의 `battery_id` 태깅** — `docs/handover/b2-session-tagging.md` (Task 14 산출물, 규칙 5개 확정).
-- **미결정 스키마 5건** — `docs/handover/schema-open-questions.md`. Consumer 착수 전에 백엔드(·AI)와 합의해야 하는 항목이다.
+- **미결정 스키마 6건** — `docs/handover/schema-open-questions.md`. Consumer 착수 전에 백엔드(·AI)와 합의해야 하는 항목이며, **Q6만은 1부 작업 중에 바로 막힌다.**
 - **Fail-Safe 문턱값** — 하드웨어 실측 후 결정. `mode1_backend_spec.md` §13 H8(압력 baseline·상승률), `mode2_powerbank_diagnosis_spec.md` §8 H2(모드 2 표면온도 상승률). 값이 나오면 `UNSET_THRESHOLDS`를 실제 값으로 바꾸는 것만으로 그 계층이 살아난다 — 코드 변경이 필요 없다.
 - **텔레메트리 구독 배선** — `runFailsafe`를 프레임마다 부르는 호출부 자체(§14)는 Consumer가 생긴 뒤 이 문서의 인프라 담당자가 연결한다.
