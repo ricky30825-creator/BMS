@@ -58,7 +58,7 @@ export interface CellGuardStore {
   changeRelay(actorId: string, batteryId: string, action: "cut" | "restore", reason: string): Promise<DemoRelay>;
   // 서버 Fail-Safe 전용. 사용자 조작(changeRelay)과 달리 인터락을 **건다**.
   // 지금 저장소에는 interlockEngaged를 런타임에 true로 만드는 경로가 없어서
-  // (store.ts:157의 픽스처가 유일) B3가 이 메서드를 필요로 한다.
+  // (store/memory.ts:51-62의 픽스처가 유일) B3가 이 메서드를 필요로 한다.
   // 릴레이 상태 전이 + RELAY_AUTO_CUT 감사 기록이 원자적이어야 한다.
   engageFailsafe(batteryId: string, triggerCode: string, condition: string): Promise<DemoRelay>;
   startDiagnosis(ownerId: string, kind: "QUICK" | "CAPACITY", batteryId: string, input: Record<string, unknown>): Promise<DemoDiagnosis>;

@@ -64,8 +64,8 @@ export function createMemoryStore(): CellGuardStore & { demoUsers: DemoUser[] } 
   // Internal logic stays synchronous so functions can call each other directly
   // without `await`/`this`. The returned object's methods are thin `async`
   // wrappers around these.
-  const findUser = (id: string): DemoUser | undefined => demoUsers.find((user) => user.id === id);
-  const findBattery = (id: string): DemoBattery | undefined => demoBatteries.find((battery) => battery.id === id);
+  const findUser = (id: string): DemoUser | undefined => { const user = demoUsers.find((item) => item.id === id); return user ? { ...user } : undefined; };
+  const findBattery = (id: string): DemoBattery | undefined => { const battery = demoBatteries.find((item) => item.id === id); return battery ? { ...battery } : undefined; };
   const listUsers = (): DemoUser[] => demoUsers.map((user) => ({ ...user }));
   const listBatteries = (ownerId?: string): DemoBattery[] => demoBatteries.filter((battery) => !ownerId || battery.ownerId === ownerId).map((battery) => ({ ...battery }));
   const findActiveSession = (ownerId?: string): DemoSession | null => [...demoSessions.values()].find((session) => session.status === "ACTIVE" && (!ownerId || session.ownerId === ownerId)) ?? null;
@@ -188,7 +188,7 @@ export function createMemoryStore(): CellGuardStore & { demoUsers: DemoUser[] } 
   };
 
   const setUserStatus = (actorId: string, userId: string, status: DemoStatus, reason: string): DemoUser => {
-    const user = findUser(userId);
+    const user = demoUsers.find((item) => item.id === userId);
     if (!user) throw new Error("NOT_FOUND");
     const normalizedReason = normalizeReason(reason);
     if (actorId === userId && status === "SUSPENDED") throw new Error("SELF_SUSPEND_FORBIDDEN");

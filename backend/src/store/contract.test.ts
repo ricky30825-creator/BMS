@@ -146,6 +146,18 @@ export function runStoreContractTests(name: string, makeStore: () => Promise<Cel
       const again = await store.batteryById(battery.id);
       expect(again?.label).not.toBe("손으로 바꾼 이름");
     });
+
+    it("batteryById/userById 반환값을 고쳐도 저장소가 오염되지 않는다", async () => {
+      const battery = await store.batteryById((await store.batteries())[0].id);
+      battery!.label = "손으로 바꾼 이름";
+      const againBattery = await store.batteryById(battery!.id);
+      expect(againBattery?.label).not.toBe("손으로 바꾼 이름");
+
+      const user = await store.userById((await store.users())[0].id);
+      user!.name = "손으로 바꾼 이름";
+      const againUser = await store.userById(user!.id);
+      expect(againUser?.name).not.toBe("손으로 바꾼 이름");
+    });
   });
 }
 

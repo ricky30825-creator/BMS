@@ -3,7 +3,7 @@ export type { CellGuardStore, CreateBatteryInput, IdempotencyResult, UpdateBatte
 
 import { createMemoryStore } from "./store/memory.js";
 
-// DATA_MODE=postgres는 server.ts:331의 가드가 /api/* 전체를 503으로 막으므로
+// DATA_MODE=postgres는 server.ts:356의 가드가 /api/* 전체를 503으로 막으므로
 // 여기까지 오지 않는다. PostgreSQL 구현체가 생기면(B1 2단계) 그때 분기한다.
 const active = createMemoryStore();
 

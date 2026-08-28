@@ -72,7 +72,7 @@ unique (device_id)  where status = 'ACTIVE'    -- measurement_session
 unique (battery_id) where status = 'RUNNING'   -- diagnosis
 ```
 
-동시 요청 두 개가 "찾아보고 없으면 만든다"(read-then-write)를 동시에 통과할 수 있으므로, **이 제약 위반(PostgreSQL 에러 코드 `23505`, unique_violation)을 잡아 `throw new Error("...")`로 도메인 에러로 옮긴다.** 예: `startSession`에서 `23505`가 나면 `throw new Error("NO_ACTIVE_SESSION")` 또는 적절한 기존 코드로 변환한다(§7 — 새 코드를 만들지 않는다).
+동시 요청 두 개가 "찾아보고 없으면 만든다"(read-then-write)를 동시에 통과할 수 있으므로, **이 제약 위반(PostgreSQL 에러 코드 `23505`, unique_violation)을 잡아 `throw new Error("...")`로 도메인 에러로 옮긴다.** 예: `startSession`에서 `23505`가 나면 `throw new Error("NO_ACTIVE_SESSION")`으로, `startDiagnosis`(diagnosis 테이블의 `unique (battery_id) where status = 'RUNNING'`)에서 `23505`가 나면 `throw new Error("DIAGNOSIS_IN_PROGRESS")`로 변환한다(§7 — 새 코드를 만들지 않는다).
 
 ⚠️ **계약 테스트는 이 경합을 못 잡는다.** `contract.test.ts`의 스위트는 인메모리 구현체와 공유하도록 단일 스레드·순차 실행이라 동시성이 아예 존재하지 않는다. PostgreSQL 구현체 쪽에는 **별도로** 두 개의 동시 `startSession` 호출을 `Promise.all`로 던지는 테스트를 추가한다:
 
