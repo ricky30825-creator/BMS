@@ -378,6 +378,8 @@ ADS1115          LAN          battery-anomaly-alerts ◀─ alerts 발행 ─┤
 | S-ROGPIB | 대시보드용 조회 뷰/요약 테이블 — `battery_id` 기준 세션·이상점수 이력 집계 |
 
 > `battery_asset`, `measurement_session` 관계 테이블은 PostgreSQL(비시계열)에 두고, 시계열 하이퍼테이블은 `battery_id` FK로 참조한다.
+>
+> **⚠️ 위 두 스펙은 "설계"가 아니라 "이미 있는 스키마 위의 남은 작업"이다.** 실제 컬럼·제약의 정본은 `backend/migrations/001_app_auth.sql`이며 테이블 8개(`app_user_profile`·`audit_log`·`battery_asset`·`measurement_session`·`relay_state`·`telemetry_metric`·`diagnosis`·`idempotency_key`)가 이미 있다. **이 문서가 "시계열 하이퍼테이블"이라 부르는 테이블의 실제 이름은 `telemetry_metric`이다.** 아직 스키마가 없는 5건(추론 결과 적재 테이블·`age_ms`/`temp_points` 자리·하이퍼테이블 전환·진단기 테이블·중복 방지 키)은 `docs/handover/schema-open-questions.md`.
 
 ### AI 모델 (4개)
 | ID | 스펙 |
@@ -624,7 +626,7 @@ ADS1115          LAN          battery-anomaly-alerts ◀─ alerts 발행 ─┤
 
 - [ ] 호스트 PC에 Kafka 설치·토픽 3개 생성, LAN 한정 PLAINTEXT 구성 (S-BYYPVQ) — `advertised.listeners`를 호스트 LAN IP로 잡아야 에지가 붙는다
 - [ ] 브로커·DB 포트를 방화벽에서 LAN으로 제한
-- [ ] PostgreSQL + TimescaleDB 설치 및 시계열 스키마 설계 (S-NFEETD)
+- [ ] PostgreSQL + TimescaleDB 설치, `telemetry_metric` 하이퍼테이블 전환·압축·보존정책 (S-NFEETD) — ⚠️ **스키마를 새로 설계하지 않는다.** 테이블 8개가 이미 `backend/migrations/001_app_auth.sql`에 있고 `backend/src/store/types.ts`의 타입과 1:1이다(한 쌍이라 한쪽만 바꾸면 런타임에서 조용히 깨진다). 하이퍼테이블 전환은 **지금 PK로는 `create_hypertable`이 거부되므로** `docs/handover/schema-open-questions.md` Q3을 먼저 읽는다
 - [x] 백엔드 프로젝트 초기화 (Node.js + TypeScript + Express)
 - [x] Better Auth 기반 사용자 인증 골격 구현 (R-HBLCDS — F-SDSVND, F-TFJKKF, F-HUYIXC)
 - [ ] ~~Better Auth 실인증 전환~~ — **보류(2026-08-25 결정).** 코드는 그대로 두고 `AUTH_MODE=demo`로 꺼둔다. 나중에 환경변수만 바꿔 켠다. 데모 계정에 ADMIN이 있어 RBAC·감사로그 시연에는 지장이 없다
@@ -637,9 +639,9 @@ ADS1115          LAN          battery-anomaly-alerts ◀─ alerts 발행 ─┤
 - [ ] 센서 JSON 스키마 정의 및 Kafka 프로듀서 발행 (S-IBQMVJ, S-TNASAB)
 
 ### Phase 3 — 스트리밍 파이프라인
-- [ ] Kafka Consumer 구현 → TimescaleDB 적재 (S-JGLAAI)
-- [ ] 배터리 자산/측정 세션 테이블 및 API (S-BATAST, S-MSESSN)
-- [ ] Consumer 적재 시 active 세션 조회 → `battery_id` 태깅 (S-MSESSN)
+- [ ] Kafka Consumer 구현 → `telemetry_metric` 적재 (S-JGLAAI)
+- [ ] 배터리 자산/측정 세션 테이블 및 API (S-BATAST, S-MSESSN) — **부분 완료: DDL(`battery_asset`·`measurement_session`)과 REST 라우트는 이미 있다.** 남은 건 그 테이블을 실제로 읽고 쓰는 PostgreSQL 구현체(`docs/handover/infra-implementations.md` 1부)이며, 그전까지 `DATA_MODE=postgres`에서 `/api/*`가 `503`인 것은 의도된 fail-closed다
+- [ ] Consumer 적재 시 active 세션 조회 → `battery_id` 태깅 (S-MSESSN) — 규칙 정본 `docs/handover/b2-session-tagging.md`
 - [ ] 오프셋 커밋 및 재처리 전략 (S-SBCSJU)
 - [ ] 대시보드용 조회 뷰 생성 (S-ROGPIB)
 - [ ] 오류/예외 이벤트 기록 (S-MVDKKZ)

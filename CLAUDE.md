@@ -32,6 +32,7 @@ Raspberry Pi              Kafka → Consumer → PostgreSQL + TimescaleDB
 | 요구사항·기능·데이터 모델(`battery_asset`/`measurement_session`) | `PLAN.md` (Manyfast 프로젝트 ID `7241ba62-d21a-4de4-ba45-fe572dd0f4de`) |
 | 기능·유저플로우 (디자인 무관) | `docs/product_contract.md` — 새 디자인 작업의 입력 |
 | REST·WebSocket 인터페이스 | `docs/backend_contract.md` |
+| DB 스키마 (실제 컬럼·제약) | `backend/migrations/001_app_auth.sql` — 테이블 8개. `backend/src/store/types.ts`와 **한 쌍**이라 한쪽만 고치면 조용히 깨진다 |
 | 인프라(Kafka·PostgreSQL) 인계 — 구현 경계·태깅 규칙·미결정 스키마 | `docs/handover/infra-implementations.md`, `docs/handover/b2-session-tagging.md`, `docs/handover/schema-open-questions.md` |
 | 관리자 기능·플로우 | `docs/admin_feature_definition.md`, `docs/admin_userflow.md` |
 | 사용자 기능·플로우 | `docs/feature_definition.md`(v3 커밋 `9bb6d8e` 기준), `docs/userflow.md` |
@@ -266,5 +267,7 @@ LSTM-AutoEncoder(재구성 오차 = 현재 이상)와 Informer(예측 오차 = �
 - **릴레이 자동 복구는 없다.** 한 번 차단되면 재인증·사유 입력으로 수동 복구만 가능하다.
 - 사용자당 진단기는 **1대 고정**이다. `deviceId`를 API로 받지 않고 서버가 자동 선택한다.
 - **기능정의서의 화면 위치는 v3와 어긋난 게 있다.** REQ-WEB-026(최근 이벤트)은 대시보드가 아니라 이상 탐지 화면, REQ-WEB-051(정렬)은 이벤트가 아니라 배터리 관리 화면, REQ-WEB-054/055(CSV·PDF)는 이벤트가 아니라 추세 화면, REQ-WEB-037의 제조사/모델 입력은 등록 폼에 없음. 충돌 시 v3 HTML이 우선한다.
+
+- **`DATA_MODE=postgres`면 `/api/*`가 전부 `503 RUNTIME_NOT_READY`다 — 고장이 아니라 의도된 fail-closed다.** PostgreSQL 저장소 구현체(`backend/src/store/postgres.ts`)가 아직 없어서, 게이트를 열면 "실 DB" 라벨을 달고 인메모리 데모 데이터가 나간다. **구현이 끝나기 전에 `server.ts`의 이 가드를 열지 않는다.** 정본은 `docs/handover/infra-implementations.md` §9. ⚠️ WebSocket은 이 게이트를 공유하지 않는다 — upgrade 핸들러가 `AUTH_MODE`만 보고 `DATA_MODE`를 안 봐서, `DATA_MODE=postgres`여도 WS는 열려 데모 데이터를 계속 흘린다(알려진 갭, 미수정).
 
 > 미결정 항목은 `docs/backend_contract.md` §9. 37건 중 32건이 닫혔고, 열린 것은 지표 임계값(Q27)·문구 코드 목록(Q34)·세션 타임아웃 분수(Q35)·보조배터리 진단 부하 수단과 문턱값(Q36)뿐이다. Q6(SOH/RUL 산출 주체)은 **모드 2만 확정**이고 모드 1은 보류다.
