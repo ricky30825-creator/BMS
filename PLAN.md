@@ -602,6 +602,22 @@ ADS1115          LAN          battery-anomaly-alerts ◀─ alerts 발행 ─┤
 
 ## 8. 개발 로드맵
 
+> ### 🔧 인프라(Kafka·PostgreSQL/TimescaleDB) 담당자는 여기서 시작한다
+>
+> **Phase 1의 Kafka·DB 3줄과 Phase 3 전체**가 인프라 담당자 몫이다 — Phase 2는 에지, Phase 4는 AI, Phase 5~7은 프론트·백엔드다. 착수 전 아래 **순서대로** 읽는다. 뒤 문서가 앞 문서를 전제로 쓰여 있어 순서를 바꾸면 두 번 읽게 된다.
+>
+> | 순서 | 문서 | 무엇이 있나 |
+> |---|---|---|
+> | 1 | `docs/implementation_status.md` §2 A-1 | 담당 경계와 완료 판정. **A1~A5가 곧 작업표다.** §3 B군은 백엔드가 어디까지 해뒀고 어디부터 넘어오는지 |
+> | 2 | `CLAUDE.md` §Kafka 토픽 규약 · §센서 데이터 JSON 스키마 | 토픽 3개의 발행자·용도, 에지 프레임의 필드와 부호 규약. ⚠️ `advertised.listeners`를 `localhost`로 두면 라즈베리파이가 **조용히** 못 붙는다 |
+> | 3 | `docs/handover/infra-implementations.md` | **구현 명세 정본.** 1부 `CellGuardStore`(PostgreSQL) / 2부 `DeviceCommandPort`(Kafka). 완료 판정은 계약 테스트 19건 통과 |
+> | 4 | `docs/handover/b2-session-tagging.md` | Consumer가 `device_id` → `battery_id`로 귀속하는 규칙 5개 + 완료 판정 SQL 2건 |
+> | 5 | `docs/handover/schema-open-questions.md` | **아직 스키마가 없는 5건.** 추론 결과 적재 테이블·`age_ms`/`temp_points` 자리·하이퍼테이블·진단기 테이블·중복 방지 키. Consumer 착수 전 백엔드(·AI)와 합의할 것 |
+>
+> 세부 계약이 필요해지면 — 에러 코드는 `docs/backend_contract.md` §1.10, 원자성 요구는 §3.4, 에지 프레임 정의와 `battery-events`의 code+params는 `docs/hardware/mode1_backend_spec.md` §9·§11이다.
+>
+> **충돌하면 계약 문서가 정본이고 이 로드맵을 고친다.**
+
 ### Phase 1 — 인프라 기반 구축
 
 > **로컬 단일 PC 구성으로 변경(2026-08-25).** EC2 프로비저닝·보안그룹·TLS/SASL 항목은 삭제했다.
