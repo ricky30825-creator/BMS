@@ -32,7 +32,7 @@ Raspberry Pi              Kafka → Consumer → PostgreSQL + TimescaleDB
 | 요구사항·기능·데이터 모델(`battery_asset`/`measurement_session`) | `PLAN.md` (Manyfast 프로젝트 ID `7241ba62-d21a-4de4-ba45-fe572dd0f4de`) |
 | 기능·유저플로우 (디자인 무관) | `docs/product_contract.md` — 새 디자인 작업의 입력 |
 | REST·WebSocket 인터페이스 | `docs/backend_contract.md` |
-| DB 스키마 (실제 컬럼·제약) | `backend/migrations/001_app_auth.sql` — 테이블 8개. `backend/src/store/types.ts`와 **한 쌍**이라 한쪽만 고치면 조용히 깨진다 |
+| DB 스키마 (실제 컬럼·제약) | `backend/migrations/001_app_auth.sql` — 테이블 8개. `backend/src/store/types.ts`와 **한 쌍**이라 한쪽만 고치면 조용히 깨진다. ⚠️ 이 파일만으로는 실행되지 않는다(Better Auth `"user"` 선행) — `docs/handover/infra-implementations.md` §3-1 |
 | 검증·테스트·중단 조건 | `docs/verification_matrix.md` |
 | 인프라(Kafka·PostgreSQL) 인계 — 구현 경계·태깅 규칙·미결정 스키마 | `docs/handover/infra-implementations.md`, `docs/handover/b2-session-tagging.md`, `docs/handover/schema-open-questions.md` |
 | 관리자 기능·플로우 | `docs/admin_feature_definition.md`, `docs/admin_userflow.md` |

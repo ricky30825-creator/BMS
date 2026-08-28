@@ -617,6 +617,8 @@ ADS1115          LAN          battery-anomaly-alerts ◀─ alerts 발행 ─┤
 > | 5 | `docs/handover/schema-open-questions.md` | **아직 스키마가 없는 6건.** 추론 결과 적재 테이블·`age_ms`/`temp_points`/`mode`/`soc_basis` 자리·하이퍼테이블·진단기 테이블·중복 방지 키·`battery_asset.memo`. Consumer 착수 전 백엔드(·AI)와 합의할 것. **Q6만은 1부 작업 중에 바로 막히므로 먼저 본다** |
 > | 6 | `docs/verification_matrix.md` | 무엇을 어떻게 검증하면 끝난 것으로 치는지. 백엔드 typecheck·빌드·`/health`·테스트 명령이 여기 있다 |
 >
+> ⚠️ **로컬 PostgreSQL에 실제로 붙이기 전에 `infra-implementations.md` §3-1을 먼저 본다.** 지금 이 저장소를 그대로 받아 `psql -f backend/migrations/001_app_auth.sql`을 돌리면 **첫 구문에서 멈춘다** — Better Auth의 `"user"` 테이블을 만드는 DDL이 저장소에 없는데 `001`이 그걸 FK로 참조하고, 그걸 생성하는 `npm run auth:generate`도 CLI 패키지가 없어 실패한다. 우회 선택지는 §4에 있고 **결정은 인프라 담당자 몫**이다.
+>
 > 세부 계약이 필요해지면 — 에러 코드는 `docs/backend_contract.md` §1.10, 원자성 요구는 §3.4, 에지 프레임 정의와 `battery-events`의 code+params는 `docs/hardware/mode1_backend_spec.md` §9·§11이다.
 >
 > **충돌하면 계약 문서가 정본이고 이 로드맵을 고친다.**

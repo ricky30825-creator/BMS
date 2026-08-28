@@ -167,6 +167,8 @@ v3 프로토타입과 정본 문서에는 모드 1/2, 대표 온도 최댓값, s
 
 > **⚠️ A2~A5에 필요한 스키마 6건이 아직 없다** — 추론 결과(A4) 적재 테이블, `age_ms`·`temp_points`·`mode`·`soc_basis` 자리, TimescaleDB 하이퍼테이블(A3, 지금 PK로는 `create_hypertable`이 실패한다), 진단기(`device`) 테이블, 중복 방지 키(A5), 그리고 **B1 작업 중에 바로 막히는 `battery_asset.memo`**. 선택지와 결정 순서는 [`docs/handover/schema-open-questions.md`](handover/schema-open-questions.md).
 
+> ⚠️ **단 이 마이그레이션은 지금 그대로 실행되지 않는다** — Better Auth `"user"` 테이블 DDL이 저장소에 없는데 `001`이 첫 테이블부터 그걸 FK로 참조한다. 실패 순서와 우회 선택지는 [`docs/handover/infra-implementations.md` §3-1·§4](handover/infra-implementations.md).
+
 > 스키마 자체는 이미 `backend/migrations/001_app_auth.sql`에 있다 — `battery_asset`(38) / `measurement_session`(62) / `relay_state`(77) / `telemetry_metric`(88) / `diagnosis`(110) / `idempotency_key`(127) / `audit_log`(20) / `app_user_profile`(1). 컬럼은 `store.ts`의 타입에 대응한다(**완전한 1:1은 아니다** — `DemoBattery.memo`를 저장할 컬럼이 아예 없는 등 어긋나는 곳이 있다, `docs/handover/schema-open-questions.md` §0·Q6). **스키마를 바꾸면 `store.ts` 타입도 같이 바뀌므로 반드시 합의 후 변경한다.**
 
 ### A-2. AI 담당

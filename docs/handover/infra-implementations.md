@@ -50,16 +50,39 @@ runStoreContractTests("postgres", async () => createPostgresStore(testPool));
 
 > ⚠️ **그중 Q6(`battery_asset.memo`)은 1부 작업 중에 바로 막힌다.** 나머지 5건은 Consumer(2부)를 붙일 때 필요해지지만, Q6은 `updateBattery`가 저장할 컬럼이 없어 **PostgreSQL 저장소를 짜는 도중에 부딪힌다.** 1부만 할 계획이어도 Q6은 먼저 읽는다.
 
+### 3-1. ⚠️ 처음 DB를 올리는 순서 — 지금 그대로는 **2단계에서 멈춘다**
+
+이 저장소를 받아 로컬 PostgreSQL에 붙이려면 아래 순서인데, **2단계가 현재 실패한다.** 착수 전에 이 절 전체를 읽고 §4의 선택지를 먼저 고른다.
+
+| 단계 | 하는 일 | 상태 |
+|---|---|---|
+| 1 | PostgreSQL 설치, DB·계정 생성, `backend/.env`의 `DATABASE_URL` 설정 | ✅ 문서만으로 됨 (`backend/.env.example`) |
+| 2 | **Better Auth 코어 스키마(`"user"` 등) 생성·적용** | ❌ **여기서 막힌다** (아래) |
+| 3 | `psql -f backend/migrations/001_app_auth.sql` | 2단계 없이는 실패 |
+| 4 | `backend/src/store/postgres.ts` 구현 (§1) | 본 인계의 본체 |
+| 5 | `DATA_MODE` 게이트 열기 (§9) | 4단계 완료 후 |
+
+**2단계가 막히는 이유 두 가지:**
+
+- **`"user"` 테이블을 만드는 DDL이 이 저장소에 없다.** 전수 검색으로 확인했다 — `create table "user"`가 어디에도 없고, 마이그레이션 파일도 `001_app_auth.sql` 하나뿐이다. 그런데 `001`은 **첫 테이블부터** 그걸 참조한다(`:2` `app_user_profile.user_id`, 그리고 `:22`·`:40`·`:65`). `create table if not exists`는 도움이 안 된다 — 없는 테이블을 FK로 거는 것 자체가 에러다. 그대로 실행하면 `relation "user" does not exist`로 **첫 구문에서** 멈춘다.
+- **그걸 만드는 유일한 안내 명령이 동작하지 않는다.** `backend/README.md:38`과 아래 §4 (a)안이 `npm run auth:generate`(`package.json:14` → `auth generate`)를 시키는데, `better-auth` 패키지는 `bin`을 제공하지 않고 CLI는 **별도 패키지 `@better-auth/cli`**다. 현재 `dependencies`/`devDependencies` 어디에도 없고 `backend/node_modules/.bin`에도 없다(설치된 것은 `@better-auth/core`와 어댑터들뿐). `auth:migrate`도 같은 바이너리를 부르므로 같이 실패한다.
+
+**우회 방법은 §4의 선택지 (a)/(b)와 같다** — (a) `@better-auth/cli`를 설치해 스키마를 생성하거나, (b) FK 4개를 걷어내고 `001`만으로 올린다. **이 결정을 인프라 담당자가 내려야 2단계가 열린다.**
+
+> **마이그레이션 실행기가 없다.** `backend/package.json`에 SQL을 적용하는 스크립트가 없고 `start-local.bat`도 DB를 건드리지 않는다. 3단계는 `psql -f`로 직접 돌린다.
+
+> **5단계까지 끝나기 전에는 앱이 당신의 DB에 쿼리를 한 건도 보내지 않는다 — 그게 정상이다.** `store.ts`가 무조건 `createMemoryStore()`를 쓰고(§9), `db.ts`의 풀은 `auth.ts`만 쓰는데 `AUTH_MODE=demo`면 그 경로도 안 밟는다. 즉 **"DB를 연결했다"를 화면으로 확인할 방법이 4단계 전에는 없다.** `psql`로 테이블이 생겼는지 직접 보는 것이 이 구간의 유일한 확인 수단이다.
+
 ### 4. ⚠️ 먼저 풀어야 할 외래키 문제
 
-`battery_asset.owner_user_id`와 `measurement_session.owner_user_id`가 `not null references "user"(id)`인데, `"user"` 테이블은 Better Auth 코어 스키마라 **아직 생성되지 않았다**(`npm run auth:generate` 미실행). 반면 데모 사용자 `hong`·`kimeng`·`leelab`·`parktest`(각각 USER/USER/ADMIN/SUSPENDED, `backend/src/store/memory.ts:30-33`)는 인메모리 구현체 안에만 존재한다. `AUTH_MODE=demo DATA_MODE=postgres`로 띄우는 순간 이 4명으로 `battery_asset`에 INSERT를 시도하면 FK 위반으로 전부 실패한다.
+`battery_asset.owner_user_id`와 `measurement_session.owner_user_id`가 `not null references "user"(id)`인데, `"user"` 테이블은 Better Auth 코어 스키마라 **아직 생성되지 않았다**(§3-1). 반면 데모 사용자 `hong`·`kimeng`·`leelab`·`parktest`(각각 USER/USER/ADMIN/SUSPENDED, `backend/src/store/memory.ts:30-33`)는 인메모리 구현체 안에만 존재한다. `AUTH_MODE=demo DATA_MODE=postgres`로 띄우는 순간 이 4명으로 `battery_asset`에 INSERT를 시도하면 FK 위반으로 전부 실패한다.
 
 두 선택지 중 하나를 반드시 고른다 — 아무것도 안 고르면 첫 배터리 등록에서 막힌다.
 
 - **(a) 권장.** Better Auth 스키마를 생성·적용한 뒤(`npm run auth:generate` — ⚠️ **아래 경고를 먼저 읽을 것**), `AUTH_MODE=demo`로 부팅할 때 데모 4명을 `user`+`app_user_profile`에 `on conflict do nothing`으로 seed한다. 참조무결성이 그대로 유지되고, 나중에 `AUTH_MODE=betterauth`로 전환해도 스키마를 다시 안 건드린다.
 - **(b) 대안.** 두 FK(`battery_asset.owner_user_id`, `measurement_session.owner_user_id`)를 제거하고 `text` 컬럼으로 둔다. 선행 작업이 없어 더 빠르지만, DB가 고아 row(존재하지 않는 owner_user_id)를 더 이상 막지 못한다.
 
-> **⚠️ `npm run auth:generate`는 지금 그대로는 실패한다.** `backend/package.json:14`가 `"auth:generate": "auth generate"`인데 `auth` 바이너리가 없다 — `better-auth` 패키지는 `bin`을 제공하지 않고, CLI는 **별도 패키지 `@better-auth/cli`**다. 현재 `backend/node_modules/.bin`에도 `dependencies`/`devDependencies` 어디에도 없다(`@better-auth/core`·`drizzle-adapter`만 설치돼 있다). **(a)를 택했다면 `@better-auth/cli` 설치가 선행돼야 한다.** `backend/README.md`의 Local Setup 5단계도 같은 명령을 안내하므로 함께 어긋나 있다.
+> **⚠️ `npm run auth:generate`는 지금 그대로는 실패한다(§3-1).** `backend/package.json:14`가 `"auth:generate": "auth generate"`인데 `auth` 바이너리가 없다 — `better-auth` 패키지는 `bin`을 제공하지 않고, CLI는 **별도 패키지 `@better-auth/cli`**다. 현재 `backend/node_modules/.bin`에도 `dependencies`/`devDependencies` 어디에도 없다(`@better-auth/core`·`drizzle-adapter`만 설치돼 있다). **(a)를 택했다면 `@better-auth/cli` 설치가 선행돼야 한다.** `backend/README.md`의 Local Setup 5단계도 같은 명령을 안내하므로 함께 어긋나 있다.
 
 이 결정은 인프라 담당자가 내리되, 마이그레이션 파일을 고치는 쪽이므로 백엔드 담당자에게 어느 쪽을 택했는지 알린다.
 
