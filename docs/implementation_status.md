@@ -165,6 +165,8 @@ v3 프로토타입과 정본 문서에는 모드 1/2, 대표 온도 최댓값, s
 
 > ⚠️ **`advertised.listeners`를 `localhost`로 두면 라즈베리파이가 못 붙는다.** 브로커가 클라이언트에게 자기 주소를 되돌려주는 값이라, `localhost`면 에지가 자기 자신에게 접속을 시도하며 조용히 실패한다. 호스트의 LAN IP로 잡는다.
 
+> **⚠️ 위 A2~A5에 필요한 스키마 중 5건이 아직 없다** — 추론 결과(A4) 적재 테이블, `age_ms`·`temp_points` 자리, TimescaleDB 하이퍼테이블(A3, 지금 PK로는 `create_hypertable`이 실패한다), 진단기(`device`) 테이블, 중복 방지 키(A5). 선택지와 결정 순서는 [`docs/handover/schema-open-questions.md`](handover/schema-open-questions.md).
+
 > 스키마 자체는 이미 `backend/migrations/001_app_auth.sql`에 있다 — `battery_asset`(38) / `measurement_session`(62) / `relay_state`(77) / `telemetry_metric`(88) / `diagnosis`(110) / `idempotency_key`(127) / `audit_log`(20) / `app_user_profile`(1). 컬럼은 `store.ts`의 타입과 이미 1:1로 맞는다. **스키마를 바꾸면 `store.ts` 타입도 같이 바뀌므로 반드시 합의 후 변경한다.**
 
 ### A-2. AI 담당

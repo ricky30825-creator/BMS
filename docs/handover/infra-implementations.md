@@ -38,6 +38,8 @@ runStoreContractTests("postgres", async () => createPostgresStore(testPool));
 
 **⚠️ 스키마를 바꾸면 `store/types.ts`도 같이 바뀐다.** 마이그레이션과 타입 정의는 한 쌍이므로, 컬럼을 추가·삭제·이름 변경하기 전에 반드시 백엔드 담당자와 합의한다. 합의 없이 한쪽만 바꾸면 타입은 컴파일되는데 런타임에서 컬럼이 없어 조용히 깨지거나, 반대로 타입에 없는 컬럼이 방치된다.
 
+> **이 8개 테이블은 `CellGuardStore` 구현에 필요한 것을 전부 담고 있다.** 반면 에지·AI 파이프라인(A2~A5)에 필요한 스키마는 아직 **없는 것이 5건** 있다 — 추론 결과 적재 테이블, `age_ms`·`temp_points` 자리, TimescaleDB 하이퍼테이블, 진단기(`device`) 테이블, 중복 방지 키. 전부 위 규칙에 따라 합의 대상이므로 [`docs/handover/schema-open-questions.md`](schema-open-questions.md)에 선택지와 함께 따로 모아 두었다. **1부(PostgreSQL 저장소) 작업만 할 때는 읽지 않아도 되고, Consumer를 붙이기 전에 읽는다.**
+
 ### 4. ⚠️ 먼저 풀어야 할 외래키 문제
 
 `battery_asset.owner_user_id`와 `measurement_session.owner_user_id`가 `not null references "user"(id)`인데, `"user"` 테이블은 Better Auth 코어 스키마라 **아직 생성되지 않았다**(`npm run auth:generate` 미실행). 반면 데모 사용자 `hong`·`kimeng`·`leelab`·`parktest`(각각 USER/USER/ADMIN/SUSPENDED, `backend/src/store/memory.ts:30-33`)는 인메모리 구현체 안에만 존재한다. `AUTH_MODE=demo DATA_MODE=postgres`로 띄우는 순간 이 4명으로 `battery_asset`에 INSERT를 시도하면 FK 위반으로 전부 실패한다.
@@ -194,5 +196,6 @@ onAutoCut: (relay, verdict) => { void broadcastAutoCut(battery, relay, verdict.t
 - **PostgreSQL 구현체** — 본 문서 1부. `backend/src/store/postgres.ts` 신규 작성 + 계약 테스트 19건 통과 + FK 결정(§4) + 동시성 테스트(§6) 추가.
 - **Kafka 구현체 + outbox 결정** — 본 문서 2부. `backend/src/device/kafka.ts` 신규 작성 + dual-write 원자성 결정(§13, 백엔드와 합의) + `sessionEnded` 배선(§15).
 - **Consumer의 `battery_id` 태깅** — `docs/handover/b2-session-tagging.md` (Task 14 산출물, 규칙 5개 확정).
+- **미결정 스키마 5건** — `docs/handover/schema-open-questions.md`. Consumer 착수 전에 백엔드(·AI)와 합의해야 하는 항목이다.
 - **Fail-Safe 문턱값** — 하드웨어 실측 후 결정. `mode1_backend_spec.md` §13 H8(압력 baseline·상승률), `mode2_powerbank_diagnosis_spec.md` §8 H2(모드 2 표면온도 상승률). 값이 나오면 `UNSET_THRESHOLDS`를 실제 값으로 바꾸는 것만으로 그 계층이 살아난다 — 코드 변경이 필요 없다.
 - **텔레메트리 구독 배선** — `runFailsafe`를 프레임마다 부르는 호출부 자체(§14)는 Consumer가 생긴 뒤 이 문서의 인프라 담당자가 연결한다.

@@ -7,7 +7,7 @@
 | 항목 | 값 |
 |---|---|
 | 작성일 | 2026-08-27 |
-| 근거 문서 | CLAUDE.md (센서 스키마 절, 배터리 자산 절), `docs/product_contract.md` (§3.2 사용자당 진단기 1대 규칙) |
+| 근거 문서 | CLAUDE.md (센서 스키마 절, 배터리 자산 절), `docs/product_contract.md` (§3.2 사용자당 진단기 1대 규칙), `backend/migrations/001_app_auth.sql` (실제 컬럼·제약) |
 | 영역 | `measurement_session` 활성 상태, 세션 생명주기, telemetry_metric 적재 시점 |
 | 대상 구성요소 | Kafka Consumer (인프라 코드) — 이 저장소 밖 |
 
@@ -30,7 +30,7 @@
 
 **에지는 측정 **대상**(셀/보조배터리, `battery_asset`)의 정체를 모르고 `device_id`(측정 **장비**의 정체)만 안다.** 한 진단기가 여러 배터리를 번갈아 측정하면 "이 프레임은 어느 배터리 것인가"를 판단할 근거가 프레임 자체에 없다.
 
-데이터베이스 `telemetry_metric` 테이블은 `battery_id` 외래키를 필수로 가지므로, **적재 시점에 백엔드의 현재 측정 세션 정보로 `battery_id`를 채워야 한다.** 이 규칙은 그 판단 로직을 정의한다.
+데이터베이스 `telemetry_metric` 테이블은 `battery_id` 외래키를 갖지만 **nullable**이므로(§3.1), **적재 시점에 백엔드의 현재 측정 세션 정보로 `battery_id`를 채우되, 채울 수 없으면 `null`로 적재한다.** 이 규칙은 그 판단 로직을 정의한다.
 
 참조: CLAUDE.md 「센서 데이터 JSON 스키마」, 「배터리 자산(Battery Asset)과 이력 추적」
 
@@ -62,13 +62,22 @@ status = 'ACTIVE'
 
 - **캐시 갱신 trigger (무효화)**:
   - `measurement_session` 테이블에 새 행 삽입 (세션 시작)
-  - 기존 행의 `status` 컬럼을 `'ACTIVE'`에서 `'COMPLETED'` 또는 `'FAILED'`로 변경 (세션 종료)
+  - 기존 행의 `status` 컬럼을 `'ACTIVE'`에서 `'ENDED'`로 변경 (세션 종료)
   
 - **구현 방안**: 
   - DB 레플리카 갱신 이벤트(예: PostgreSQL WAL, 변경 데이터 캡처) 또는
   - 세션 시작/종료를 별도 Kafka 토픽(`battery-events` 등)으로 받아 Consumer 메모리 캐시 갱신
   
 - **초기화 시**: 부팅 직후 Consumer는 데이터베이스에서 모든 device_id의 현재 활성 세션을 읽어 캐시를 채운다.
+
+> **⚠️ `status`는 `'ACTIVE'` / `'ENDED'` 두 값뿐이다.** `measurement_session_status_check` 제약이 그렇게 잡혀 있어(`backend/migrations/001_app_auth.sql:70`) `'COMPLETED'`·`'FAILED'`를 쓰면 INSERT/UPDATE가 거부된다. 종료 **사유**는 별도 컬럼 `end_reason`에 들어가며, 현재 백엔드가 쓰는 값은 두 개뿐이다(`backend/src/store/memory.ts:150`·`:172`):
+>
+> | `end_reason` | 언제 |
+> |---|---|
+> | `SUPERSEDED` | 같은 진단기로 새 세션이 시작돼 이전 세션이 대체됨 |
+> | `BLOCKED` | 관리자가 배터리를 `BLOCKED`로 바꿔 활성 세션이 강제 종료됨 |
+>
+> **사용자가 "측정 종료"를 눌러 세션을 끝내는 경로는 오늘 없다** — 세션은 위 두 경우에만 끝난다. 따라서 캐시 무효화 이벤트도 이 두 가지만 관측하면 된다.
 
 ### 2.3 캐시 miss 처리
 
@@ -94,14 +103,22 @@ status = 'ACTIVE'
 
 ### 3.1 스키마 지원
 
-데이터베이스 스키마는 이미 nullable을 지원한다:
+`telemetry_metric`에는 `battery_id`가 **이미 있고 nullable이다.** 컬럼을 새로 추가할 필요가 없다(`backend/migrations/001_app_auth.sql:88`):
 
 ```sql
-ALTER TABLE telemetry_metric
-ADD COLUMN battery_id text REFERENCES battery_asset(id) ON DELETE SET NULL;
+create table if not exists telemetry_metric (
+  id          bigserial primary key,
+  session_id  text references measurement_session(id) on delete set null,
+  battery_id  text references battery_asset(id)       on delete set null,
+  device_id   text not null,
+  measured_at timestamptz not null,
+  ...
+);
 ```
 
 `battery_id`가 `null`이어도 테이블에 저장되고, 이는 정상적인 상태다.
+
+> **`session_id`도 함께 채운다.** 이 테이블은 `battery_id`와 `session_id`를 **둘 다** 갖는다. Consumer가 활성 세션을 찾았으면 그 세션의 `battery_id`뿐 아니라 `id`도 같이 넣는다 — §5의 완료 판정 SQL이 두 컬럼의 정합성을 본다. 활성 세션이 없으면 둘 다 `null`이다.
 
 ### 3.2 분석 가치
 
@@ -138,7 +155,7 @@ Frame 1은 **measured 시각으로는 Session A 범위** (14:34:59.800 < 14:35:0
 
 위 예시에서 Frame 1이 적재되는 시점(14:35:00.050Z)에 조회하면:
 
-- Session A: `status = 'COMPLETED'` (이미 종료됨) → 캐시에서 제거됨
+- Session A: `status = 'ENDED'` (이미 종료됨, `end_reason = 'SUPERSEDED'`) → 캐시에서 제거됨
 - Session B: `status = 'ACTIVE'` → 이 세션의 `battery_id` 사용
 - 결과: Frame 1은 **battery_id_B**로 적재
 
@@ -186,9 +203,9 @@ Frame 1은 **measured 시각으로는 Session A 범위** (14:34:59.800 < 14:35:0
 - NULL 값이 섞이면 안 됨.
 - 검증: 
   ```sql
-  SELECT COUNT(*) FROM telemetry_metric 
-  WHERE measurement_session_id = '<session_id>' 
-    AND battery_id IS NULL;
+  select count(*) from telemetry_metric
+  where session_id = '<session_id>'
+    and battery_id is null;
   -- 결과: 0
   ```
 
@@ -198,9 +215,9 @@ Frame 1은 **measured 시각으로는 Session A 범위** (14:34:59.800 < 14:35:0
 - 즉, 세션 범위 밖 프레임이 잘못된 세션에 붙으면 안 됨.
 - 검증:
   ```sql
-  SELECT COUNT(*) FROM telemetry_metric m
-  WHERE m.measurement_session_id IS NULL
-    AND m.battery_id IS NOT NULL;
+  select count(*) from telemetry_metric
+  where session_id is null
+    and battery_id is not null;
   -- 결과: 0
   ```
 
@@ -228,8 +245,8 @@ Raspberry Pi (에지)
 Kafka Consumer (인프라 코드)
   ├─ measurement_session 캐시 조회
   ├─ battery_id 결정
-  └─ INSERT INTO telemetry_metric
-       (device_id, measured_at, voltage_v, ..., battery_id)
+  └─ insert into telemetry_metric
+       (device_id, measured_at, voltage_v, ..., session_id, battery_id)
   ↓
 PostgreSQL + TimescaleDB
   └─ telemetry_metric 테이블
@@ -242,3 +259,4 @@ Consumer의 책임은 **"device_id 알아서 battery_id로 변환"** 그것뿐�
 ## 변경 이력
 
 - 2026-08-27: 초안 작성 (Task 14 — B2 Phase)
+- 2026-08-28: 실제 스키마와 어긋난 3건을 정정 — 세션 종료 상태값(`'COMPLETED'`/`'FAILED'` → `'ENDED'` + `end_reason`), §3.1의 불필요한 `ALTER TABLE ... ADD COLUMN battery_id`(이미 존재) 제거, §5 완료 판정 SQL의 컬럼명(`measurement_session_id` → `session_id`). `session_id`도 함께 적재한다는 규칙을 §3.1에 추가했다.
