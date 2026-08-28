@@ -339,11 +339,13 @@ const locked = gated && r !== 'battery';
 
 *"한 번에 하나의 배터리만 연결됩니다. 기존 연결은 해제됩니다."* `[v3: T.cnOneAtTime]`
 
-- **`device_id`당 `ACTIVE` 상태 `measurement_session`은 최대 1개** `[PLAN.md:156, S-LWVJRY]`. 진단기 하나가 동시에 두 배터리를 측정할 수 없다는 물리적 제약이다.
-- 새 배터리 연결 요청 시 서버가 **해당 진단기의 기존 세션을 원자적으로 종료하고** 새 세션을 연다. 프론트가 "종료 → 시작" 2콜로 나누지 않는다(중간 실패 시 무세션 상태로 빠짐).
+- **설비 전체에 `ACTIVE` 상태 `measurement_session`은 최대 1개다(2026-08-28 확정).** 진단기가 여러 대여도 동시에 활성인 세션은 하나뿐이다. 근거는 하드웨어다 — BQ27441(0x55)은 I2C 주소가 하드웨어 고정이라 한 번에 배터리 1개만 측정할 수 있다(CLAUDE.md).
+  - **DB가 이것을 강제한다**: `uq_active_session_global`(`backend/migrations/002_domain_gaps.sql`) — `measurement_session (status) where status = 'ACTIVE'`. 001의 per-device 제약(`uq_active_session_device`)은 이 결정으로 교체됐다.
+  - ⚠️ **계약 테스트 20건은 per-device와 전역을 구분하지 못한다**(`backend/src/store/contract.test.ts:31-40`이 같은 사용자·같은 진단기로만 `startSession`을 두 번 부른다). 저장소 구현체가 어느 쪽으로 짜였는지는 테스트가 아니라 DB 제약이 잡는다.
+- 새 배터리 연결 요청 시 서버가 **기존 활성 세션을 원자적으로 종료하고** 새 세션을 연다. 프론트가 "종료 → 시작" 2콜로 나누지 않는다(중간 실패 시 무세션 상태로 빠짐).
 - 모드 인터락: 새 세션의 `targetMode`가 이전과 다르면 **이전 모드 릴레이를 먼저 차단**한 뒤 전환한다. `[PLAN: S-LWVJRY]`
 
-> **사용자당 진단기는 1대로 확정됐다.** 따라서 `device_id`당 1세션 = **사용자당 1세션**이 되어 두 규칙이 실질적으로 같다. `GET /api/me`의 `activeSession`은 단수로 유지하고, 진단기 선택 UI도 만들지 않는다.
+> **사용자당 진단기는 1대로 확정됐다.** 따라서 전역 1세션 = **사용자당 1세션**이 되어 두 규칙이 실질적으로 같다. `GET /api/me`의 `activeSession`은 단수로 유지하고, 진단기 선택 UI도 만들지 않는다.
 > 나중에 여러 대를 지원하려면 `activeSession` → `activeSessions[]` 배열화와 진단기 선택 UI가 필요하다. 그때까지 **`deviceId`를 응답에 포함시켜 두면** 확장 시 프론트 변경 범위가 줄어든다.
 
 ### 3.3 Fail-Safe 우선순위 `[v3]` `[PLAN: S-VMNNAM]`

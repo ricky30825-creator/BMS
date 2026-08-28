@@ -32,13 +32,9 @@ runStoreContractTests("postgres", async () => createPostgresStore(testPool));
 
 `testPool`은 테스트 전용 PostgreSQL 인스턴스(또는 트랜잭션 롤백 방식의 격리)를 가리키는 `pg.Pool`이며, 이 명세 밖에서 인프라 담당자가 준비한다. 20건은 인메모리 구현체가 이미 통과하고 있는 계약이므로, PostgreSQL 구현체가 이 중 하나라도 다르게 행동하면 계약 위반이다.
 
-> **⚠️ 이 20건은 "활성 세션이 진단기별인가 설비 전체인가"를 검출하지 못한다 — 착수 전에 백엔드와 확정할 것.**
+> **✅ 활성 세션 범위는 확정됐다 — 설비 전체에 1개다(2026-08-28).** `backend/src/store/memory.ts:145-146` 주석(*"for the whole installation"*)이 맞고, per-device를 적던 `docs/backend_contract.md` §3.2와 `001`의 `uq_active_session_device`를 이에 맞춰 고쳤다. 근거는 하드웨어다 — BQ27441(0x55)은 I2C 주소가 고정이라 한 번에 배터리 1개만 측정할 수 있다.
 >
-> 계약과 참조 구현이 갈려 있다. `docs/backend_contract.md:342`는 **`device_id`당 `ACTIVE` 세션 최대 1개**(per-device), `backend/src/store/memory.ts:145-146` 주석은 *"one active battery and one active session **for the whole installation**, not one session per user"*(전역)다. DB가 실제로 보증하는 것은 per-device다(`uq_active_session_device`, §6).
->
-> 지금 둘이 같아 보이는 이유는 `memory.ts:154`가 `deviceId: "demo-device-01"`을 상수로 박아 진단기가 1대뿐이기 때문이다(Q4 — `device` 테이블이 없다). **진단기가 2대가 되는 순간 갈린다.**
->
-> 그리고 이 차이를 계약 테스트가 못 잡는다 — `contract.test.ts:31-40`의 *"설비 전체에 활성 세션은 하나뿐"* 테스트가 제목과 달리 **같은 사용자·같은 진단기로만** `startSession`을 두 번 부른다. per-device로 짜든 전역으로 짜든 양쪽 다 통과하므로, **"20건 통과"를 완료 판정으로 삼으면 이 항목만 통합 시점까지 살아남는다.**
+> **⚠️ 그래도 계약 테스트 20건은 이 차이를 검출하지 못한다.** `contract.test.ts:31-40`의 *"설비 전체에 활성 세션은 하나뿐"* 테스트가 제목과 달리 **같은 사용자·같은 진단기로만** `startSession`을 두 번 부르기 때문에, per-device로 짜도 통과한다. **"20건 통과"만으로는 이 항목이 맞게 구현됐는지 알 수 없으므로**, DB 제약(`uq_active_session_global`, §6)이 실질적인 유일한 방어선이다. 다른 진단기로 두 번째 세션을 여는 테스트를 PostgreSQL 구현체 쪽에 따로 추가한다.
 
 ### 3. 스키마
 
@@ -46,34 +42,54 @@ runStoreContractTests("postgres", async () => createPostgresStore(testPool));
 
 **⚠️ 스키마를 바꾸면 `store/types.ts`도 같이 바뀐다.** 마이그레이션과 타입 정의는 한 쌍이므로, 컬럼을 추가·삭제·이름 변경하기 전에 반드시 백엔드 담당자와 합의한다. 합의 없이 한쪽만 바꾸면 타입은 컴파일되는데 런타임에서 컬럼이 없어 조용히 깨지거나, 반대로 타입에 없는 컬럼이 방치된다.
 
-> **이 8개 테이블은 `CellGuardStore` 구현에 필요한 것을 전부 담고 있다.** 반면 아직 **없는 스키마가 6건** 있다 — 추론 결과 적재 테이블, `age_ms`·`temp_points`·`mode`·`soc_basis` 자리, TimescaleDB 하이퍼테이블, 진단기(`device`) 테이블, 중복 방지 키, 그리고 `battery_asset.memo`. 전부 위 규칙에 따라 합의 대상이므로 [`docs/handover/schema-open-questions.md`](schema-open-questions.md)에 선택지와 함께 따로 모아 두었다.
+> **✅ 비어 있던 스키마 6건은 2026-08-28에 전부 결정·구현됐다** — 추론 결과 적재 테이블(`anomaly_score`), `age_ms`·`temp_points`·`mode`·`soc_basis`, TimescaleDB 하이퍼테이블, 진단기(`device`) 테이블, 중복 방지 키, `battery_asset.memo`. 결정 기록과 "왜 그 안이었나"는 [`docs/handover/schema-open-questions.md`](schema-open-questions.md)에, DDL은 `migrations/002`~`005`에 있다.
+>
+> **테이블은 이제 8개가 아니라 14개다** — 위 8개 + `"user"`·`device`·`anomaly_score`·`battery_latest`·`battery_health`·`outbox`. 새로 만든 6개는 `store/types.ts`와 아직 짝이 없다(§3-2).
 
-> ⚠️ **그중 Q6(`battery_asset.memo`)은 1부 작업 중에 바로 막힌다.** 나머지 5건은 Consumer(2부)를 붙일 때 필요해지지만, Q6은 `updateBattery`가 저장할 컬럼이 없어 **PostgreSQL 저장소를 짜는 도중에 부딪힌다.** 1부만 할 계획이어도 Q6은 먼저 읽는다.
+> ⚠️ **`store/types.ts`·`contract.ts`에 아직 반영되지 않은 것이 있다 — 백엔드 몫이다.** 스키마와 타입은 한 쌍인데, 이번에 만든 테이블 중 `anomaly_score`·`battery_latest`·`battery_health`를 읽으려면 `CellGuardStore`에 조회 메서드가 늘어난다(예: `latestAnomaly`, `anomalySummary`). 인터페이스 변경이라 DB 담당자가 `contract.ts`를 고치지 않았다(§1의 *"이 파일을 고치지 않는다"*). **백엔드가 이 델타를 반영해야 `postgres.ts`가 `DemoBattery.latest.score`를 채울 수 있다.** `battery_asset.memo`는 반대로 타입에 이미 있어서 변경이 필요 없다.
 
-### 3-1. ⚠️ 처음 DB를 올리는 순서 — 지금 그대로는 **2단계에서 멈춘다**
+### 3-1. 처음 DB를 올리는 순서 — **막힘은 2026-08-28에 해소됐다**
 
-이 저장소를 받아 로컬 PostgreSQL에 붙이려면 아래 순서인데, **2단계가 현재 실패한다.** 착수 전에 이 절 전체를 읽고 §4의 선택지를 먼저 고른다.
+> **예전 서술**: 2단계(Better Auth 코어 스키마)에서 멈추고 §4의 선택지를 먼저 골라야 했다.
+> **지금**: `000_identity.sql`이 `"user"` 테이블을 직접 만들고 데모 4명을 seed하므로 1~3단계가 명령 하나로 끝난다(§4). 남은 것은 4·5단계뿐이다.
 
 | 단계 | 하는 일 | 상태 |
 |---|---|---|
-| 1 | PostgreSQL 설치, DB·계정 생성, `backend/.env`의 `DATABASE_URL` 설정 | ✅ 문서만으로 됨 (`backend/.env.example`) |
-| 2 | **Better Auth 코어 스키마(`"user"` 등) 생성·적용** | ❌ **여기서 막힌다** (아래) |
-| 3 | `psql -f backend/migrations/001_app_auth.sql` | 2단계 없이는 실패 |
+| 1 | PostgreSQL **+ TimescaleDB 확장** 설치, DB·계정 생성, `backend/.env`의 `DATABASE_URL` 설정 | ✅ 문서만으로 됨 (`backend/.env.example`) |
+| 2 | `npm run db:migrate` — `migrations/*.sql`을 파일명 순서대로 적용 | ✅ 실행기 있음 (`backend/scripts/migrate.mjs`) |
+| 3 | `psql`로 테이블 생성 확인 | ✅ 4단계 전까지 유일한 확인 수단 |
 | 4 | `backend/src/store/postgres.ts` 구현 (§1) | 본 인계의 본체 |
 | 5 | `DATA_MODE` 게이트 열기 (§9) | 4단계 완료 후 |
 
-**2단계가 막히는 이유 두 가지:**
+**마이그레이션 6개 파일** — 순서가 곧 의존성이다.
 
-- **`"user"` 테이블을 만드는 DDL이 이 저장소에 없다.** 전수 검색으로 확인했다 — `create table "user"`가 어디에도 없고, 마이그레이션 파일도 `001_app_auth.sql` 하나뿐이다. 그런데 `001`은 **첫 테이블부터** 그걸 참조한다(`:2` `app_user_profile.user_id`, 그리고 `:22`·`:40`·`:65`). `create table if not exists`는 도움이 안 된다 — 없는 테이블을 FK로 거는 것 자체가 에러다. 그대로 실행하면 `relation "user" does not exist`로 **첫 구문에서** 멈춘다.
-- **그걸 만드는 유일한 안내 명령이 동작하지 않는다.** `backend/README.md:38`과 아래 §4 (a)안이 `npm run auth:generate`(`package.json:14` → `auth generate`)를 시키는데, `better-auth` 패키지는 `bin`을 제공하지 않고 CLI는 **별도 패키지 `@better-auth/cli`**다. 현재 `dependencies`/`devDependencies` 어디에도 없고 `backend/node_modules/.bin`에도 없다(설치된 것은 `@better-auth/core`와 어댑터들뿐). `auth:migrate`도 같은 바이너리를 부르므로 같이 실패한다.
+| 파일 | 내용 |
+|---|---|
+| `000_identity.sql` | `"user"` 테이블 + 데모 4명 seed. **001의 FK 4개가 이걸 전제한다** |
+| `001_app_auth.sql` | 기존 8개 테이블 (**수정하지 않는다** — 백엔드의 기준 파일) |
+| `002_domain_gaps.sql` | `app_user_profile` seed, `battery_asset.memo`, 활성 세션 전역 제약 교체, `device` 테이블 |
+| `003_telemetry_columns.sql` | `age_ms`·`temp_points`(jsonb) + `mode`·`soc_basis` |
+| `004_anomaly_and_health.sql` | `anomaly_score`, `battery_latest`, `battery_health`, `outbox` |
+| `005_timescale.sql` | PK 교체 + 하이퍼테이블 2개 + 보존 60일 |
 
-**우회 방법은 §4의 선택지 (a)/(b)와 같다** — (a) `@better-auth/cli`를 설치해 스키마를 생성하거나, (b) FK 4개를 걷어내고 `001`만으로 올린다. **이 결정을 인프라 담당자가 내려야 2단계가 열린다.**
+> **`005`만 실패해도 004까지는 유효하다** — TimescaleDB 확장이 없으면 `telemetry_metric`이 평범한 PostgreSQL 테이블로 남을 뿐, 나머지 스키마는 정상이다. 실행기가 이 경우를 따로 안내한다.
 
-> **마이그레이션 실행기가 없다.** `backend/package.json`에 SQL을 적용하는 스크립트가 없고 `start-local.bat`도 DB를 건드리지 않는다. 3단계는 `psql -f`로 직접 돌린다.
+**예전에 2단계를 막던 것과, 어떻게 풀었는지:**
+
+- **`"user"` 테이블 DDL이 없었다.** `001`은 첫 테이블부터 그걸 FK로 참조하는데(`:2`·`:22`·`:40`·`:65`) 만드는 DDL이 저장소 어디에도 없어 `relation "user" does not exist`로 첫 구문에서 멈췄다. → **`000_identity.sql`이 만든다.**
+- **`npm run auth:generate`가 동작하지 않았다.** `better-auth` 패키지는 `bin`을 제공하지 않고 CLI는 별도 패키지 `@better-auth/cli`인데 설치돼 있지 않다. → **Better Auth를 지금 쓰지 않기로 해서(2026-08-28) 이 명령이 경로에서 빠졌다.** `package.json:14`의 `auth:generate`·`auth:migrate` 스크립트는 아직 그대로 남아 있으니 부르지 말 것. Better Auth를 켤 때 `@better-auth/cli`를 설치하면 그때 살아난다.
+
+> **마이그레이션 실행기는 `backend/scripts/migrate.mjs`다(`npm run db:migrate`).** psql에 의존하지 않는다 — 호스트 PC는 Windows이고 개발 장비는 macOS라, 이미 의존성에 있는 `pg`로 도는 편이 양쪽에서 똑같이 동작한다. 적용한 파일은 `schema_migrations`에 기록되어 다시 실행되지 않고, 파일 하나가 트랜잭션 하나다. `start-local.bat`은 여전히 DB를 건드리지 않으므로 이 명령은 손으로 돌린다.
 
 > **5단계까지 끝나기 전에는 앱이 당신의 DB에 쿼리를 한 건도 보내지 않는다 — 그게 정상이다.** `store.ts`가 무조건 `createMemoryStore()`를 쓰고(§9), `db.ts`의 풀은 `auth.ts`만 쓰는데 `AUTH_MODE=demo`면 그 경로도 안 밟는다. 즉 **"DB를 연결했다"를 화면으로 확인할 방법이 4단계 전에는 없다.** `psql`로 테이블이 생겼는지 직접 보는 것이 이 구간의 유일한 확인 수단이다.
 
-### 4. ⚠️ 먼저 풀어야 할 외래키 문제
+### 4. 외래키 문제 — **결정 완료 (2026-08-28)**
+
+> **결정: (a)의 변형.** Better Auth는 지금 쓰지 않되, `"user"`라는 **이름과 자리를 우리가 선점**한다 — `000_identity.sql`이 Better Auth 코어 user 스키마와 같은 모양으로 테이블을 만들고 데모 4명을 seed한다. FK 4개는 그대로 살아 있고 `001`은 한 글자도 고치지 않는다. 나중에 Better Auth를 켜면 `session`·`account`·`verification` 3개만 추가하면 되고, 컬럼명이 어긋나면 `ALTER` 한 번으로 끝난다.
+>
+> **(b)(FK 제거)는 택하지 않았다** — DB가 고아 row를 막지 못하게 되고, 나중에 FK를 되살리는 비용이 더 크다.
+>
+> 아래는 그 결정의 근거가 된 원래 서술이다.
 
 `battery_asset.owner_user_id`와 `measurement_session.owner_user_id`가 `not null references "user"(id)`인데, `"user"` 테이블은 Better Auth 코어 스키마라 **아직 생성되지 않았다**(§3-1). 반면 데모 사용자 `hong`·`kimeng`·`leelab`·`parktest`(각각 USER/USER/ADMIN/SUSPENDED, `backend/src/store/memory.ts:30-33`)는 인메모리 구현체 안에만 존재한다. `AUTH_MODE=demo DATA_MODE=postgres`로 띄우는 순간 이 4명으로 `battery_asset`에 INSERT를 시도하면 FK 위반으로 전부 실패한다.
 
@@ -105,9 +121,11 @@ await inTransaction(async (client) => {
 마이그레이션에 부분 유니크 인덱스가 이미 있다.
 
 ```sql
-unique (device_id)  where status = 'ACTIVE'    -- measurement_session
+unique (status)     where status = 'ACTIVE'    -- measurement_session (전역 1개, 002)
 unique (battery_id) where status = 'RUNNING'   -- diagnosis
 ```
+
+> `measurement_session` 쪽은 **`uq_active_session_global`**이다. `status` 컬럼에 partial unique를 걸면 인덱스에 들어오는 행이 전부 `ACTIVE`라 그런 행이 최대 1개가 된다 — 001의 per-device 제약을 이 결정으로 교체했다.
 
 동시 요청 두 개가 "찾아보고 없으면 만든다"(read-then-write)를 동시에 통과할 수 있으므로, **이 제약 위반(PostgreSQL 에러 코드 `23505`, unique_violation)을 잡아 `throw new Error("...")`로 도메인 에러로 옮긴다.** 예: `startSession`에서 `23505`가 나면 `throw new Error("NO_ACTIVE_SESSION")`으로, `startDiagnosis`(diagnosis 테이블의 `unique (battery_id) where status = 'RUNNING'`)에서 `23505`가 나면 `throw new Error("DIAGNOSIS_IN_PROGRESS")`로 변환한다(§7 — 새 코드를 만들지 않는다).
 
@@ -167,7 +185,13 @@ export function createKafkaDeviceCommandPort(/* producer, topic 등 */): DeviceC
 
 발행하는 페이로드는 `code` + `params`만 담는다(`docs/hardware/mode1_backend_spec.md:787`). 라즈베리파이가 이 `code`로 로컬에 미리 저장된 한국어 음성 파일(MP3/WAV)을 선택해 재생하므로, 서버가 한국어 문장을 조립해서 보내면 안 된다 — CLAUDE.md의 "서버는 사용자에게 보일 문구를 만들지 않는다" 규칙이 여기도 적용된다. 예: `relayCut`은 `{ code: "RELAY_CUT", params: { batteryId, reasonCode } }` 형태로 나가야지, `{ message: "배터리 PACK-001의 릴레이가 차단되었습니다" }` 형태로 나가면 안 된다.
 
-### 13. ⚠️ 미결정 — dual-write 원자성
+### 13. dual-write 원자성 — **결정: outbox 채택 (2026-08-28)**
+
+> **`outbox` 테이블은 이미 만들었다**(`migrations/004_anomaly_and_health.sql`). 도메인 트랜잭션 안에서 상태 변경·`audit_log` INSERT와 **함께** 발행할 메시지를 여기 넣고, 별도 워커가 발행 후 `sent_at`을 채운다.
+>
+> **⚠️ 이 결정은 백엔드 코드에 영향을 준다.** 지금 `changeRelay`·`engageFailsafe` 등이 저장소 커밋 뒤에 `devicePort.*`를 직접 부르는데, outbox로 가면 그 자리가 "저장소 트랜잭션 안에서 outbox에 INSERT"로 바뀐다. `CellGuardStore` 경계를 넘나드는 변경이라 **2부 착수 시점에 백엔드와 함께 손댄다** — 테이블만 먼저 만들어 두고 도메인 코드는 아직 건드리지 않았다.
+>
+> 아래는 그 결정의 근거가 된 원래 서술이다.
 
 지금 도메인 코드는 **저장소 커밋 → 그 다음 포트 호출**(예: `changeRelay`가 트랜잭션을 커밋한 뒤 `devicePort.relayCut(...)`을 부르는 순서) 구조다. Kafka 브로커가 그 순간 죽어 있으면 **DB의 릴레이 상태는 이미 바뀌었는데 에지는 그 사실을 영영 모르는** 상태가 된다. `docs/backend_contract.md` §3.4는 *"승인 후 명령 실행과 감사 기록을 원자적으로 처리하고 실패 시 성공 응답이나 성공 이벤트를 내보내지 않는다"*를 요구하므로, 지금 순서 그대로는 계약 위반이다.
 
@@ -190,7 +214,13 @@ export async function runFailsafe(
 
 판정(`judgeFailsafe`)·인터락(`engageFailsafe`)·에지 통보(`devicePort.relayCut`)·WS 푸시(`broadcastAutoCut` → `relay.autoCut`)가 이미 그 안에 배선돼 있다(`backend/src/failsafeRunner.ts`의 `evaluateFailsafe`가 실체). Consumer가 할 일은 프레임마다 이 함수를 호출하는 것뿐이다.
 
-#### 14a. ⚠️ 미결정 — Consumer가 백엔드와 같은 프로세스인가
+#### 14a. Consumer 프로세스 경계 — **결정: 2번 (2026-08-28)**
+
+> **`runFailsafe`를 `server.ts` 밖으로 뺀다**(예: `backend/src/failsafeEntry.ts`). Consumer를 "이 저장소 밖"으로 둔 기존 서술을 지키면서 `EADDRINUSE`만 없앤다. 순수 로직은 이미 `failsafe.ts`·`failsafeRunner.ts`에 분리돼 있고 `server.ts:1233`은 저장소·포트·WS를 묶는 얇은 래퍼일 뿐이라 그 래퍼만 옮기면 된다.
+>
+> **⚠️ 백엔드 파일을 옮기는 일이라 아직 실행하지 않았다** — 2부(Kafka) 착수 시점에 백엔드와 함께 한다. 그전까지 `server.ts:1233`의 export는 그대로다.
+>
+> 아래는 그 결정의 근거가 된 원래 서술이다.
 
 **`runFailsafe`를 별도 프로세스에서 `import`하면 서버가 하나 더 뜬다.** `backend/src/server.ts:1233`이 이 함수를 export하는데, **같은 파일 톱레벨 `:1249`에 `httpServer.listen(env.PORT, ...)`이 있다.** ES 모듈은 import 시 톱레벨이 실행되므로 `import { runFailsafe } from "./server.js"` 한 줄에 두 번째 HTTP 서버가 같은 포트로 뜨고 `EADDRINUSE`가 난다.
 
@@ -230,7 +260,11 @@ onAutoCut: (relay, verdict) => { void broadcastAutoCut(battery, relay, verdict.t
 
 둘 중 아무것도 안 하면 이 갭은 코드 리뷰로도 잘 안 보인다 — `void` 키워드가 "의도적으로 무시함"처럼 읽혀서, 실패 시나리오를 실제로 재현해보기 전까지는 아무도 눈치채지 못한다.
 
-### 15. ⚠️ 미결정 — `sessionEnded` 배선 지점
+### 15. `sessionEnded` 배선 지점 — **결정: 3번(outbox)으로 함께 해결 (2026-08-28)**
+
+> §13을 outbox로 정했으므로 이 항목도 같이 닫혔다. 저장소 트랜잭션 안에서 세션 종료와 함께 `sessionEnded` 메시지를 `outbox`에 넣으면 되고, 저장소가 전송 계층을 알 필요도 라우트 시그니처가 바뀔 필요도 없다.
+>
+> 아래는 그 결정의 근거가 된 원래 서술이다.
 
 `DeviceCommandPort.sessionEnded(sessionId, endReason)`을 언제 부를지가 아직 정해지지 않았다. 세션 종료는 라우트 레벨의 명시적 액션이 아니라, `startSession`(새 세션이 이전 세션을 `SUPERSEDED`로 끝낼 때)과 `changeOpsStatus`(배터리를 `BLOCKED`로 바꿔 활성 세션이 강제 종료될 때) **안에서 저장소가 부수적으로 일으키는** 사건이다. 그래서 지금 라우트 코드에는 "세션이 방금 끝났다"를 알 수 있는 훅이 없다.
 
@@ -246,9 +280,13 @@ onAutoCut: (relay, verdict) => { void broadcastAutoCut(battery, relay, verdict.t
 
 ## 인계 후 남는 것 (요약)
 
-- **PostgreSQL 구현체** — 본 문서 1부. `backend/src/store/postgres.ts` 신규 작성 + 계약 테스트 20건 통과 + FK 결정(§4) + 동시성 테스트(§6) 추가.
-- **Kafka 구현체 + outbox 결정** — 본 문서 2부. `backend/src/device/kafka.ts` 신규 작성 + dual-write 원자성 결정(§13, 백엔드와 합의) + `sessionEnded` 배선(§15).
+> **2026-08-28 갱신** — 설계 결정은 전부 닫혔다(스키마 6건 + FK + 활성 세션 범위 + outbox + Consumer 프로세스 경계). 스키마도 적용 가능한 상태다. 남은 것은 아래 **구현**뿐이다.
+
+- ✅ **스키마** — `migrations/000`~`005`, `npm run db:migrate`로 적용. 결정 근거는 `schema-open-questions.md`.
+- **PostgreSQL 구현체** — 본 문서 1부. `backend/src/store/postgres.ts` 신규 작성 + 계약 테스트 20건 통과 + 동시성 테스트(§6) + **다른 진단기로 두 번째 세션을 여는 테스트**(§2) 추가.
+- **`store/types.ts`·`contract.ts` 델타 — 백엔드 몫**(§3). `anomaly_score`·`battery_latest`·`battery_health`를 읽을 조회 메서드가 없으면 `DemoBattery.latest.score`를 채울 수 없다.
+- **Kafka 구현체** — 본 문서 2부. `backend/src/device/kafka.ts` 신규 작성 + 도메인 코드를 outbox 방식으로 전환(§13·§15, 백엔드와 함께) + `runFailsafe`를 `server.ts` 밖으로 이동(§14a).
 - **Consumer의 `battery_id` 태깅** — `docs/handover/b2-session-tagging.md` (Task 14 산출물, 규칙 5개 확정).
-- **미결정 스키마 6건** — `docs/handover/schema-open-questions.md`. Consumer 착수 전에 백엔드(·AI)와 합의해야 하는 항목이며, **Q6만은 1부 작업 중에 바로 막힌다.**
+- **모드 1 SOH/RUL 산출 주체** — `battery_health` 테이블은 만들었지만 **누가 계산해 넣는지는 아직 미정**이다(`backend_contract.md` §9 Q6은 모드 2만 확정). DB는 저장만 맡는다.
 - **Fail-Safe 문턱값** — 하드웨어 실측 후 결정. `mode1_backend_spec.md` §13 H8(압력 baseline·상승률), `mode2_powerbank_diagnosis_spec.md` §8 H2(모드 2 표면온도 상승률). 값이 나오면 `UNSET_THRESHOLDS`를 실제 값으로 바꾸는 것만으로 그 계층이 살아난다 — 코드 변경이 필요 없다.
 - **텔레메트리 구독 배선** — `runFailsafe`를 프레임마다 부르는 호출부 자체(§14)는 Consumer가 생긴 뒤 이 문서의 인프라 담당자가 연결한다.

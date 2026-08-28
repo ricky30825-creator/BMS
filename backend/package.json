@@ -12,7 +12,8 @@
     "start": "node dist/server.js",
     "start:local": "tsx src/server.ts",
     "auth:generate": "auth generate",
-    "auth:migrate": "auth migrate"
+    "auth:migrate": "auth migrate",
+    "db:migrate": "node scripts/migrate.mjs"
   },
   "dependencies": {
     "better-auth": "^1.6.23",

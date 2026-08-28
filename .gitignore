@@ -11,6 +11,8 @@ archive/
 node_modules/
 dist/
 scripts/
+# 단, backend/scripts는 프로젝트 상태다 (마이그레이션 실행기).
+!backend/scripts/
 
 # Local-only presentation/report artifacts. Keep shared project state in Markdown docs.
 발표자료/

@@ -26,14 +26,25 @@
 
 결정할 때마다 이 표를 채운다. 빈 칸이 남아 있으면 그 항목은 아직 합의되지 않은 것이다.
 
+> **6건 모두 2026-08-28에 결정됐다.** 아래 표가 결정 기록이고, 실제 DDL은
+> `backend/migrations/002`~`005`에 있다. 각 파일 주석에 "왜 그 안을 택했는지"가
+> 함께 적혀 있으므로, 이 문서의 선택지 설명과 함께 읽는다.
+
 | # | 항목 | 결정 | 결정일 | 합의자 |
 |---|---|---|---|---|
-| Q1 | `battery-anomaly-alerts` 적재 테이블 | | | |
-| Q2 | `age_ms` · `temp_points` 적재 위치 | | | |
-| Q3 | TimescaleDB 하이퍼테이블 전환 | | | |
-| Q4 | 진단기(`device`) 테이블 | | | |
-| Q5 | 텔레메트리 중복 방지 키 | | | |
-| Q6 | `battery_asset.memo` 컬럼 | | | |
+| Q1 | `battery-anomaly-alerts` 적재 테이블 | **(a)** 새 하이퍼테이블 `anomaly_score` + **(c)** 최신값 캐시. 단 캐시는 `battery_asset` 비정규화가 아니라 **별도 1행 테이블 `battery_latest`** — `battery_asset.version`이 낙관적 잠금에 쓰여 초당 10회 갱신과 충돌한다. `grade` 컬럼은 두지 않는다(계산값) | 2026-08-28 | 오너·DB |
+| Q2 | `age_ms` · `temp_points` 적재 위치 | **(a)** `jsonb` 두 컬럼. `mode`(smallint)·`soc_basis`(text) 스칼라도 함께 추가 | 2026-08-28 | 오너·DB |
+| Q3 | TimescaleDB 하이퍼테이블 전환 | **(b)** 대리키 `id` 제거, PK를 자연키 `(device_id, measured_at)`로. `chunk_time_interval` 1일, 보존 60일, **압축은 걸지 않음**(재처리 창 충돌, 8GB 규모라 이득 없음) | 2026-08-28 | 오너·DB(보존기간은 AI) |
+| Q4 | 진단기(`device`) 테이블 | **(a)** 만든다. `measurement_session.device_id`에 FK. `telemetry_metric.device_id`에는 걸지 않는다(고빈도 + 미등록 진단기 프레임도 적재해야 함) | 2026-08-28 | 오너·DB |
+| Q5 | 텔레메트리 중복 방지 키 | **(a)** 자연키 `(device_id, measured_at)` — Q3의 PK와 같은 결정이라 한 번에 닫혔다. Consumer는 `on conflict do nothing` | 2026-08-28 | 오너·DB |
+| Q6 | `battery_asset.memo` 컬럼 | **(a)** `memo text not null default ''` 추가. `store/types.ts` 변경 없음 | 2026-08-28 | 오너·DB |
+
+**표 밖에서 함께 결정된 것 2건** (`infra-implementations.md` 소관):
+
+| 항목 | 결정 | 근거 |
+|---|---|---|
+| 활성 세션 범위 | **설비 전체 1개**(per-device 아님). `uq_active_session_device` → `uq_active_session_global`로 교체, `backend_contract.md` §3.2도 이에 맞춰 고쳤다 | BQ27441 I2C 주소 고정으로 한 번에 배터리 1개만 측정 가능 |
+| `"user"` FK (§4) | **(a) 변형** — Better Auth는 지금 쓰지 않되, 테이블 이름·컬럼 모양을 Better Auth 코어 스키마에 맞춰 `000_identity.sql`로 우리가 선점한다. FK 4개는 그대로 살아 있고 `001`은 수정하지 않는다 | 나중에 Better Auth를 켤 때 session/account/verification 3개만 추가하면 된다 |
 
 ---
 

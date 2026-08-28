@@ -619,7 +619,7 @@ ADS1115          LAN          battery-anomaly-alerts ◀─ alerts 발행 ─┤
 > | 5 | `docs/handover/schema-open-questions.md` | **아직 스키마가 없는 6건.** 추론 결과 적재 테이블·`age_ms`/`temp_points`/`mode`/`soc_basis` 자리·하이퍼테이블·진단기 테이블·중복 방지 키·`battery_asset.memo`. Consumer 착수 전 백엔드(·AI)와 합의할 것. **Q6만은 1부 작업 중에 바로 막히므로 먼저 본다** |
 > | 6 | `docs/verification_matrix.md` | 무엇을 어떻게 검증하면 끝난 것으로 치는지. 백엔드 typecheck·빌드·`/health`·테스트 명령이 여기 있다 |
 >
-> ⚠️ **로컬 PostgreSQL에 실제로 붙이기 전에 `infra-implementations.md` §3-1을 먼저 본다.** 지금 이 저장소를 그대로 받아 `psql -f backend/migrations/001_app_auth.sql`을 돌리면 **첫 구문에서 멈춘다** — Better Auth의 `"user"` 테이블을 만드는 DDL이 저장소에 없는데 `001`이 그걸 FK로 참조하고, 그걸 생성하는 `npm run auth:generate`도 CLI 패키지가 없어 실패한다. 우회 선택지는 §4에 있고 **결정은 인프라 담당자 몫**이다.
+> ✅ **DB는 `npm run db:migrate` 하나로 올라간다(2026-08-28).** `backend/migrations/000`~`005`가 파일명 순서대로 적용된다. 예전에 `psql -f 001_app_auth.sql`이 첫 구문에서 멈추던 문제(`"user"` 테이블 DDL 부재)는 `000_identity.sql`이 해결했다. **`psql -f`로 001만 직접 돌리지 마라** — 순서가 있는 6개 파일이다. `npm run auth:generate`·`auth:migrate`는 CLI 패키지가 없어 실패하니 부르지 않는다(Better Auth는 지금 미사용).
 >
 > 세부 계약이 필요해지면 — 에러 코드는 `docs/backend_contract.md` §1.10, 원자성 요구는 §3.4, 에지 프레임 정의와 `battery-events`의 code+params는 `docs/hardware/mode1_backend_spec.md` §9·§11이다.
 >
@@ -631,7 +631,7 @@ ADS1115          LAN          battery-anomaly-alerts ◀─ alerts 발행 ─┤
 
 - [ ] 호스트 PC에 Kafka 설치·토픽 3개 생성, LAN 한정 PLAINTEXT 구성 (S-BYYPVQ) — `advertised.listeners`를 호스트 LAN IP로 잡아야 에지가 붙는다
 - [ ] 브로커·DB 포트를 방화벽에서 LAN으로 제한
-- [ ] PostgreSQL + TimescaleDB 설치, `telemetry_metric` 하이퍼테이블 전환·압축·보존정책 (S-NFEETD) — ⚠️ **스키마를 새로 설계하지 않는다.** 테이블 8개가 이미 `backend/migrations/001_app_auth.sql`에 있고 `backend/src/store/types.ts`의 도메인 타입에 대응한다(둘은 한 쌍이라 한쪽만 바꾸면 런타임에서 조용히 깨진다 — 다만 완전한 1:1은 아니고 어긋나는 컬럼이 있다, `schema-open-questions.md` §0). 하이퍼테이블 전환은 **지금 PK로는 `create_hypertable`이 거부되므로** `docs/handover/schema-open-questions.md` Q3을 먼저 읽는다
+- [ ] PostgreSQL + TimescaleDB **설치** (S-NFEETD) — 설치만 남았다. ⚠️ **스키마를 새로 설계하지 않는다.** `backend/migrations/`의 6개 파일이 테이블 14개를 정의하고 `npm run db:migrate`가 적용한다. 하이퍼테이블 전환·보존정책(60일)은 `005_timescale.sql`에 이미 들어 있고, PK를 `(device_id, measured_at)`로 바꿔 `create_hypertable` 거부 문제도 해결됐다. 압축 정책은 재처리 창과 충돌해 **일부러 걸지 않았다**(되살리는 두 줄이 `005` 주석에 있다). 결정 근거는 `docs/handover/schema-open-questions.md`
 - [x] 백엔드 프로젝트 초기화 (Node.js + TypeScript + Express)
 - [x] Better Auth 기반 사용자 인증 골격 구현 (R-HBLCDS — F-SDSVND, F-TFJKKF, F-HUYIXC)
 - [ ] ~~Better Auth 실인증 전환~~ — **보류(2026-08-25 결정).** 코드는 그대로 두고 `AUTH_MODE=demo`로 꺼둔다. 나중에 환경변수만 바꿔 켠다. 데모 계정에 ADMIN이 있어 RBAC·감사로그 시연에는 지장이 없다
@@ -645,7 +645,7 @@ ADS1115          LAN          battery-anomaly-alerts ◀─ alerts 발행 ─┤
 
 ### Phase 3 — 스트리밍 파이프라인
 - [ ] Kafka Consumer 구현 → `telemetry_metric` 적재 (S-JGLAAI)
-- [ ] 배터리 자산/측정 세션 테이블 및 API (S-BATAST, S-MSESSN) — **부분 완료: DDL(`battery_asset`·`measurement_session`)과 REST 라우트는 이미 있다.** 남은 건 그 테이블을 실제로 읽고 쓰는 PostgreSQL 구현체(`docs/handover/infra-implementations.md` 1부)이며, 그전까지 `DATA_MODE=postgres`에서 `/api/*`가 `503`인 것은 의도된 fail-closed다
+- [ ] 배터리 자산/측정 세션 테이블 및 API (S-BATAST, S-MSESSN) — **부분 완료: DDL(`battery_asset`·`measurement_session`·`device`)과 REST 라우트는 이미 있다.** 활성 세션은 **설비 전체 1개**이며 `uq_active_session_global`이 강제한다(2026-08-28 확정). 남은 건 그 테이블을 실제로 읽고 쓰는 PostgreSQL 구현체(`docs/handover/infra-implementations.md` 1부)이며, 그전까지 `DATA_MODE=postgres`에서 `/api/*`가 `503`인 것은 의도된 fail-closed다
 - [ ] Consumer 적재 시 active 세션 조회 → `battery_id` 태깅 (S-MSESSN) — 규칙 정본 `docs/handover/b2-session-tagging.md`
 - [ ] 오프셋 커밋 및 재처리 전략 (S-SBCSJU)
 - [ ] 대시보드용 조회 뷰 생성 (S-ROGPIB)

@@ -33,7 +33,7 @@ Raspberry Pi              Kafka → Consumer → PostgreSQL + TimescaleDB
 | 요구사항·기능·데이터 모델(`battery_asset`/`measurement_session`) | `PLAN.md` (Manyfast 프로젝트 ID `7241ba62-d21a-4de4-ba45-fe572dd0f4de`) |
 | 기능·유저플로우 (디자인 무관) | `docs/product_contract.md` — 새 디자인 작업의 입력 |
 | REST·WebSocket 인터페이스 | `docs/backend_contract.md` |
-| DB 스키마 (실제 컬럼·제약) | `backend/migrations/001_app_auth.sql` — 테이블 8개. `backend/src/store/types.ts`와 **한 쌍**이라 한쪽만 고치면 조용히 깨진다. ⚠️ 이 파일만으로는 실행되지 않는다(Better Auth `"user"` 선행) — `docs/handover/infra-implementations.md` §3-1 |
+| DB 스키마 (실제 컬럼·제약) | `backend/migrations/` — 6개 파일·테이블 14개. `npm run db:migrate`로 적용한다(`backend/scripts/migrate.mjs`). `backend/src/store/types.ts`와 **한 쌍**이라 한쪽만 고치면 조용히 깨진다 |
 | 검증·테스트·중단 조건 | `docs/verification_matrix.md` |
 | 인프라(Kafka·PostgreSQL) 인계 — 구현 경계·태깅 규칙·미결정 스키마 | `docs/handover/infra-implementations.md`, `docs/handover/b2-session-tagging.md`, `docs/handover/schema-open-questions.md` |
 | 관리자 기능·플로우 | `docs/admin_feature_definition.md`, `docs/admin_userflow.md` |
@@ -270,13 +270,16 @@ LSTM-AutoEncoder(재구성 오차 = 현재 이상)와 Informer(예측 오차 = �
 - **배터리 미연결 게이트**: 연결된 배터리가 없는 일반 사용자는 `배터리 자산관리`를 제외한 8개 메뉴가 전부 잠긴다(v3 실측). 서버도 `409 NO_ACTIVE_SESSION`으로 재검증한다.
 - `devices`(디바이스 상태) 라우트는 v3에 마크업만 있고 전환 코드가 없는 고아 라우트다. `REQ-WEB-030/031`은 구현 대상이 아니다.
 - **셀 단위 데이터는 전부 범위 밖이다.** 히트맵도, 이벤트·알림의 `cellIndex`도 만들지 않는다. 프론트에 노출하는 온도는 `temp_contact`·`temp_ir_surface` 두 값뿐이며, 이벤트명에서 `· 셀 N`을 뺀다. (에지가 함께 싣는 `temp_points`는 **셀 1개 표면의 여러 지점**이라 여기서 말하는 '셀 단위'가 아니다 — AI 특징용이고 프론트에 노출하지 않는다.)
-- **인증은 Better Auth 세션 쿠키 + 서버 세션 검증이다.** `/api/auth/*`는 우리가 만들지 말고 Better Auth 핸들러에 넘긴다. 관리자는 RBAC로 분리한다.
+- **인증의 목표 형태는 Better Auth 세션 쿠키 + 서버 세션 검증이다.** `/api/auth/*`는 우리가 만들지 말고 Better Auth 핸들러에 넘긴다. 관리자는 RBAC로 분리한다. ⚠️ **다만 지금은 Better Auth를 켜지 않았다**(`AUTH_MODE=demo`) — 아래 DB 절 참조.
 - **서버는 사용자에게 보일 문구를 만들지 않는다.** 한/영 토글이 있으므로 code+params만 내려주고 문장은 프론트 사전이 조립한다. 예외는 사용자가 입력한 자유 텍스트(공지 본문, 메모, 제어 사유)뿐이다.
 - **계정 제재와 안전 감시는 분리한다.** 계정을 정지해도 측정 세션·데이터 적재·Fail-Safe는 계속 돈다(웹 로그인만 차단). 배터리 `BLOCKED`만 세션을 끊고, 그것도 릴레이는 건드리지 않는다.
 - **릴레이 자동 복구는 없다.** 한 번 차단되면 재인증·사유 입력으로 수동 복구만 가능하다.
 - 사용자당 진단기는 **1대 고정**이다. `deviceId`를 API로 받지 않고 서버가 자동 선택한다.
 - **기능정의서의 화면 위치는 v3와 어긋난 게 있다.** REQ-WEB-026(최근 이벤트)은 대시보드가 아니라 이상 탐지 화면, REQ-WEB-051(정렬)은 이벤트가 아니라 배터리 관리 화면, REQ-WEB-054/055(CSV·PDF)는 이벤트가 아니라 추세 화면, REQ-WEB-037의 제조사/모델 입력은 등록 폼에 없음. **충돌 시 `frontend/` 구현이 우선한다**(2026-08-28 — 예전에는 v3 HTML이 이 자리였다).
-
+- **DB는 `npm run db:migrate` 하나로 올린다(2026-08-28).** `migrations/000`~`005`를 파일명 순서대로 적용하고 `schema_migrations`에 기록한다. **`001_app_auth.sql`은 고치지 않는다** — 백엔드의 기준 파일이라 변경은 앞뒤 번호 파일로 쌓는다. `005`는 TimescaleDB 확장이 있어야 통과하며, 없으면 `005`만 실패하고 `telemetry_metric`이 평범한 테이블로 남는다.
+- **Better Auth는 지금 쓰지 않는다(2026-08-28).** 다만 `"user"` 테이블은 **Better Auth 코어 스키마와 같은 모양으로 우리가 미리 만들어 둔다**(`000_identity.sql`) — `001`의 FK 4개가 그걸 전제하기 때문이고, 나중에 켤 때 `session`·`account`·`verification` 3개만 추가하면 되게 하려는 것이다. **`npm run auth:generate`·`auth:migrate`는 부르지 마라** — CLI가 별도 패키지(`@better-auth/cli`)라 설치돼 있지 않아 실패한다.
+- **활성 `measurement_session`은 설비 전체에 1개다(2026-08-28 확정, per-device 아님).** DB가 `uq_active_session_global`로 강제한다. 근거는 BQ27441 I2C 주소 고정 — 한 번에 배터리 1개만 측정할 수 있다. ⚠️ **계약 테스트 20건은 per-device와 전역을 구분하지 못하므로**(같은 진단기로만 두 번 부른다) 테스트 통과를 이 규칙의 근거로 삼지 마라.
+- **`telemetry_metric`의 PK는 `(device_id, measured_at)` 자연키다** — 대리키 `id`는 제거했다. TimescaleDB가 모든 UNIQUE 인덱스에 파티셔닝 컬럼을 요구해서이고, 덕분에 재처리 중복 방지가 같은 제약으로 닫힌다. **적재는 `on conflict do nothing`으로 한다.** 보존 60일, 압축은 일부러 걸지 않았다(재처리 창과 충돌).
 - **`DATA_MODE=postgres`면 도메인 `/api/*`가 `503 RUNTIME_NOT_READY`다 — 고장이 아니라 의도된 fail-closed다.** PostgreSQL 저장소 구현체(`backend/src/store/postgres.ts`)가 아직 없어서, 게이트를 열면 "실 DB" 라벨을 달고 인메모리 데모 데이터가 나간다. **구현이 끝나기 전에 `backend/src/server.ts`의 이 가드를 열지 않는다.** 정본은 `docs/handover/infra-implementations.md` §9.
   - **"전부"는 아니다** — `POST /api/demo/login`·`/api/demo/logout`이 이 가드보다 **먼저** 등록돼(`backend/src/server.ts:314`·`:338` vs 가드 `:356`) `DATA_MODE=postgres`에서도 그대로 응답한다.
   - ⚠️ **WebSocket도 이 게이트를 공유하지 않는다** — upgrade 핸들러가 `AUTH_MODE`만 보고 `DATA_MODE`를 안 본다(`:1102-1131`).
