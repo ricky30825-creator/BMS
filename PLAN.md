@@ -667,8 +667,8 @@ ADS1115          LAN          battery-anomaly-alerts ◀─ alerts 발행 ─┤
 
 ### Phase 6 — 알림 & 차단
 - [ ] ~~카카오톡 알림 연동 (S-EOCLMX, S-UZDNPT)~~ — **보류(2026-08-25 결정).** 설정 화면의 채널 토글은 **현행 유지**한다: 저장은 되지만 발송은 일어나지 않으며, 화면에 별도 미구현 표시를 추가하지 않는다. ⚠️ 시연에서 "알림이 간다"고 설명하지 않도록 주의
-- [ ] 릴레이/Kill-Switch 제어 API (S-ELAUQJ)
-- [ ] 긴급 차단 자동화 Fail-Safe (S-VMNNAM)
+- [ ] 릴레이/Kill-Switch 제어 API (S-ELAUQJ) — **부분 완료: REST(승인·재인증·사유·멱등성)와 감사 기록은 이미 있다.** 남은 건 그 결정을 실제 에지로 보내는 `DeviceCommandPort`의 Kafka 구현체(`battery-events` 발행) — `docs/handover/infra-implementations.md` 2부
+- [ ] 긴급 차단 자동화 Fail-Safe (S-VMNNAM) — **부분 완료: 판정 엔진(`judgeFailsafe`)과 인터락·에지통보·WS 배선(`runFailsafe`)은 이미 있다.** 남은 것 둘 — ① 하드웨어 실측 문턱값(지금 전부 `0`이라 어떤 계층도 차단하지 않는 휴면 상태) ② **Kafka Consumer가 프레임마다 `runFailsafe`를 부르는 호출부.** ⚠️ 같은 `batteryId`에 대해 동시 호출되면 감사 로그가 중복 오염되므로 **배터리별로 직렬화**해야 한다 — `docs/handover/infra-implementations.md` §14·§14b
 - [ ] 디바이스 음성 안내 웹 설정 및 백엔드 API (S-VOCALR)
 - [ ] 알림 설정 및 이력 페이지
 
