@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { CAPACITY_PHASE, isInAggregationWindow, phaseAt, phaseIndexAt, quickPhases, totalDurationMs } from "./phases.js";
+import { specAttainmentPct } from "./metrics.js";
 
 describe("quickPhases", () => {
   it("정격 전류가 없으면 스펙 §3-1의 6단계를 그대로 낸다", () => {
@@ -18,24 +19,46 @@ describe("quickPhases", () => {
     expect(quickPhases(null).some((s) => s.phase === "P6")).toBe(false);
   });
 
-  it("목표 전류에 0.7 × 정격 상한을 건다", () => {
-    // 정격 1.0A → 상한 0.7A. P3(1.5)·P4(2.0)가 깎인다
-    const specs = quickPhases(1.0);
-    expect(specs.find((s) => s.phase === "P2")?.loadTargetA).toBe(0.7);
-    expect(specs.find((s) => s.phase === "P3")?.loadTargetA).toBe(0.7);
-    expect(specs.find((s) => s.phase === "P4")?.loadTargetA).toBe(0.7);
+  it("정격 전류가 있어도 사다리는 그대로다 — §9의 0.7× 상한은 여기 없다", () => {
+    // 정격 1.0A라도 P3(1.5)·P4(2.0)는 깎이지 않는다. §3-1 사다리는 §9-2
+    // "고정 자극 15분"(스크리닝) 상한과 무관하다.
+    const withRated = quickPhases(1.0);
+    const withoutRated = quickPhases(null);
+    expect(withRated.map((s) => s.loadTargetA)).toEqual(withoutRated.map((s) => s.loadTargetA));
+    expect(withRated.map((s) => s.loadTargetA)).toEqual([0.1, 0.5, 1.0, 1.5, 2.0, 0.1]);
   });
 
-  it("상한이 걸려도 P0·P5의 최소 유지 부하 0.1A 아래로는 내려가지 않는다", () => {
-    // 무부하로 두면 보조배터리가 출력을 스스로 끊는다(스펙 §2-6)
+  it("정격이 아주 작아도(0.05A) 사다리는 안 깎인다 — 최소 유지 부하만 P0·P5에 적용된다", () => {
     const specs = quickPhases(0.05);
+    expect(specs.map((s) => s.loadTargetA)).toEqual([0.1, 0.5, 1.0, 1.5, 2.0, 0.1]);
+  });
+
+  it("MIN_HOLD_LOAD_A(0.1A)는 P0·P5의 바닥이다 — 무부하로 두면 보조배터리가 출력을 스스로 끊는다(스펙 §2-6)", () => {
+    const specs = quickPhases(null);
     expect(specs.find((s) => s.phase === "P0")?.loadTargetA).toBe(0.1);
     expect(specs.find((s) => s.phase === "P5")?.loadTargetA).toBe(0.1);
   });
+});
 
-  it("BW150 설정 분해능에 맞춰 0.01A 단위로 반올림한다", () => {
-    const specs = quickPhases(1.3); // 0.7 × 1.3 = 0.91
-    expect(specs.find((s) => s.phase === "P4")?.loadTargetA).toBe(0.91);
+describe("정격까지 계단이 올라간다 — 상한을 걸면 HEALTHY가 영원히 안 나온다", () => {
+  it("건강한 팩을 시뮬레이션하면 100% 도달률이 나온다", () => {
+    const rated = 2.0;
+    const specs = quickPhases(rated);
+    const sustained = Math.max(...specs.map((s) => s.loadTargetA));
+    expect(sustained).toBeGreaterThanOrEqual(rated);
+
+    const p0Voltage = 5.0;
+    const windows = specs.map((s) => ({
+      phase: s.phase,
+      loadTargetA: s.loadTargetA,
+      voltageMedianV: p0Voltage,
+      voltageSamples: [p0Voltage],
+      currentMedianA: -s.loadTargetA,
+      tempSamples: [],
+      latchOff: false,
+    }));
+
+    expect(specAttainmentPct(windows, rated)).toBe(100);
   });
 });
 

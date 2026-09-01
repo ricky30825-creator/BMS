@@ -13,13 +13,21 @@ export const MIN_HOLD_LOAD_A = 0.1;
 
 export const CAPACITY_PHASE = "CAPACITY";
 
-// 0.7 × 광고 정격 전류 상한(스펙 §9). 정격 1A짜리 팩에 1.5A를 걸면
-// "위험"이 아니라 "정격 초과"를 재게 된다.
-const RATED_LOAD_FRACTION = 0.7;
-
 // BW150 설정 분해능이 0.01A다.
 const LOAD_RESOLUTION_A = 0.01;
 
+// ⚠️ 이 사다리에는 정격 전류 상한이 없다 — 의도적이다. `0.7 × 광고 정격
+// 전류` 상한은 스펙 §9-2 "고정 자극 15분"(스크리닝 프로토콜)에만 있는
+// 규칙이고, §3-1의 빠른 진단 사다리(이 표)는 0.1/0.5/1.0/1.5/2.0/0.1A로
+// 고정이며 상한을 두지 않는다. 예전에 §9의 규칙을 여기로 잘못 들여왔더니
+// specAttainmentPct의 분자가 0.7×rated를 못 넘어 HEALTHY가 어떤 자산에도
+// 나올 수 없었다(등급 4개 중 1개가 도달 불가능해짐). §3-2는 사다리가
+// 이탈점(latch-off 포함)을 찾아내길 기대하므로, 정격 1A짜리 팩에 2.0A를
+// 거는 것도 스펙상 맞다.
+//
+// ⚠️ 미해결 — 지금 측정원은 시뮬레이터라 물리적 위험이 없지만, 실기기에서
+// 빠른 진단도 정격 전류로 상한을 걸어야 하는지는 실측이 필요한 열린
+// 질문이다(§3-3의 미측정 중단 문턱들과 같은 부류). 정하지 말고 남겨둔다.
 const QUICK_TABLE: readonly { phase: string; durationMs: number; baseLoadA: number }[] = [
   { phase: "P0", durationMs: 10_000, baseLoadA: 0.1 },
   { phase: "P1", durationMs: 20_000, baseLoadA: 0.5 },
@@ -39,14 +47,17 @@ function roundLoad(value: number): number {
   return Number((Math.round(value / LOAD_RESOLUTION_A) * LOAD_RESOLUTION_A).toFixed(2));
 }
 
+// `ratedOutputCurrentA`는 더 이상 사다리 계산에 쓰이지 않는다(위 주석 참조)
+// — 그래도 시그니처에 남긴다. `store/memory.ts`·`diagnosis/runner.ts`가
+// 이미 자산의 정격 전류를 넘겨 호출하고 있고, 이번 수정의 범위는
+// `phases.ts`·`phases.test.ts` 두 파일뿐이라 그 호출부를 고칠 수 없다.
+// 파라미터를 지우면 시그니처가 깨져 두 호출부가 컴파일에 실패한다.
 export function quickPhases(ratedOutputCurrentA: number | null): PhaseSpec[] {
-  const cap = ratedOutputCurrentA !== null && ratedOutputCurrentA > 0
-    ? ratedOutputCurrentA * RATED_LOAD_FRACTION
-    : Number.POSITIVE_INFINITY;
+  void ratedOutputCurrentA;
   return QUICK_TABLE.map(({ phase, durationMs, baseLoadA }) => ({
     phase,
     durationMs,
-    loadTargetA: roundLoad(Math.max(MIN_HOLD_LOAD_A, Math.min(baseLoadA, cap))),
+    loadTargetA: roundLoad(Math.max(MIN_HOLD_LOAD_A, baseLoadA)),
   }));
 }
 
