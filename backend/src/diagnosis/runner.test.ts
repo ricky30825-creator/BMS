@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { applyAbort, stepDiagnosis } from "./runner.js";
 import type { RunnerConfig } from "./runner.js";
+import { accumulateWh } from "./metrics.js";
 import { UNSET_DIAGNOSIS_THRESHOLDS } from "./safety.js";
 import type { DemoBattery, DemoDiagnosis } from "../store/types.js";
 
@@ -22,7 +23,7 @@ const running = (kind: "QUICK" | "CAPACITY", phase: string): DemoDiagnosis => ({
   id: "dg_1", batteryId: "PB-A", sessionId: "s1", kind, status: "RUNNING", phase,
   input: kind === "CAPACITY" ? { dischargeCurrentA: 1 } : {},
   result: null, startedAt: "2026-09-01T00:00:00.000Z", estimatedEndAt: null, completedAt: null,
-  progress: { loadTargetA: null, loadActualA: null, partialMetrics: null, windows: [], deliveredWh: 0, vLightLoadV: null },
+  progress: { loadTargetA: null, loadActualA: null, partialMetrics: null, windows: [], deliveredWh: 0, vLightLoadV: null, lastElapsedMs: null },
 });
 
 describe("stepDiagnosis", () => {
@@ -91,6 +92,25 @@ describe("stepDiagnosis", () => {
     const outcome = stepDiagnosis({ battery: battery(), diagnosis: running("CAPACITY", "CAPACITY"), elapsedMs: 1000, config });
     if (outcome.kind !== "RUNNING") throw new Error("expected RUNNING");
     expect(outcome.progress.deliveredWh).toBeGreaterThan(0);
+  });
+
+  it("회귀: tick 고정폭이 아니라 실제 경과시간 델타를 크레딧한다 — 3초 간격 두 tick은 3초치를 적산해야지 tickMs(1초) 두 번치가 아니다", () => {
+    const first = stepDiagnosis({ battery: battery(), diagnosis: running("CAPACITY", "CAPACITY"), elapsedMs: 3000, config });
+    if (first.kind !== "RUNNING") throw new Error("expected RUNNING");
+    // 첫 tick은 이전 tick이 없어 elapsedMs 그대로(3초)를 크레딧해야 한다.
+    const oneStepAt3s = accumulateWh(0, first.progress.vLightLoadV ?? battery().latest.voltageV, battery().latest.currentA, 3000);
+    expect(first.progress.deliveredWh).toBeCloseTo(oneStepAt3s, 6);
+    expect(first.progress.lastElapsedMs).toBe(3000);
+
+    const nextDiagnosis = { ...running("CAPACITY", "CAPACITY"), phase: first.phase, progress: first.progress };
+    const second = stepDiagnosis({ battery: battery(), diagnosis: nextDiagnosis, elapsedMs: 6000, config });
+    if (second.kind !== "RUNNING") throw new Error("expected RUNNING");
+
+    // 델타 3초분만 추가로 크레딧돼야 한다 — tickMs(1초) 두 번치(≈2초분)가 아니다.
+    const deltaWh = second.progress.deliveredWh - first.progress.deliveredWh;
+    const expectedDeltaWh = accumulateWh(0, second.progress.vLightLoadV ?? battery().latest.voltageV, battery().latest.currentA, 3000);
+    expect(deltaWh).toBeCloseTo(expectedDeltaWh, 6);
+    expect(second.progress.lastElapsedMs).toBe(6000);
   });
 
   it("진행 상태를 제자리에서 변형하지 않는다 — 호출부가 이전 스냅샷을 그대로 들고 있을 수 있다", () => {

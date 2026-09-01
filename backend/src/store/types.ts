@@ -71,6 +71,10 @@ export type DiagnosisProgress = {
   windows: PhaseWindow[];
   deliveredWh: number;
   vLightLoadV: number | null;
+  // CAPACITY 브랜치가 실제 경과시간 델타로 Wh를 적산하는 데 쓴다 — 직전
+  // tick의 elapsedMs. tickMs 고정폭을 매번 크레딧하면 타이머 드리프트·
+  // 누락 tick이 여러 시간짜리 테스트에서 체계적으로 어긋난다(2026-09-01).
+  lastElapsedMs: number | null;
 };
 
 export type DemoDiagnosis = {

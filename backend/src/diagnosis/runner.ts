@@ -81,7 +81,7 @@ function upsertWindow(windows: PhaseWindow[], spec: PhaseSpec, sample: { voltage
 export function stepDiagnosis(input: StepInput): RunnerOutcome {
   const { battery, diagnosis, elapsedMs, config } = input;
   const source = input.source ?? defaultSource;
-  const progress = diagnosis.progress ?? { loadTargetA: null, loadActualA: null, partialMetrics: null, windows: [], deliveredWh: 0, vLightLoadV: null };
+  const progress = diagnosis.progress ?? { loadTargetA: null, loadActualA: null, partialMetrics: null, windows: [], deliveredWh: 0, vLightLoadV: null, lastElapsedMs: null };
 
   const isQuick = diagnosis.kind === "QUICK";
   const specs = isQuick ? quickPhases(battery.ratedOutputCurrentA) : [];
@@ -107,7 +107,15 @@ export function stepDiagnosis(input: StepInput): RunnerOutcome {
   if (abortReason) return { kind: "ABORTED", reason: abortReason };
 
   if (!isQuick) {
-    const deliveredWh = accumulateWh(progress.deliveredWh, sample.voltageV, sample.currentA, config.tickMs);
+    // tickMs 고정폭이 아니라 직전 tick 이후 실제 경과시간을 크레딧한다 —
+    // 몇 시간짜리 용량 테스트에서는 타이머 드리프트·누락 tick이 쌓여
+    // config.tickMs를 그대로 쓰면 체계적으로 틀린다. deliveredWh는 두
+    // SOH 산식의 분자이자 이후 모든 테스트가 나누는 기준선의 분자다.
+    // lastElapsedMs가 아직 없는 첫 tick은 진단이 t=0에서 시작했다고 보고
+    // elapsedMs 전체를 크레딧한다(0을 기준점으로 삼는다) — elapsedMs를
+    // 기준점으로 삼으면 첫 tick의 델타가 0이 되어 아무 것도 적산되지 않는다.
+    const elapsedDeltaMs = elapsedMs - (progress.lastElapsedMs ?? 0);
+    const deliveredWh = accumulateWh(progress.deliveredWh, sample.voltageV, sample.currentA, elapsedDeltaMs);
     const vLight = knownVLight ?? sample.voltageV;
     // ⚠️ CAPACITY에서 전압 붕괴는 중단이 아니라 정상 컷오프다(스펙 §4-1 ⑤).
     if (sample.voltageV < vLight * COLLAPSE_RATIO) {
@@ -127,6 +135,7 @@ export function stepDiagnosis(input: StepInput): RunnerOutcome {
         windows: progress.windows,
         deliveredWh,
         vLightLoadV: vLight,
+        lastElapsedMs: elapsedMs,
       },
     };
   }
@@ -154,6 +163,7 @@ export function stepDiagnosis(input: StepInput): RunnerOutcome {
       windows,
       deliveredWh: progress.deliveredWh,
       vLightLoadV: vLight,
+      lastElapsedMs: progress.lastElapsedMs, // QUICK은 이 필드를 쓰지 않는다 — CAPACITY 전용
     },
   };
 }
