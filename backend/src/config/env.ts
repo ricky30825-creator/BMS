@@ -1,5 +1,6 @@
 import "dotenv/config";
 import { z } from "zod";
+import type { DiagnosisSafetyThresholds } from "../diagnosis/safety.js";
 
 const envSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
@@ -12,6 +13,14 @@ const envSchema = z.object({
   BETTER_AUTH_URL: z.string().url(),
   BETTER_AUTH_SECRET: z.string().min(32),
   GOOGLE_CLIENT_ID: z.string().optional(),
+  // F21 진단 문턱. 전부 `0`이 미설정 sentinel이며 그 계층을 비활성화한다.
+  // H2·H3 실측이 나오면 여기 숫자만 바꾼다(코드 변경 불필요).
+  DIAG_SURFACE_CUTOFF_C: z.coerce.number().min(0).default(0),
+  DIAG_TEMP_SLOPE_C_PER_MIN: z.coerce.number().min(0).default(0),
+  DIAG_GAS_RAW: z.coerce.number().min(0).default(0),
+  DIAG_S1_THERMAL_SLOPE_C_PER_MIN: z.coerce.number().min(0).default(0),
+  // 부스트 효율은 0이면 절대 SOH를 못 내므로 기본값이 있다(스펙 §8 H4).
+  DIAG_ASSUMED_EFFICIENCY: z.coerce.number().min(0).max(1).default(0.88),
   GOOGLE_CLIENT_SECRET: z.string().optional()
 });
 
@@ -20,3 +29,15 @@ export const env = envSchema.parse(process.env);
 export const corsOrigins = env.CORS_ORIGINS.split(",")
   .map((origin) => origin.trim())
   .filter(Boolean);
+
+export const diagnosisSafetyThresholds: DiagnosisSafetyThresholds = Object.freeze({
+  surfaceCutoffC: env.DIAG_SURFACE_CUTOFF_C,
+  tempSlopeCPerMin: env.DIAG_TEMP_SLOPE_C_PER_MIN,
+  gasRaw: env.DIAG_GAS_RAW,
+});
+
+// 발열 기울기 상한. 스펙 §3-4가 "판정의 형태만 확정"이라 실측 전에는 0이며,
+// 0이면 그 조건을 위반으로 보지 않고 결과에 gradeProvisional을 단다.
+export const diagnosisS1CPerMin = env.DIAG_S1_THERMAL_SLOPE_C_PER_MIN;
+
+export const diagnosisAssumedEfficiency = env.DIAG_ASSUMED_EFFICIENCY;
