@@ -44,30 +44,37 @@ function capacityLoadA(diagnosis: DemoDiagnosis): number {
 }
 
 // 진행 중 창을 갱신한다. 후반 절반 구간의 샘플만 쌓는다.
+//
+// ⚠️ 기존 원소를 in-place로 바꾸지 않는다. stepDiagnosis는 순수 함수로
+// 명시돼 있고, store/memory.ts의 findDiagnosisById가 얕은 복제
+// (`{ ...diagnosis }`)만 하므로 progress는 저장된 진단과 참조를 공유한다.
+// 여기서 기존 window 객체를 mutate하면 advanceDiagnosis가 호출되기도
+// 전에, 심지어 그 tick이 ABORTED로 끝나 advanceDiagnosis가 아예 안
+// 불려도, 저장소 상태에 조용히 쓰기가 일어난다.
 function upsertWindow(windows: PhaseWindow[], spec: PhaseSpec, sample: { voltageV: number; currentA: number; atMs: number; tempIrSurfaceC: number | null }): PhaseWindow[] {
-  const next = [...windows];
-  let window = next.find((w) => w.phase === spec.phase);
-  if (!window) {
-    window = {
-      phase: spec.phase,
-      loadTargetA: spec.loadTargetA,
-      voltageMedianV: sample.voltageV,
-      voltageSamples: [],
-      currentMedianA: sample.currentA,
-      tempSamples: [],
-      latchOff: false,
-    };
-    next.push(window);
-  }
+  const index = windows.findIndex((w) => w.phase === spec.phase);
+  const existing = index === -1 ? null : windows[index];
+
   // 중앙값을 유지하려면 원자료가 필요하므로 온도 외 값은 누적 평균 대신
   // 관측한 전압을 모아 중앙값을 다시 낸다.
-  window.voltageSamples = [...window.voltageSamples, sample.voltageV];
-  window.voltageMedianV = median(window.voltageSamples) ?? sample.voltageV;
-  window.currentMedianA = sample.currentA;
-  window.latchOff = window.latchOff || sample.voltageV < LATCH_OFF_VOLTAGE_V;
-  if (sample.tempIrSurfaceC !== null) {
-    window.tempSamples = [...window.tempSamples, { atMs: sample.atMs, tempIrSurfaceC: sample.tempIrSurfaceC }];
-  }
+  const voltageSamples = [...(existing?.voltageSamples ?? []), sample.voltageV];
+  const tempSamples = sample.tempIrSurfaceC !== null
+    ? [...(existing?.tempSamples ?? []), { atMs: sample.atMs, tempIrSurfaceC: sample.tempIrSurfaceC }]
+    : (existing?.tempSamples ?? []);
+
+  const updated: PhaseWindow = {
+    phase: spec.phase,
+    loadTargetA: spec.loadTargetA,
+    voltageMedianV: median(voltageSamples) ?? sample.voltageV,
+    voltageSamples,
+    currentMedianA: sample.currentA,
+    tempSamples,
+    latchOff: (existing?.latchOff ?? false) || sample.voltageV < LATCH_OFF_VOLTAGE_V,
+  };
+
+  if (index === -1) return [...windows, updated];
+  const next = [...windows];
+  next[index] = updated;
   return next;
 }
 

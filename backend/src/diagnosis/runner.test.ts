@@ -72,6 +72,23 @@ describe("stepDiagnosis", () => {
     if (outcome.kind !== "RUNNING") throw new Error("expected RUNNING");
     expect(outcome.progress.deliveredWh).toBeGreaterThan(0);
   });
+
+  it("진행 상태를 제자리에서 변형하지 않는다 — 호출부가 이전 스냅샷을 그대로 들고 있을 수 있다", () => {
+    const diagnosis = running("QUICK", "P0");
+    // P0 후반(집계 창)에서 한 틱
+    const first = stepDiagnosis({ battery: battery(), diagnosis, elapsedMs: 6_000, config });
+    if (first.kind !== "RUNNING") throw new Error("expected RUNNING");
+    const snapshot = first.progress.windows;
+    const beforeCounts = snapshot.map((w) => w.voltageSamples.length);
+
+    // 같은 windows를 들고 다음 틱
+    const next = { ...diagnosis, phase: first.phase, progress: first.progress };
+    const second = stepDiagnosis({ battery: battery(), diagnosis: next, elapsedMs: 7_000, config });
+    if (second.kind !== "RUNNING") throw new Error("expected RUNNING");
+
+    expect(snapshot.map((w) => w.voltageSamples.length)).toEqual(beforeCounts);
+    expect(second.progress.windows).not.toBe(snapshot);
+  });
 });
 
 describe("applyAbort", () => {
