@@ -132,7 +132,7 @@ describe("specAttainmentPct", () => {
 });
 
 describe("quickGrade", () => {
-  const base = { regulationKneeA: 2.0, ratedOutputCurrentA: 2.0, thermalSlopeCPerMin: 1.0, s1CPerMin: 5, specAttainmentPct: 100 };
+  const base = { regulationKneeA: 2.0, kneeIsUpperBound: false, ratedOutputCurrentA: 2.0, thermalSlopeCPerMin: 1.0, s1CPerMin: 5, specAttainmentPct: 100 };
 
   it("세 조건을 다 만족하면 HEALTHY", () => {
     expect(quickGrade(base)).toEqual({ grade: "HEALTHY", gradeProvisional: false });
@@ -162,8 +162,28 @@ describe("quickGrade", () => {
   });
 
   it("관측 가능한 조건이 2개 미만이면 BASELINE_PENDING — 비교 기준이 없다", () => {
-    const result = quickGrade({ regulationKneeA: 2.0, ratedOutputCurrentA: null, thermalSlopeCPerMin: null, s1CPerMin: 0, specAttainmentPct: null });
+    const result = quickGrade({ regulationKneeA: 2.0, kneeIsUpperBound: false, ratedOutputCurrentA: null, thermalSlopeCPerMin: null, s1CPerMin: 0, specAttainmentPct: null });
     expect(result.grade).toBe("BASELINE_PENDING");
+  });
+
+  it("회귀: 사다리 상한(2.0A)이 정격보다 낮으면 knee·attainment는 위반이 아니라 관측 불가다 — 2.4A·3A 정격의 멀쩡한 팩이 SUSPECT_DEGRADED로 잘못 나오던 결함", () => {
+    // 정격 2.0A 이하는 오늘도 그대로 HEALTHY다 — 사다리 천장이 정격 이상이라 관측된다.
+    const rated2 = quickGrade({ regulationKneeA: 2.0, kneeIsUpperBound: true, ratedOutputCurrentA: 2.0, thermalSlopeCPerMin: null, s1CPerMin: 0, specAttainmentPct: 100 });
+    expect(rated2.grade).toBe("HEALTHY");
+
+    // 정격 3.0A: 사다리가 2.0A까지밖에 못 걸었으므로 knee·attainment 둘 다
+    // 관측 불가 — SUSPECT_DEGRADED가 아니라 BASELINE_PENDING이어야 한다.
+    const rated3 = quickGrade({ regulationKneeA: 2.0, kneeIsUpperBound: true, ratedOutputCurrentA: 3.0, thermalSlopeCPerMin: null, s1CPerMin: 0, specAttainmentPct: (2.0 / 3.0) * 100 });
+    expect(rated3.grade).toBe("BASELINE_PENDING");
+
+    // 정격 2.4A도 마찬가지.
+    const rated24 = quickGrade({ regulationKneeA: 2.0, kneeIsUpperBound: true, ratedOutputCurrentA: 2.4, thermalSlopeCPerMin: null, s1CPerMin: 0, specAttainmentPct: (2.0 / 2.4) * 100 });
+    expect(rated24.grade).toBe("BASELINE_PENDING");
+
+    // 진짜 이탈(사다리 안에서 규정 이탈점을 실제로 찾음)은 여전히 위반으로 잡는다 —
+    // 이 수정이 진짜 열화 탐지를 무디게 하지 않는다.
+    const realDeparture = quickGrade({ regulationKneeA: 1.2, kneeIsUpperBound: false, ratedOutputCurrentA: 3.0, thermalSlopeCPerMin: null, s1CPerMin: 0, specAttainmentPct: 40 });
+    expect(realDeparture.grade).toBe("SUSPECT_DEGRADED");
   });
 });
 

@@ -98,6 +98,7 @@ export type QuickGrade = "HEALTHY" | "CAUTION" | "SUSPECT_DEGRADED" | "BASELINE_
 
 export type QuickGradeInput = {
   regulationKneeA: number | null;
+  kneeIsUpperBound: boolean;         // true = 사다리를 다 버텨서 이탈점을 못 찾음("이 이상")
   ratedOutputCurrentA: number | null;
   thermalSlopeCPerMin: number | null;
   s1CPerMin: number;                 // 0 = 미설정
@@ -110,12 +111,25 @@ const SEVERE_KNEE_FRACTION = 0.7;
 // ⚠️ 이 등급은 이상점수 4등급과 다른 축이다. 열화는 수명, 이상점수는
 // 열폭주 위험이다. 두 값을 합산하거나 같은 enum으로 취급하지 않는다.
 export function quickGrade(input: QuickGradeInput): { grade: QuickGrade; gradeProvisional: boolean } {
-  const { regulationKneeA, ratedOutputCurrentA, thermalSlopeCPerMin: slope, s1CPerMin, specAttainmentPct: attainment } = input;
+  const { regulationKneeA, kneeIsUpperBound, ratedOutputCurrentA, thermalSlopeCPerMin: slope, s1CPerMin, specAttainmentPct: attainment } = input;
   const gradeProvisional = s1CPerMin === 0;
 
-  const kneeObservable = regulationKneeA !== null && ratedOutputCurrentA !== null && ratedOutputCurrentA > 0;
+  // 사다리 천장은 2.0A로 고정이다(phases.ts). kneeIsUpperBound가 true라는 건
+  // "이탈점을 못 찾았다"가 아니라 "정격까지 걸어보지 못했을 수 있다"는
+  // 뜻이다 — regulationKneeA는 그때 사다리가 실제로 낸 최고 전류(상한)일
+  // 뿐이다. 그 상한이 정격보다 낮으면 사다리가 정격 구간을 아예 시험하지
+  // 못한 것이므로, knee도 attainment(같은 사다리 데이터로 낸 값)도
+  // "관측 불가"다 — "실패"로 세면 2.4A·3A처럼 흔한 정격의 멀쩡한 팩이
+  // 전부 SUSPECT_DEGRADED로 나온다(2026-09-01 회귀). 상한이 정격 이상이면
+  // (예: 정격 2.0A 이하 팩이 사다리를 끝까지 버팀) 이건 진짜 "정격 충족
+  // 확인됨"이므로 관측 가능하고 위반도 아니다.
+  const ratingUntested = kneeIsUpperBound
+    && regulationKneeA !== null && ratedOutputCurrentA !== null
+    && regulationKneeA < ratedOutputCurrentA;
+
+  const kneeObservable = !ratingUntested && regulationKneeA !== null && ratedOutputCurrentA !== null && ratedOutputCurrentA > 0;
   const slopeObservable = s1CPerMin > 0 && slope !== null;
-  const attainObservable = attainment !== null;
+  const attainObservable = !ratingUntested && attainment !== null;
   const observable = [kneeObservable, slopeObservable, attainObservable].filter(Boolean).length;
 
   if (observable < 2) return { grade: "BASELINE_PENDING", gradeProvisional };

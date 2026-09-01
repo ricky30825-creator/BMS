@@ -165,6 +165,7 @@ function buildQuickResult(progress: DiagnosisProgress, battery: DemoBattery, con
   const attainment = specAttainmentPct(windows, battery.ratedOutputCurrentA);
   const { grade, gradeProvisional } = quickGrade({
     regulationKneeA: knee.regulationKneeA,
+    kneeIsUpperBound: knee.kneeIsUpperBound,
     ratedOutputCurrentA: battery.ratedOutputCurrentA,
     thermalSlopeCPerMin: slope,
     s1CPerMin: config.s1CPerMin,
