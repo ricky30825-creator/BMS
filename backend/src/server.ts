@@ -136,6 +136,7 @@ async function batteryJson(battery: Awaited<ReturnType<typeof batteryById>>) {
   const representativeTempSource = representativeTempC === null ? null : battery.latest.tempContact === representativeTempC ? "CONTACT" : "IR_SURFACE";
   const hardwareProfile = battery.targetMode === 2 ? "COMBINED_EXISTING_PARTS_V1" : "MODE1_EXTERNAL_CELL_V1";
   const mode2ProfileReady = false;
+  const relay = await relayByBattery(battery.id);
   return {
     id: battery.id,
     label: battery.label,
@@ -166,9 +167,14 @@ async function batteryJson(battery: Awaited<ReturnType<typeof batteryById>>) {
     },
     memo: battery.memo,
     health: await mode1Health(battery),
-    diagnosisCapability: battery.targetMode === 2
-      ? { executionAllowed: false, reasonCode: "SAFETY_PROFILE_NOT_READY" }
-      : { executionAllowed: false, reasonCode: "MODE_NOT_SUPPORTED" }
+    // 2026-09-01 결정: 모드 2면 실행을 허용한다. 안전 프로필 게이트
+    // (MODE2_FULL 한정)는 제거됐고, 결과에 dataSource가 실려 시뮬레이션
+    // 시기 데이터를 이력에서 구분한다. 계약서 §4.13도 함께 갱신했다.
+    diagnosisCapability: battery.targetMode !== 2
+      ? { executionAllowed: false, reasonCode: "MODE_NOT_SUPPORTED" }
+      : relay.state === "OPEN"
+        ? { executionAllowed: false, reasonCode: "RELAY_CUT" }
+        : { executionAllowed: true, reasonCode: null }
   };
 }
 
@@ -289,6 +295,9 @@ function errorFromDomain(res: Response, error: unknown): void {
     VERSION_CONFLICT: [409, "VERSION_CONFLICT"],
     BATTERY_NAME_REQUIRED: [422, "BATTERY_NAME_REQUIRED"],
     CAPACITY_REQUIRED: [422, "CAPACITY_REQUIRED"],
+    CAPACITY_NOT_REGISTERED: [409, "CAPACITY_NOT_REGISTERED"],
+    RELAY_CUT: [409, "RELAY_CUT"],
+    DEVICE_OFFLINE: [409, "DEVICE_OFFLINE"],
     RATED_CURRENT_REQUIRED: [422, "RATED_CURRENT_REQUIRED"],
     IDEMPOTENCY_CONFLICT: [409, "IDEMPOTENCY_CONFLICT"],
     VALIDATION_FAILED: [400, "VALIDATION_FAILED"]
@@ -861,6 +870,8 @@ async function diagnosisStart(req: Request, res: Response, kind: "QUICK" | "CAPA
   const body = req.body ?? {};
   if (body.acknowledged !== true) { apiError(res, 400, "ACK_REQUIRED", "Safety acknowledgement is required."); return; }
   if (kind === "CAPACITY" && body.fullyChargedConfirmed !== true) { apiError(res, 400, "FULL_CHARGE_REQUIRED", "Full-charge confirmation is required."); return; }
+  const relay = await relayByBattery(batteryId);
+  if (relay.state === "OPEN") { apiError(res, 409, "RELAY_CUT", "The relay is cut, so there is no load path."); return; }
   try {
     const diagnosis = await startDiagnosis(actorId(req), kind, batteryId, body);
     await recordAudit({ actorId: actorId(req), action: kind === "QUICK" ? "DIAGNOSIS_QUICK_START" : "DIAGNOSIS_CAPACITY_START", resource: diagnosis.id, result: "SUCCESS", reason: null });
