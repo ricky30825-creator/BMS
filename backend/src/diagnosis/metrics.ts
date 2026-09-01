@@ -64,24 +64,22 @@ export function regulationKnee(windows: PhaseWindow[]): KneeResult {
   return { regulationKneeA: highest || null, kneeIsUpperBound: true, latchOff: false };
 }
 
-// 두 점 차분이 IR 노이즈에 취약해서 쓰지 않는다(스펙 §3-2 ②). 대신 모든 점
-// 쌍의 기울기를 구해 중앙값을 취하는 Theil–Sen 추정을 쓴다 — 단순 최소자승은
-// 이상치 1개에도 값이 끌려가지만(예: 40초 구간 끝에서만 튀는 IR 스파이크),
-// 중앙값 기반 추정은 나머지 점들이 다수인 한 이상치 쌍의 영향을 대부분 없앤다.
+// 최소자승을 쓰는 이유: 두 점 차분은 IR 노이즈에 취약하다(스펙 §3-2 ②).
 export function thermalSlopeCPerMin(windows: PhaseWindow[]): number | null {
   const window = windows.find((w) => w.phase === THERMAL_PHASE);
   if (!window || window.tempSamples.length < 2) return null;
   const points = window.tempSamples;
-  const pairwiseSlopesPerMs: number[] = [];
-  for (let i = 0; i < points.length; i++) {
-    for (let j = i + 1; j < points.length; j++) {
-      const dx = points[j].atMs - points[i].atMs;
-      if (dx === 0) continue;
-      pairwiseSlopesPerMs.push((points[j].tempIrSurfaceC - points[i].tempIrSurfaceC) / dx);
-    }
+  const n = points.length;
+  const meanX = points.reduce((sum, p) => sum + p.atMs, 0) / n;
+  const meanY = points.reduce((sum, p) => sum + p.tempIrSurfaceC, 0) / n;
+  let numerator = 0;
+  let denominator = 0;
+  for (const point of points) {
+    numerator += (point.atMs - meanX) * (point.tempIrSurfaceC - meanY);
+    denominator += (point.atMs - meanX) ** 2;
   }
-  const slopePerMs = median(pairwiseSlopesPerMs);
-  if (slopePerMs === null) return null;
+  if (denominator === 0) return null;
+  const slopePerMs = numerator / denominator;
   return slopePerMs * 60_000;
 }
 

@@ -103,8 +103,9 @@ describe("thermalSlopeCPerMin", () => {
     ];
     const windows = healthyWindows();
     windows[3] = win("P3", 1.5, 4.92, { tempSamples: samples });
-    // 두 점 차분이면 15 °C/min. 최소자승은 그보다 훨씬 작다
-    expect(thermalSlopeCPerMin(windows)!).toBeLessThan(10);
+    // 두 점 차분이면 15 °C/min, 최소자승은 12 °C/min으로 스파이크에 덜 끌린다
+    expect(thermalSlopeCPerMin(windows)!).toBeCloseTo(12, 5);
+    expect(thermalSlopeCPerMin(windows)!).toBeLessThan(15);
   });
 
   it("샘플이 2개 미만이면 null", () => {
