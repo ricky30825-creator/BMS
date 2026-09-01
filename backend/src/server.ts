@@ -8,7 +8,7 @@ import cors from "cors";
 import express, { type NextFunction, type Request, type Response } from "express";
 import { fromNodeHeaders, toNodeHandler } from "better-auth/node";
 import { auth } from "./auth.js";
-import { corsOrigins, diagnosisAssumedEfficiency, diagnosisS1CPerMin, diagnosisSafetyThresholds, env } from "./config/env.js";
+import { corsOrigins, diagnosisAssumedEfficiency, diagnosisS1CPerMin, diagnosisSafetyThresholds, diagnosisTempSlopeMinSamples, diagnosisTempSlopeWindowMs, env } from "./config/env.js";
 import { applyAbort, stepDiagnosis } from "./diagnosis/runner.js";
 import { demoPasswordMatches, demoUserForToken, issueDemoToken, requireRole, requireSession, revokeDemoToken, setDemoPassword } from "./auth/middleware.js";
 import { resolveDemoUser } from "./demoLogin.js";
@@ -1242,6 +1242,8 @@ async function tickActiveDiagnosis(): Promise<void> {
       s1CPerMin: diagnosisS1CPerMin,
       assumedEfficiency: diagnosisAssumedEfficiency,
       tickMs: DIAGNOSIS_TICK_MS,
+      tempSlopeWindowMs: diagnosisTempSlopeWindowMs,
+      tempSlopeMinSamples: diagnosisTempSlopeMinSamples,
     },
   });
 

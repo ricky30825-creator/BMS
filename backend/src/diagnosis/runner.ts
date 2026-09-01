@@ -7,7 +7,7 @@ import { CAPACITY_PHASE, isInAggregationWindow, phaseAt, quickPhases } from "./p
 import type { PhaseSpec } from "./phases.js";
 import {
   accumulateWh, baselineWhFrom, capacityResult, COLLAPSE_RATIO, LATCH_OFF_VOLTAGE_V,
-  median, quickGrade, regulationKnee, specAttainmentPct, thermalSlopeCPerMin, vLightLoadV,
+  median, quickGrade, regulationKnee, rollingTempSlopeCPerMin, specAttainmentPct, thermalSlopeCPerMin, vLightLoadV,
 } from "./metrics.js";
 import type { PhaseWindow } from "./metrics.js";
 import { judgeDiagnosisAbort } from "./safety.js";
@@ -20,6 +20,10 @@ export type RunnerConfig = {
   s1CPerMin: number;
   assumedEfficiency: number;
   tickMs: number;
+  // 안전 판정용 롤링 온도 기울기 창 — 등급용 P3 창(thermalSlopeCPerMin)과는
+  // 별도다. QUICK·CAPACITY 둘 다 이 창으로 판정한다(아래 appendTempSample 참조).
+  tempSlopeWindowMs: number;
+  tempSlopeMinSamples: number;
 };
 
 export type StepInput = {
@@ -78,10 +82,29 @@ function upsertWindow(windows: PhaseWindow[], spec: PhaseSpec, sample: { voltage
   return next;
 }
 
+// 안전 판정용 롤링 온도 창을 갱신한다: 이번 tick 샘플을 더하고(온도가
+// null이면 더하지 않는다), 창보다 오래된 점을 시간으로 잘라낸다.
+//
+// ⚠️ 개수가 아니라 시간(ms)으로 트리밍한다. tick은 지금 1초지만 Kafka
+// consumer가 100ms 프레임을 넣기 시작하면 같은 포트로 10배 빨리 샘플이
+// 들어온다 — "최근 N개"로 트리밍하면 그 순간 안전 계층의 응답 창이
+// 조용히 1/10로 줄어든다(문턱 숫자는 하나도 안 바뀌었는데). 시간창은
+// tick 주기가 바뀌어도 의미가 그대로 30초·60초를 뜻한다.
+function appendTempSample(
+  trail: { atMs: number; tempIrSurfaceC: number }[],
+  tempIrSurfaceC: number | null,
+  atMs: number,
+  windowMs: number
+): { atMs: number; tempIrSurfaceC: number }[] {
+  const withSample = tempIrSurfaceC !== null ? [...trail, { atMs, tempIrSurfaceC }] : trail;
+  const cutoff = atMs - windowMs;
+  return withSample.filter((point) => point.atMs >= cutoff);
+}
+
 export function stepDiagnosis(input: StepInput): RunnerOutcome {
   const { battery, diagnosis, elapsedMs, config } = input;
   const source = input.source ?? defaultSource;
-  const progress = diagnosis.progress ?? { loadTargetA: null, loadActualA: null, partialMetrics: null, windows: [], deliveredWh: 0, vLightLoadV: null, lastElapsedMs: null };
+  const progress = diagnosis.progress ?? { loadTargetA: null, loadActualA: null, partialMetrics: null, windows: [], deliveredWh: 0, vLightLoadV: null, lastElapsedMs: null, tempTrail: [] };
 
   const isQuick = diagnosis.kind === "QUICK";
   const specs = isQuick ? quickPhases(battery.ratedOutputCurrentA) : [];
@@ -97,10 +120,18 @@ export function stepDiagnosis(input: StepInput): RunnerOutcome {
   const sample = source.sample(battery, diagnosis, elapsedMs, spec!.loadTargetA, progress.deliveredWh);
   const knownVLight = progress.vLightLoadV ?? vLightLoadV(progress.windows);
 
-  const slope = thermalSlopeCPerMin(progress.windows);
+  // 이번 tick 샘플을 안전 판정용 롤링 창에 먼저 반영한 뒤 그 창으로
+  // 판정한다 — 판정이 progress.windows(P3 전용, QUICK의 좁은 구간에서만
+  // 차고 CAPACITY에서는 아예 안 참)를 보던 옛 코드는 두 가지로 죽어
+  // 있었다: CAPACITY는 windows를 절대 안 채워 안전 계층이 통째로
+  // 비활성이었고, QUICK은 P4/P5에서 t=90s에 멎은 P3 값을 그대로 재판정해
+  // 최대 부하 구간의 실제 발열을 못 봤다. 이 트레일은 QUICK·CAPACITY
+  // 둘 다, 매 tick 채운다.
+  const tempTrail = appendTempSample(progress.tempTrail, sample.tempIrSurfaceC, elapsedMs, config.tempSlopeWindowMs);
+  const rollingSlope = rollingTempSlopeCPerMin(tempTrail, config.tempSlopeMinSamples);
   const abortReason = judgeDiagnosisAbort(
     diagnosis.kind,
-    { voltageV: sample.voltageV, tempIrSurfaceC: sample.tempIrSurfaceC, gasRaw: sample.gasRaw, tempSlopeCPerMin: slope },
+    { voltageV: sample.voltageV, tempIrSurfaceC: sample.tempIrSurfaceC, gasRaw: sample.gasRaw, tempSlopeCPerMin: rollingSlope },
     knownVLight,
     config.thresholds
   );
@@ -136,6 +167,7 @@ export function stepDiagnosis(input: StepInput): RunnerOutcome {
         deliveredWh,
         vLightLoadV: vLight,
         lastElapsedMs: elapsedMs,
+        tempTrail,
       },
     };
   }
@@ -164,6 +196,7 @@ export function stepDiagnosis(input: StepInput): RunnerOutcome {
       deliveredWh: progress.deliveredWh,
       vLightLoadV: vLight,
       lastElapsedMs: progress.lastElapsedMs, // QUICK은 이 필드를 쓰지 않는다 — CAPACITY 전용
+      tempTrail,
     },
   };
 }

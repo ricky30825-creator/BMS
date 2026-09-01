@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { median, quickGrade, regulationKnee, specAttainmentPct, thermalSlopeCPerMin, vLightLoadV } from "./metrics.js";
+import { median, quickGrade, regulationKnee, rollingTempSlopeCPerMin, specAttainmentPct, thermalSlopeCPerMin, vLightLoadV } from "./metrics.js";
 import type { PhaseWindow } from "./metrics.js";
 
 const win = (phase: string, loadTargetA: number, voltageMedianV: number, overrides: Partial<PhaseWindow> = {}): PhaseWindow => ({
@@ -112,6 +112,41 @@ describe("thermalSlopeCPerMin", () => {
     const windows = healthyWindows();
     windows[3] = win("P3", 1.5, 4.92, { tempSamples: [{ atMs: 0, tempIrSurfaceC: 30 }] });
     expect(thermalSlopeCPerMin(windows)).toBeNull();
+  });
+});
+
+describe("rollingTempSlopeCPerMin", () => {
+  it("합성 선형 램프의 기울기를 낸다 — 60초 동안 1.0°C 상승 → 1.0 °C/min", () => {
+    const samples = [0, 15_000, 30_000, 45_000, 60_000].map((atMs) => ({
+      atMs,
+      tempIrSurfaceC: 30 + (atMs / 60_000) * 1.0,
+    }));
+    expect(rollingTempSlopeCPerMin(samples, 5)).toBeCloseTo(1.0, 5);
+  });
+
+  it("minSamples 미만이면 null", () => {
+    const samples = [
+      { atMs: 0, tempIrSurfaceC: 30 },
+      { atMs: 10_000, tempIrSurfaceC: 31 },
+    ];
+    expect(rollingTempSlopeCPerMin(samples, 5)).toBeNull();
+  });
+
+  it("타임스탬프가 전부 같으면(x분산 0) null", () => {
+    const samples = [
+      { atMs: 5_000, tempIrSurfaceC: 30 },
+      { atMs: 5_000, tempIrSurfaceC: 31 },
+      { atMs: 5_000, tempIrSurfaceC: 32 },
+    ];
+    expect(rollingTempSlopeCPerMin(samples, 2)).toBeNull();
+  });
+
+  it("위상(P0~P5)을 모른다 — thermalSlopeCPerMin과 달리 PhaseWindow가 아니라 평평한 샘플 배열을 받는다", () => {
+    const samples = [
+      { atMs: 0, tempIrSurfaceC: 30 },
+      { atMs: 1_000, tempIrSurfaceC: 30.5 },
+    ];
+    expect(rollingTempSlopeCPerMin(samples, 2)).toBeCloseTo(30, 3); // 0.5°C/1s = 30°C/min
   });
 });
 

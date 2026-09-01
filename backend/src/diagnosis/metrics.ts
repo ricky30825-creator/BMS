@@ -64,11 +64,10 @@ export function regulationKnee(windows: PhaseWindow[]): KneeResult {
   return { regulationKneeA: highest || null, kneeIsUpperBound: true, latchOff: false };
 }
 
-// 최소자승을 쓰는 이유: 두 점 차분은 IR 노이즈에 취약하다(스펙 §3-2 ②).
-export function thermalSlopeCPerMin(windows: PhaseWindow[]): number | null {
-  const window = windows.find((w) => w.phase === THERMAL_PHASE);
-  if (!window || window.tempSamples.length < 2) return null;
-  const points = window.tempSamples;
+// 최소자승 기울기(°C/ms). 두 함수가 공유하는 계산 — 두 점 차분은 IR
+// 노이즈에 취약해 둘 다 최소자승을 쓴다(스펙 §3-2 ②). x분산이 0이면(타임
+// 스탬프가 전부 같으면) null — 기울기가 정의되지 않는다.
+function leastSquaresSlopePerMs(points: { atMs: number; tempIrSurfaceC: number }[]): number | null {
   const n = points.length;
   const meanX = points.reduce((sum, p) => sum + p.atMs, 0) / n;
   const meanY = points.reduce((sum, p) => sum + p.tempIrSurfaceC, 0) / n;
@@ -79,8 +78,30 @@ export function thermalSlopeCPerMin(windows: PhaseWindow[]): number | null {
     denominator += (point.atMs - meanX) ** 2;
   }
   if (denominator === 0) return null;
-  const slopePerMs = numerator / denominator;
-  return slopePerMs * 60_000;
+  return numerator / denominator;
+}
+
+// 등급 산식(스펙 §3-2 ②) 전용 — P3 40초 창의 기울기만 본다. 안전 판정에는
+// 쓰지 않는다(P3는 t=70s부터 채워지고 t=90s에 멎는다 — rollingTempSlopeCPerMin
+// 참조).
+export function thermalSlopeCPerMin(windows: PhaseWindow[]): number | null {
+  const window = windows.find((w) => w.phase === THERMAL_PHASE);
+  if (!window || window.tempSamples.length < 2) return null;
+  const slopePerMs = leastSquaresSlopePerMs(window.tempSamples);
+  return slopePerMs === null ? null : slopePerMs * 60_000;
+}
+
+// 안전 판정 전용 — 단계와 무관하게 최근 창(rollingTempSlopeCPerMin의
+// 호출부가 시간으로 트리밍한 표류값)의 기울기를 낸다. thermalSlopeCPerMin과
+// 달리 위상(P0~P5)을 모르며, 그래서 CAPACITY(단계가 없는 진단)에서도 동작한다
+// — 이게 이 함수가 따로 존재하는 이유다.
+export function rollingTempSlopeCPerMin(
+  samples: { atMs: number; tempIrSurfaceC: number }[],
+  minSamples: number,
+): number | null {
+  if (samples.length < minSamples) return null;
+  const slopePerMs = leastSquaresSlopePerMs(samples);
+  return slopePerMs === null ? null : slopePerMs * 60_000;
 }
 
 export function specAttainmentPct(windows: PhaseWindow[], ratedOutputCurrentA: number | null): number | null {
