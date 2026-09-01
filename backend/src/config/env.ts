@@ -27,7 +27,9 @@ const envSchema = z.object({
   // 노이즈에 취약해지고, 최소 표본수를 0/1로 두면 사실상 두 점 차분과
   // 같아져 스펙이 최소자승을 쓰는 이유(§3-2 ②)가 무의미해진다.
   DIAG_TEMP_SLOPE_WINDOW_MS: z.coerce.number().positive().default(60_000),
-  DIAG_TEMP_SLOPE_MIN_SAMPLES: z.coerce.number().int().min(2).default(5),
+  // 하한이 3인 이유: 표본 2개에서 최소자승은 두 점 차분과 수학적으로 같아져,
+  // IR 노이즈에 취약해서 최소자승을 쓰기로 한 이유가 사라진다(스펙 §3-2 ②).
+  DIAG_TEMP_SLOPE_MIN_SAMPLES: z.coerce.number().int().min(3).default(5),
   GOOGLE_CLIENT_SECRET: z.string().optional()
 });
 
