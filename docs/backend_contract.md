@@ -1413,17 +1413,26 @@ v3 테이블 컬럼: `시간 · 관리자 · 행위 · 대상 · 변경 내용` 
 >
 > 물리 근거·산식·안전 조건의 정본은 `docs/hardware/mode2_powerbank_diagnosis_spec.md`다. 이 절은 그 스펙의 API 표면만 정의한다. **산식을 이 문서에서 다시 정의하지 않는다.**
 
-에지 배포의 `hardware_profile`을 함께 검사한다. 이 값은 Raw 프레임에서 받지 않고 서버가 `device_id`별 배포 메타데이터로 관리한다. 값이 없거나 알 수 없으면 준비되지 않은 것으로 닫는다. `MODE2_FULL`만 F21 진단 실행이 가능하다. `COMBINED_EXISTING_PARTS_V1`은 MQ-2·확정 안전 문턱·연속 감시가 없는 0.5A·10초 시운전 프로필이므로, Raw의 `gas_raw`·`pressure_raw`·`temp_contact`·`temp_points.contact`·`soc_pct`·`diag_phase`·`load_target_a`는 **모두 반드시 `null`**이다. 모드 1 캐시값이나 추정값으로 채우지 않는다. 이 프로필에서 빠른 진단·정밀 용량시험 시작 요청은 `409 SAFETY_PROFILE_NOT_READY`로 거절한다.
+**2026-09-01 갱신 — 실행 잠금을 모드 2 전체로 열었다.** `targetMode`가 2이면
+하드웨어 프로필과 문턱 설정에 관계없이 진단을 시작할 수 있다. 이전의
+*"`MODE2_FULL`만 실행 가능, `COMBINED_EXISTING_PARTS_V1`은 409"* 규칙과
+*"문턱값 하나라도 0이면 `configured=false`이며 409"* 규칙은 **폐기됐다.**
 
-F21 문턱값은 `0`을 미설정 sentinel로 둔다. 발열 기울기·표면온도 중단·효율·최소 부하·자동 차단 시간 중 하나라도 0이면 `configured=false`이며, 숨은 HTML `MODE2_FULL` 속성을 켜도 서버는 `409 SAFETY_PROFILE_NOT_READY`를 반환한다 `[Q36 확정]`.
+대신 결과에 출처를 싣는다. `dataSource`가 `SIMULATED`면 계측값이 백엔드
+시뮬레이터에서 나온 것이고, 실물 에지가 붙으면 `MEASURED`가 된다. 안전 문턱은
+`0`이 미설정 sentinel이라는 규약을 유지하되, **미설정이 실행을 막지는 않는다** —
+해당 안전 계층만 비활성화된다.
+
+`reasonCode`는 `MODE_NOT_SUPPORTED|RELAY_CUT|DEVICE_OFFLINE|null`이다.
+`SAFETY_PROFILE_NOT_READY`는 더 이상 발생하지 않는다.
 
 F21 화면이 실행 전에 잠금 사유를 알 수 있도록 `GET /api/batteries/{id}`는 아래 capability를 함께 내려준다. 내부 `hardware_profile` 원문은 노출하지 않아도 된다.
 
 ```json
-{ "diagnosisCapability": { "executionAllowed": false, "reasonCode": "SAFETY_PROFILE_NOT_READY" } }
+{ "diagnosisCapability": { "executionAllowed": false, "reasonCode": "MODE_NOT_SUPPORTED" } }
 ```
 
-`reasonCode`는 `SAFETY_PROFILE_NOT_READY|MODE_NOT_SUPPORTED|DEVICE_OFFLINE|RELAY_CUT|null`이다. capability는 설명용 선조회이며 POST의 서버 안전 검증을 대체하거나 우회하지 않는다. v3의 숨은 `hardwareProfile` 프로토타입 속성은 두 화면 상태를 검토하기 위한 목업 전환일 뿐 실제 서버 capability를 바꾸지 않는다.
+`reasonCode`는 `MODE_NOT_SUPPORTED|DEVICE_OFFLINE|RELAY_CUT|null`이다. `SAFETY_PROFILE_NOT_READY`는 더 이상 발생하지 않는다(위 갱신 참조). capability는 설명용 선조회이며 POST의 서버 안전 검증을 대체하거나 우회하지 않는다. v3의 숨은 `hardwareProfile` 프로토타입 속성은 두 화면 상태를 검토하기 위한 목업 전환일 뿐 실제 서버 capability를 바꾸지 않는다.
 
 **모드 2 전용이다.** `targetMode`가 1인 배터리에 호출하면 `409 MODE_NOT_SUPPORTED`.
 
@@ -1444,7 +1453,6 @@ F21 화면이 실행 전에 잠금 사유를 알 수 있도록 `GET /api/batteri
 | `409 DIAGNOSIS_IN_PROGRESS` | 이미 진행 중인 진단이 있음 |
 | `409 DEVICE_OFFLINE` | 진단기 오프라인 |
 | `409 RELAY_CUT` | 릴레이가 차단 상태라 부하 경로가 없음 |
-| `409 SAFETY_PROFILE_NOT_READY` | `COMBINED_EXISTING_PARTS_V1` 등 필수 안전계층·연속 감시가 준비되지 않은 하드웨어 프로필 |
 
 #### `POST /api/diagnosis/capacity` — 정밀 용량 테스트 시작 `[REQ-WEB-139]`
 
@@ -1549,12 +1557,18 @@ F21 화면이 실행 전에 잠금 사유를 알 수 있도록 `GET /api/batteri
   "vLightLoadV": 5.06,
   "regulationKneeA": 1.6,
   "kneeIsUpperBound": false,
+  "latchOff": false,
   "thermalSlopeCPerMin": 2.4,
   "specAttainmentPct": 80,
   "ratedOutputCurrentA": 2.0,
-  "grade": "SUSPECT_DEGRADED"
+  "grade": "SUSPECT_DEGRADED",
+  "gradeProvisional": true
 }
 ```
+
+- `latchOff` — 출력 소실(5V→0V)로 이탈이 관측됐는지. 점진적 처짐과 구분한다(스펙 §3-2 ②)
+- `gradeProvisional` — 발열 기울기 상한 `S1`이 미설정(`0`)인 상태로 낸 등급이라는 표시. H3 실측 후 `false`가 된다
+- `dataSource` (최상위) — `SIMULATED` \| `MEASURED`
 
 **enum**
 
@@ -1719,14 +1733,14 @@ F21 화면이 실행 전에 잠금 사유를 알 수 있도록 `GET /api/batteri
 
 ## 9. 미결정 항목
 
-**38건 모두 결정됨.** 아래 결정은 현재 API 골격과 v3 화면에 반영했다. 하드웨어 실측으로 문턱값을 얻기 전까지 F21은 fail-closed다.
+**38건 모두 결정됨.** 아래 결정은 현재 API 골격과 v3 화면에 반영했다. **2026-09-01 갱신** — F21 실행 잠금은 모드 2 전체로 열렸다. 하드웨어 실측으로 안전 문턱값을 얻기 전까지도 진단은 실행되지만, 결과는 `dataSource: "SIMULATED"`이고 미실측 문턱에 해당하는 안전 계층은 비활성화된다 — fail-closed가 아니라 **출처 표시 + 부분 fail-open**이다.
 
 | # | 항목 | 상태 |
 |---|---|---|
 | **Q27** | 전압·전류·SOC 지표 배지 임계값 | **확정** — 온도 외 지표는 `status: null`로 유지한다. |
 | **Q35** | 세션 타임아웃 임계 N분 | **확정** — 5분 무수신이면 `TIMEOUT`으로 닫는다. |
 | **Q34** | 문구 `code` 전체 목록 | **확정** — §1.10에 현재 code 목록을 고정하고 신규 code는 문서·프론트를 함께 갱신한다. |
-| **Q36** | F21 진단 문턱값 | **확정된 보류 방식** — 모든 문턱값을 0으로 저장해 `configured=false`로 두며, 실측 전에는 `SAFETY_PROFILE_NOT_READY`로 거절한다. |
+| **Q36** | F21 진단 문턱값 | **확정된 보류 방식(2026-09-01 갱신)** — 모든 문턱값을 0으로 저장해 미설정 sentinel로 두되, **더 이상 실행을 거절하지 않는다.** 미설정 문턱에 해당하는 안전 계층만 비활성화되고, 결과에는 `dataSource: "SIMULATED"`가 동봉된다. |
 | **Q37** | F21 광고 정격 출력 전류의 등록·수정 경로 | **확정** — 모드 2 자산 등록 시 `ratedOutputCurrentA` 필수 입력으로 받고 진단 스펙 도달률의 분모로 사용한다. |
 | **Q38** | 관리자 사유·메모 입력 및 동시 수정 정책 | **확정** — reason 500자·memo 2,000자, NFKC+trim, 빈 메모 삭제 허용, 비밀값 마스킹 금지, `version` 불일치 `409 VERSION_CONFLICT`; 상태·메모·감사는 별도 원자 저장이다. |
 | **Q6** | SOH/RUL 산출 주체 | **확정** — 모드 1은 백엔드가 BQ27441 집계로 계산하고, 모드 2 미지원 건강도는 `null`이다. |
