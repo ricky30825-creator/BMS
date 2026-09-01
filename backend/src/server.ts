@@ -896,6 +896,7 @@ app.get("/api/batteries/:id/diagnoses", requireSession, asyncRoute(async (req, r
     status: diagnosis.status,
     confidence: diagnosis.confidence,
     measuredAt: diagnosis.measuredAt,
+    startedAt: diagnosis.startedAt,
     socHintLevel: diagnosis.socHintLevel,
     summary: diagnosis.kind === "QUICK"
       ? {

@@ -278,7 +278,7 @@ export type Diagnosis = {
   } | null;
 };
 
-export type DiagnosisListItem = Pick<Diagnosis, "id" | "batteryId" | "batteryLabel" | "kind" | "status" | "confidence" | "measuredAt" | "socHintLevel"> & {
+export type DiagnosisListItem = Pick<Diagnosis, "id" | "batteryId" | "batteryLabel" | "kind" | "status" | "confidence" | "measuredAt" | "startedAt" | "socHintLevel"> & {
   summary?: Record<string, number | string | null> | null;
 };
 
