@@ -106,5 +106,5 @@ export function AppShell({ me, onLogout, onTheme, children }: { me: MeResponse; 
 }
 
 export function PublicHeader({ onLogin, onSignUp }: { onLogin: () => void; onSignUp: () => void }) {
-  return <header className="public-header"><Link to="/"><Logo /></Link><nav className="public-nav" aria-label="소개 메뉴"><a href="#preview">제품</a><a href="#how">작동 방식</a><a href="#preview">실시간 관제</a><a href="#preview">AI 이상탐지</a></nav><div className="public-actions"><button className="button button-ghost" onClick={onLogin}>로그인</button><button className="button button-primary" onClick={onSignUp}>무료로 시작</button></div></header>;
+  return <header className="public-header"><Link to="/"><Logo /></Link><nav className="public-nav" aria-label="소개 메뉴"><a href="#preview">제품</a><a href="#how">작동 방식</a><a href="#preview">실시간 관제</a><a href="#preview">AI 이상탐지</a></nav><div className="public-actions"><button className="button button-ghost" onClick={onLogin}>로그인</button><button className="button button-primary" onClick={onSignUp}>시작하기</button></div></header>;
 }

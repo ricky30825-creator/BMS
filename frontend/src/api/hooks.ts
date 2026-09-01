@@ -28,7 +28,7 @@ const keys = {
 export { keys as queryKeys };
 
 export function useMe(enabled = true) { return useQuery({ queryKey: keys.me, queryFn: () => api.me(), enabled, retry: false }); }
-export function useBatteries(enabled = true) { return useQuery({ queryKey: keys.batteries, queryFn: async () => { const result = await api.get<{ items: Battery[]; page: { number: number; size: number; total: number; totalPages: number } }>("/api/batteries", { size: 100 }); return { ...result, items: result.items.map(normalizeBattery) }; }, enabled }); }
+export function useBatteries(enabled = true) { return useQuery({ queryKey: keys.batteries, queryFn: async () => { const result = await api.get<{ items: Battery[]; page: { number: number; size: number; total: number; totalPages: number } }>("/api/batteries", { size: 100 }); return { ...result, items: result.items.map(normalizeBattery) }; }, enabled, refetchInterval: enabled ? 4_000 : false }); }
 export function useBattery(id: string | undefined, enabled = true) { return useQuery({ queryKey: id ? keys.battery(id) : ["battery", "none"], queryFn: async () => normalizeBattery(await api.get<Battery>(`/api/batteries/${id}`)), enabled: Boolean(id) && enabled }); }
 export function useDashboard(enabled = true, metric?: DashboardMetricParam) { return useQuery({ queryKey: keys.dashboard, queryFn: async () => normalizeDashboard(await api.get<Record<string, unknown>>("/api/dashboard", metric ? { metric } : undefined)), enabled, retry: false }); }
 export function useRelay(enabled = true) { return useQuery({ queryKey: keys.relay, queryFn: () => api.get<Relay>("/api/relay"), enabled, retry: false }); }
