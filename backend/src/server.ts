@@ -8,7 +8,8 @@ import cors from "cors";
 import express, { type NextFunction, type Request, type Response } from "express";
 import { fromNodeHeaders, toNodeHandler } from "better-auth/node";
 import { auth } from "./auth.js";
-import { corsOrigins, env } from "./config/env.js";
+import { corsOrigins, diagnosisAssumedEfficiency, diagnosisS1CPerMin, diagnosisSafetyThresholds, env } from "./config/env.js";
+import { applyAbort, stepDiagnosis } from "./diagnosis/runner.js";
 import { demoPasswordMatches, demoUserForToken, issueDemoToken, requireRole, requireSession, revokeDemoToken, setDemoPassword } from "./auth/middleware.js";
 import { resolveDemoUser } from "./demoLogin.js";
 import { writeAuditLog } from "./auth/audit.js";
@@ -23,14 +24,17 @@ import { evaluateFailsafe } from "./failsafeRunner.js";
 import type { FailsafeSample, FailsafeThresholds, FailsafeVerdict, HardwareProfile } from "./failsafe.js";
 import {
   abortDiagnosis,
+  abortDiagnosisBySystem,
   activeDiagnosis,
   activeSession,
+  advanceDiagnosis,
   audits,
   batteries,
   batteryById,
   changeRelay,
   changeOpsStatus,
   changeUserStatus,
+  completeDiagnosis,
   createBattery,
   csvForBattery,
   diagnosisById,
@@ -516,6 +520,7 @@ app.post("/api/sessions", requireSession, asyncRoute(async (req, res) => {
     const session = await startSession(actorId(req), battery.id);
     await devicePort.sessionStarted(session.id, session.batteryId, session.targetMode);
     if (priorSession && priorSession.id !== session.id) {
+      await closeDiagnosisFor(priorSession.batteryId, "SESSION_ENDED");
       await broadcast("session.ended", { sessionId: priorSession.id, endReason: "SUPERSEDED" }, null, priorSession.batteryId);
     }
     await recordAudit({ actorId: actorId(req), action: "SESSION_START", resource: session.id, result: "SUCCESS", reason: null });
@@ -566,6 +571,7 @@ async function relayMutation(req: Request, res: Response, action: "cut" | "resto
     const response = { decision: "APPROVED", requestId: `relay_${randomUUID()}`, relay: await relayJson(battery.id) };
     if (action === "cut") await devicePort.relayCut(battery.id, response.relay.reasonCode);
     else await devicePort.relayRestore(battery.id);
+    if (action === "cut") await closeDiagnosisFor(battery.id, "RELAY_CUT");
     await rememberIdempotency(actorId(req), key, requestBody, 200, response);
     await broadcast("relay.changed", await relayJson(battery.id), response.requestId, battery.id);
     const latestAudit = (await audits()).find((audit) => audit.resource === battery.id && audit.action === (action === "cut" ? "RELAY_CUT" : "RELAY_RESTORE"));
@@ -791,6 +797,7 @@ app.patch("/api/admin/batteries/:id/ops-status", requireRole("ADMIN"), asyncRout
     const version = Number.isInteger(req.body?.version) ? req.body.version : undefined;
     const battery = await changeOpsStatus(actorId(req), req.params.id, next as "NORMAL" | "WATCH" | "BLOCKED", reason, version);
     if (next === "BLOCKED" && priorSession && priorSession.batteryId === req.params.id) {
+      await closeDiagnosisFor(req.params.id, "SESSION_ENDED");
       await broadcast("session.ended", { sessionId: priorSession.id, endReason: "BLOCKED" }, null, req.params.id);
     }
     res.json({ opsStatus: battery.opsStatus, version: battery.version, updatedAt: battery.latest.measuredAt, updatedBy: actorName(req) });
@@ -1206,8 +1213,82 @@ async function tickActiveBattery(): Promise<void> {
   await broadcast("alert.created", alertJson(alert), null, battery.id);
 }
 
+const DIAGNOSIS_TICK_MS = 1000;
+
+async function tickActiveDiagnosis(): Promise<void> {
+  const session = await activeSession();
+  if (!session) return;
+  const diagnosis = await activeDiagnosis(session.batteryId);
+  if (!diagnosis) return;
+  const battery = await batteryById(diagnosis.batteryId);
+  if (!battery) return;
+
+  const elapsedMs = Date.now() - new Date(diagnosis.startedAt).getTime();
+  const previous = (await diagnosesForBattery(battery.id))
+    .filter((item) => item.kind === "CAPACITY" && item.status === "COMPLETED")
+    .map((item) => {
+      const capacity = (item.result?.capacity ?? {}) as { deliveredWh?: number | null; partial?: boolean };
+      return { deliveredWh: capacity.deliveredWh ?? null, partial: capacity.partial === true };
+    });
+
+  const outcome = stepDiagnosis({
+    battery,
+    diagnosis,
+    elapsedMs,
+    previousCapacity: previous,
+    config: {
+      thresholds: diagnosisSafetyThresholds,
+      s1CPerMin: diagnosisS1CPerMin,
+      assumedEfficiency: diagnosisAssumedEfficiency,
+      tickMs: DIAGNOSIS_TICK_MS,
+    },
+  });
+
+  if (outcome.kind === "RUNNING") {
+    const updated = await advanceDiagnosis(diagnosis.id, outcome.phase, outcome.progress);
+    // 계약 §5.3: 매 tick이 아니라 단계 전환 시에만 보낸다.
+    if (outcome.phaseChanged) {
+      await broadcast("diagnosis.progress", {
+        id: updated.id,
+        kind: updated.kind,
+        phase: updated.phase,
+        loadTargetA: outcome.progress.loadTargetA,
+        loadActualA: outcome.progress.loadActualA,
+        estimatedEndAt: updated.estimatedEndAt,
+        partialMetrics: outcome.progress.partialMetrics,
+      }, null, battery.id);
+    }
+    return;
+  }
+
+  if (outcome.kind === "COMPLETED") {
+    const done = await completeDiagnosis(diagnosis.id, outcome.result);
+    await broadcast("diagnosis.done", await diagnosisJson(done), null, battery.id);
+    return;
+  }
+
+  // ⚠️ 부하를 0A로 내린 다음 릴레이를 차단한다. 순서가 뒤바뀌면 아크가 생긴다.
+  await applyAbort({
+    setLoadA: async () => { /* 부하 제어는 에지가 붙을 때 연결한다 */ },
+    relayCut: async (reason) => { await engageFailsafe(battery.id, reason, "DIAGNOSIS_ABORT"); },
+  }, outcome.reason);
+  const aborted = await abortDiagnosisBySystem(battery.id, outcome.reason);
+  if (aborted) {
+    await broadcast("diagnosis.aborted", { id: aborted.id, kind: aborted.kind, abortReason: outcome.reason }, null, battery.id);
+  }
+}
+
+// 계약 §4.13: 세션이 끝나면 진행 중 진단을 ABORTED로 닫는다.
+// 안 닫으면 영원히 RUNNING으로 남는다.
+async function closeDiagnosisFor(batteryId: string, reason: "SESSION_ENDED" | "RELAY_CUT"): Promise<void> {
+  const aborted = await abortDiagnosisBySystem(batteryId, reason);
+  if (!aborted) return;
+  await broadcast("diagnosis.aborted", { id: aborted.id, kind: aborted.kind, abortReason: reason }, null, batteryId);
+}
+
 setInterval(() => {
   void tickActiveBattery().catch((error) => { console.error("tickActiveBattery failed", error); });
+  void tickActiveDiagnosis().catch((error) => { console.error("tickActiveDiagnosis failed", error); });
 }, 1000);
 
 // 계약 §1628: { batteryId, batteryLabel, representativeTempC,
