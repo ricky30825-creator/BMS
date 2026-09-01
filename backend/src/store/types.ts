@@ -75,6 +75,11 @@ export type DiagnosisProgress = {
   // tick의 elapsedMs. tickMs 고정폭을 매번 크레딧하면 타이머 드리프트·
   // 누락 tick이 여러 시간짜리 테스트에서 체계적으로 어긋난다(2026-09-01).
   lastElapsedMs: number | null;
+  // 안전 판정 전용 최근 온도 창(시간으로 트리밍, 단계 무관) — QUICK·CAPACITY
+  // 둘 다 매 tick 채운다. 등급용 P3 창(windows)과는 다른 목적이라 별도로
+  // 둔다 — P3 창은 40초 구간에서만 차고, CAPACITY는 애초에 windows를 갱신
+  // 하지 않는다(2026-09-02, 안전 계층이 CAPACITY에서 죽어 있던 결함 수정).
+  tempTrail: { atMs: number; tempIrSurfaceC: number }[];
 };
 
 export type DemoDiagnosis = {

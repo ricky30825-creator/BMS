@@ -13,7 +13,7 @@ const diagnosis = (kind: "QUICK" | "CAPACITY"): DemoDiagnosis => ({
   id: "dg_1", batteryId: "PB-A", sessionId: "s1", kind, status: "RUNNING",
   phase: kind === "QUICK" ? "P0" : "CAPACITY", input: {}, result: null,
   startedAt: "2026-09-01T00:00:00.000Z", estimatedEndAt: null, completedAt: null,
-  progress: { loadTargetA: null, loadActualA: null, partialMetrics: null, windows: [], deliveredWh: 0, vLightLoadV: null, lastElapsedMs: null },
+  progress: { loadTargetA: null, loadActualA: null, partialMetrics: null, windows: [], deliveredWh: 0, vLightLoadV: null, lastElapsedMs: null, tempTrail: [] },
 });
 
 describe("createSimulatorSource", () => {

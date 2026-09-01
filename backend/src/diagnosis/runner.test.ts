@@ -1,15 +1,18 @@
 import { describe, expect, it, vi } from "vitest";
 import { applyAbort, stepDiagnosis } from "./runner.js";
 import type { RunnerConfig } from "./runner.js";
-import { accumulateWh } from "./metrics.js";
+import { accumulateWh, rollingTempSlopeCPerMin } from "./metrics.js";
 import { UNSET_DIAGNOSIS_THRESHOLDS } from "./safety.js";
 import type { DemoBattery, DemoDiagnosis } from "../store/types.js";
+import type { DiagnosisSource } from "./ingest.js";
 
 const config: RunnerConfig = {
   thresholds: UNSET_DIAGNOSIS_THRESHOLDS,
   s1CPerMin: 0,
   assumedEfficiency: 0.88,
   tickMs: 1000,
+  tempSlopeWindowMs: 60_000,
+  tempSlopeMinSamples: 5,
 };
 
 const battery = (): DemoBattery => ({
@@ -23,8 +26,30 @@ const running = (kind: "QUICK" | "CAPACITY", phase: string): DemoDiagnosis => ({
   id: "dg_1", batteryId: "PB-A", sessionId: "s1", kind, status: "RUNNING", phase,
   input: kind === "CAPACITY" ? { dischargeCurrentA: 1 } : {},
   result: null, startedAt: "2026-09-01T00:00:00.000Z", estimatedEndAt: null, completedAt: null,
-  progress: { loadTargetA: null, loadActualA: null, partialMetrics: null, windows: [], deliveredWh: 0, vLightLoadV: null, lastElapsedMs: null },
+  progress: { loadTargetA: null, loadActualA: null, partialMetrics: null, windows: [], deliveredWh: 0, vLightLoadV: null, lastElapsedMs: null, tempTrail: [] },
 });
+
+// 결정론적 테스트 전용 소스 — flatUntilMs까지는 flatTempC로 평평하다가,
+// 그 시점부터 tick마다 rampCPerMs만큼(엄청 가파르게) 오른다. 시뮬레이터의
+// 해시 기반 배터리 특성에 기대지 않고 "P3에서는 평평, P4 진입 직후 급등"
+// 같은 시나리오를 정확히 만들기 위한 것이다.
+function stepTempSource(flatUntilMs: number, flatTempC: number, rampCPerMs: number): DiagnosisSource {
+  return {
+    sample(_battery, _diagnosis, elapsedMs, loadTargetA) {
+      const tempIrSurfaceC = elapsedMs < flatUntilMs
+        ? flatTempC
+        : flatTempC + (elapsedMs - flatUntilMs) * rampCPerMs;
+      return {
+        atMs: elapsedMs,
+        voltageV: 5,
+        currentA: -loadTargetA,
+        tempIrSurfaceC,
+        gasRaw: null,
+        loadTargetA,
+      };
+    },
+  };
+}
 
 describe("stepDiagnosis", () => {
   it("경과시간에 맞는 단계를 낸다", () => {
@@ -128,6 +153,73 @@ describe("stepDiagnosis", () => {
 
     expect(snapshot.map((w) => w.voltageSamples.length)).toEqual(beforeCounts);
     expect(second.progress.windows).not.toBe(snapshot);
+  });
+
+  it("회귀: CAPACITY도 롤링 온도 트레일을 채운다 — 이전에는 CAPACITY 브랜치가 windows를 절대 갱신하지 않아 온도가 진단 내내 전혀 기록되지 않았다", () => {
+    let diagnosis = running("CAPACITY", "CAPACITY");
+    let outcome: ReturnType<typeof stepDiagnosis> | undefined;
+    for (let elapsedMs = 1000; elapsedMs <= 5000; elapsedMs += 1000) {
+      outcome = stepDiagnosis({ battery: battery(), diagnosis, elapsedMs, config });
+      if (outcome.kind !== "RUNNING") throw new Error("expected RUNNING");
+      diagnosis = { ...diagnosis, phase: outcome.phase, progress: outcome.progress };
+    }
+    if (!outcome || outcome.kind !== "RUNNING") throw new Error("expected RUNNING");
+    expect(outcome.progress.tempTrail.length).toBe(5);
+    const slope = rollingTempSlopeCPerMin(outcome.progress.tempTrail, config.tempSlopeMinSamples);
+    // 데모 배터리는 부하 중 계속 발열하는 시뮬레이터 모델을 쓴다 — 5틱 뒤엔
+    // null이 아니라 실제 상승 기울기가 나와야 한다(헤드라인 회귀의 전제조건).
+    expect(slope).not.toBeNull();
+    expect(slope!).toBeGreaterThan(0);
+  });
+
+  it("헤드라인 회귀: CAPACITY 진단이 TEMP_SLOPE로 중단된다 — 이전에는 CAPACITY의 안전 계층이 통째로 죽어 있어 이 중단 자체가 코드상 불가능했다", () => {
+    const hot: RunnerConfig = { ...config, thresholds: { surfaceCutoffC: 0, tempSlopeCPerMin: 0.001, gasRaw: 0 } };
+    let diagnosis = running("CAPACITY", "CAPACITY");
+    let outcome: ReturnType<typeof stepDiagnosis> | undefined;
+    for (let elapsedMs = 1000; elapsedMs <= 20_000; elapsedMs += 1000) {
+      outcome = stepDiagnosis({ battery: battery(), diagnosis, elapsedMs, config: hot });
+      if (outcome.kind === "ABORTED") break;
+      if (outcome.kind !== "RUNNING") throw new Error("expected RUNNING or ABORTED, got " + outcome.kind);
+      diagnosis = { ...diagnosis, phase: outcome.phase, progress: outcome.progress };
+    }
+    if (!outcome) throw new Error("no outcome produced");
+    expect(outcome.kind).toBe("ABORTED");
+    if (outcome.kind === "ABORTED") expect(outcome.reason).toBe("TEMP_SLOPE");
+  });
+
+  it("빠른 진단 P4는 얼어붙은 P3 창이 아니라 최근 샘플로 판정한다 — P3까지는 평평하다가 P4 진입 직후 온도가 급등하는 배터리도 P4 안에서 잡아야 한다", () => {
+    // P3 집계 창(70s~90s)은 계속 평평(30°C) → 옛 코드(frozen P3 slope)라면
+    // 기울기가 계속 0으로 얼어붙어 P4·P5에서 무슨 일이 나도 절대 못 잡는다.
+    const source = stepTempSource(90_000, 30, 1); // P4(t=90s) 진입 즉시 ms당 1°C 급등
+    const hot: RunnerConfig = { ...config, thresholds: { surfaceCutoffC: 0, tempSlopeCPerMin: 100, gasRaw: 0 } };
+    let diagnosis = running("QUICK", "P0");
+    let outcome: ReturnType<typeof stepDiagnosis> | undefined;
+    let abortedAtMs: number | null = null;
+    for (let elapsedMs = 1000; elapsedMs <= 120_000; elapsedMs += 1000) {
+      outcome = stepDiagnosis({ battery: battery(), diagnosis, elapsedMs, config: hot, source });
+      if (outcome.kind === "ABORTED") { abortedAtMs = elapsedMs; break; }
+      if (outcome.kind !== "RUNNING") throw new Error("expected RUNNING or ABORTED, got " + outcome.kind);
+      diagnosis = { ...diagnosis, phase: outcome.phase, progress: outcome.progress };
+    }
+    expect(outcome?.kind).toBe("ABORTED");
+    if (outcome?.kind === "ABORTED") expect(outcome.reason).toBe("TEMP_SLOPE");
+    expect(abortedAtMs).not.toBeNull();
+    // P4 진입(90s) 전에는 온도가 전혀 안 올랐으니 그 전엔 abort가 나올 수 없다.
+    expect(abortedAtMs!).toBeGreaterThanOrEqual(90_000);
+    // P5(110s~)까지 안 가고 P4 안에서 잡혀야 "최근 샘플로 판정한다"는 주장이 선다.
+    expect(abortedAtMs!).toBeLessThan(110_000);
+  });
+
+  it("회귀: 문턱 0(미설정 sentinel)이면 온도가 치솟아도 TEMP_SLOPE로 중단하지 않는다 — 기존 sentinel 동작은 그대로 유지돼야 한다", () => {
+    const source = stepTempSource(0, 30, 1); // 처음부터 급등
+    let diagnosis = running("CAPACITY", "CAPACITY");
+    let outcome: ReturnType<typeof stepDiagnosis> | undefined;
+    for (let elapsedMs = 1000; elapsedMs <= 10_000; elapsedMs += 1000) {
+      outcome = stepDiagnosis({ battery: battery(), diagnosis, elapsedMs, config, source }); // config.thresholds는 UNSET(0)
+      if (outcome.kind !== "RUNNING") break;
+      diagnosis = { ...diagnosis, phase: outcome.phase, progress: outcome.progress };
+    }
+    expect(outcome?.kind).toBe("RUNNING");
   });
 });
 

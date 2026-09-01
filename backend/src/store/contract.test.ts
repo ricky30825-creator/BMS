@@ -178,7 +178,7 @@ describe("진단 진행 상태", () => {
 
     const advanced = await store.advanceDiagnosis(started.id, "P3", {
       loadTargetA: 1.5, loadActualA: 1.47, partialMetrics: { vLightLoadV: 5.02 },
-      windows: [], deliveredWh: 0, vLightLoadV: 5.02, lastElapsedMs: null,
+      windows: [], deliveredWh: 0, vLightLoadV: 5.02, lastElapsedMs: null, tempTrail: [],
     });
 
     expect(advanced.phase).toBe("P3");

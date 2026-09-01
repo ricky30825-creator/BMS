@@ -313,7 +313,7 @@ export function createMemoryStore(): CellGuardStore & { demoUsers: DemoUser[] } 
       startedAt: isoNow(),
       estimatedEndAt: estimatedEnd(kind, battery, input),
       completedAt: null,
-      progress: { loadTargetA: null, loadActualA: null, partialMetrics: null, windows: [], deliveredWh: 0, vLightLoadV: null, lastElapsedMs: null },
+      progress: { loadTargetA: null, loadActualA: null, partialMetrics: null, windows: [], deliveredWh: 0, vLightLoadV: null, lastElapsedMs: null, tempTrail: [] },
     };
     demoDiagnoses.set(diagnosis.id, diagnosis);
     return { ...diagnosis };

@@ -21,6 +21,13 @@ const envSchema = z.object({
   DIAG_S1_THERMAL_SLOPE_C_PER_MIN: z.coerce.number().min(0).default(0),
   // 부스트 효율은 0이면 절대 SOH를 못 내므로 기본값이 있다(스펙 §8 H4).
   DIAG_ASSUMED_EFFICIENCY: z.coerce.number().min(0).max(1).default(0.88),
+  // ⚠️ 위 DIAG_* 문턱과 달리 이 둘은 `0`-미설정 sentinel이 아니다 — 안전
+  // 계층이 동작하는 데 필요한 운영값이라 DIAG_ASSUMED_EFFICIENCY처럼 실제
+  // 기본값을 준다. 창을 0으로 두면 판정이 매 tick 샘플 1개로 이뤄져
+  // 노이즈에 취약해지고, 최소 표본수를 0/1로 두면 사실상 두 점 차분과
+  // 같아져 스펙이 최소자승을 쓰는 이유(§3-2 ②)가 무의미해진다.
+  DIAG_TEMP_SLOPE_WINDOW_MS: z.coerce.number().positive().default(60_000),
+  DIAG_TEMP_SLOPE_MIN_SAMPLES: z.coerce.number().int().min(2).default(5),
   GOOGLE_CLIENT_SECRET: z.string().optional()
 });
 
@@ -41,3 +48,10 @@ export const diagnosisSafetyThresholds: DiagnosisSafetyThresholds = Object.freez
 export const diagnosisS1CPerMin = env.DIAG_S1_THERMAL_SLOPE_C_PER_MIN;
 
 export const diagnosisAssumedEfficiency = env.DIAG_ASSUMED_EFFICIENCY;
+
+// 안전 판정용 롤링 온도 기울기의 응답 창과 노이즈 바닥. runner.ts의
+// appendTempSample/rollingTempSlopeCPerMin이 소비한다. 실제 중단 문턱
+// (DIAG_TEMP_SLOPE_C_PER_MIN 등)은 여전히 미측정(H2·H3)이라 0이지만,
+// 이 둘은 그 문턱이 뭐든 상관없이 판정 창 자체를 정하는 값이라 별도다.
+export const diagnosisTempSlopeWindowMs = env.DIAG_TEMP_SLOPE_WINDOW_MS;
+export const diagnosisTempSlopeMinSamples = env.DIAG_TEMP_SLOPE_MIN_SAMPLES;
