@@ -166,3 +166,82 @@ describe("quickGrade", () => {
     expect(result.grade).toBe("BASELINE_PENDING");
   });
 });
+
+import { accumulateWh, baselineWhFrom, capacityResult, DEFAULT_ASSUMED_EFFICIENCY } from "./metrics.js";
+
+describe("accumulateWh", () => {
+  it("tick 간격에서 시간 단위를 환산해 누적한다", () => {
+    // 5V × 1A = 5W를 1초 → 5 / 3600 Wh
+    expect(accumulateWh(0, 5, -1, 1000)).toBeCloseTo(5 / 3600, 9);
+  });
+
+  it("방전 부호(음수)를 절대값으로 다룬다", () => {
+    expect(accumulateWh(0, 5, -1, 1000)).toBe(accumulateWh(0, 5, 1, 1000));
+  });
+
+  it("Δt를 상수로 박지 않는다 — 100ms 프레임이 들어와도 같은 코드가 맞는다", () => {
+    const oneSecond = accumulateWh(0, 5, -1, 1000);
+    const tenFrames = Array.from({ length: 10 }).reduce<number>((wh) => accumulateWh(wh, 5, -1, 100), 0);
+    expect(tenFrames).toBeCloseTo(oneSecond, 9);
+  });
+});
+
+describe("baselineWhFrom", () => {
+  it("첫 완료 테스트의 deliveredWh를 기준선으로 삼는다", () => {
+    expect(baselineWhFrom([{ deliveredWh: 34.8, partial: false }, { deliveredWh: 31.2, partial: false }])).toBe(34.8);
+  });
+
+  it("중단된 결과는 기준선 후보가 아니다", () => {
+    expect(baselineWhFrom([{ deliveredWh: 12.0, partial: true }, { deliveredWh: 34.8, partial: false }])).toBe(34.8);
+  });
+
+  it("완료 이력이 없으면 null", () => {
+    expect(baselineWhFrom([{ deliveredWh: 12.0, partial: true }])).toBeNull();
+  });
+});
+
+describe("capacityResult", () => {
+  const base = { deliveredWh: 31.2, ratedWh: 37.0, baselineWh: 34.8, assumedEfficiency: 0.88, dischargeCurrentA: 1.0, partial: false };
+
+  it("상대 SOH는 기준선 대비다 — η가 분자·분모에서 약분된다", () => {
+    expect(capacityResult(base).sohRelPct).toBeCloseTo(89.66, 2);
+  });
+
+  it("절대 SOH는 η 가정에 의존하며 assumedEfficiency를 반드시 동봉한다", () => {
+    const result = capacityResult(base);
+    expect(result.sohAbsPct).toBeCloseTo(95.82, 2);
+    expect(result.assumedEfficiency).toBe(0.88);
+  });
+
+  it("첫 테스트는 sohRelPct가 null이고 isBaseline이 true다 — 100%로 내면 '열화 없음'으로 오독된다", () => {
+    const result = capacityResult({ ...base, baselineWh: null });
+    expect(result.sohRelPct).toBeNull();
+    expect(result.isBaseline).toBe(true);
+  });
+
+  it("중단된 결과는 SOH를 내지 않는다", () => {
+    const result = capacityResult({ ...base, partial: true });
+    expect(result.sohRelPct).toBeNull();
+    expect(result.sohAbsPct).toBeNull();
+    expect(result.partial).toBe(true);
+  });
+
+  it("중단된 결과는 기준선도 되지 않는다", () => {
+    expect(capacityResult({ ...base, baselineWh: null, partial: true }).isBaseline).toBe(false);
+  });
+
+  it("η로 보정하지 않으면 새 배터리가 SOH 85%로 나온다 — 회귀 방지", () => {
+    // 10000mAh(37Wh) 신품에서 실제로 뽑히는 31.5Wh
+    const fresh = capacityResult({ ...base, deliveredWh: 31.5, baselineWh: null });
+    expect(31.5 / 37.0 * 100).toBeCloseTo(85.1, 1);   // 보정 안 하면 이 값
+    expect(fresh.sohAbsPct).toBeGreaterThan(95);       // 보정하면 정상 범위
+  });
+
+  it("정격 용량이 없으면 절대 SOH는 null", () => {
+    expect(capacityResult({ ...base, ratedWh: null }).sohAbsPct).toBeNull();
+  });
+
+  it("기본 효율은 0.88이다 (스펙 §8 H4, 정의 필요)", () => {
+    expect(DEFAULT_ASSUMED_EFFICIENCY).toBe(0.88);
+  });
+});

@@ -130,3 +130,74 @@ export function quickGrade(input: QuickGradeInput): { grade: QuickGrade; gradePr
   if (violations === 1) return { grade: "CAUTION", gradeProvisional };
   return { grade: "HEALTHY", gradeProvisional };
 }
+
+// ── 정밀 용량 테스트 (스펙 §4) ──────────────────────────────────────
+
+// 부스트 효율. 데이터시트 최대치는 91~96%지만 중부하(2A) + 저잔량 조합에서
+// 80% 초반까지 떨어진다. 실측 전이라 `정의 필요`다(스펙 §8 H4).
+export const DEFAULT_ASSUMED_EFFICIENCY = 0.88;
+
+const MS_PER_HOUR = 3_600_000;
+
+// ⚠️ Δt를 상수로 박지 않는다. 지금은 1초 tick이지만 Kafka consumer가
+// 100ms 프레임을 넣기 시작하면 같은 코드가 그대로 맞아야 한다.
+export function accumulateWh(currentWh: number, voltageV: number, currentA: number, tickMs: number): number {
+  return currentWh + Math.abs(voltageV * currentA) * (tickMs / MS_PER_HOUR);
+}
+
+// 중단된 결과는 기준선 후보가 아니다(스펙 §4-3).
+export function baselineWhFrom(previous: { deliveredWh: number | null; partial: boolean }[]): number | null {
+  const first = previous.find((item) => !item.partial && item.deliveredWh !== null);
+  return first ? first.deliveredWh : null;
+}
+
+export type CapacityResultInput = {
+  deliveredWh: number;
+  ratedWh: number | null;
+  baselineWh: number | null;
+  assumedEfficiency: number;
+  dischargeCurrentA: number;
+  partial: boolean;
+};
+
+export type CapacityResult = {
+  deliveredWh: number;
+  ratedWh: number | null;
+  baselineWh: number | null;
+  sohRelPct: number | null;
+  sohAbsPct: number | null;
+  assumedEfficiency: number | null;
+  dischargeCurrentA: number;
+  isBaseline: boolean;
+  partial: boolean;
+};
+
+export function capacityResult(input: CapacityResultInput): CapacityResult {
+  const { deliveredWh, ratedWh, baselineWh, assumedEfficiency, dischargeCurrentA, partial } = input;
+
+  // 첫 테스트에서 sohRelPct를 100%로 내면 "열화 없음"으로 오독된다.
+  // 기준선 자신이므로 null + isBaseline: true다(스펙 §4-2).
+  const isBaseline = !partial && baselineWh === null;
+
+  const sohRelPct = partial || baselineWh === null || baselineWh <= 0
+    ? null
+    : (deliveredWh / baselineWh) * 100;
+
+  // 정격 Wh는 셀 기준(3.7V × mAh)이고 측정은 출력단(5V) 기준이라,
+  // η로 보정하지 않으면 방금 산 배터리가 SOH 85%로 나온다(스펙 §4-2).
+  const sohAbsPct = partial || ratedWh === null || ratedWh <= 0 || assumedEfficiency <= 0
+    ? null
+    : (deliveredWh / (ratedWh * assumedEfficiency)) * 100;
+
+  return {
+    deliveredWh,
+    ratedWh,
+    baselineWh,
+    sohRelPct,
+    sohAbsPct,
+    assumedEfficiency: partial ? null : assumedEfficiency,
+    dischargeCurrentA,
+    isBaseline,
+    partial,
+  };
+}
