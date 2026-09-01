@@ -1,4 +1,4 @@
-import type { DemoAudit, DemoBattery, DemoDiagnosis, DemoRelay, DemoSession, DemoStatus, DemoUser, OpsStatus } from "./types.js";
+import type { DemoAudit, DemoBattery, DemoDiagnosis, DemoRelay, DemoSession, DemoStatus, DemoUser, DiagnosisProgress, OpsStatus } from "./types.js";
 
 export type CreateBatteryInput = {
   label: string;
@@ -63,6 +63,12 @@ export interface CellGuardStore {
   engageFailsafe(batteryId: string, triggerCode: string, condition: string): Promise<DemoRelay>;
   startDiagnosis(ownerId: string, kind: "QUICK" | "CAPACITY", batteryId: string, input: Record<string, unknown>): Promise<DemoDiagnosis>;
   abortDiagnosis(ownerId: string, batteryId: string): Promise<DemoDiagnosis>;
+  advanceDiagnosis(id: string, phase: string, progress: DiagnosisProgress): Promise<DemoDiagnosis>;
+  completeDiagnosis(id: string, result: Record<string, unknown>): Promise<DemoDiagnosis>;
+  // 안전 중단·세션 종료용. abortDiagnosis와 달리 활성 세션과 소유자를
+  // 검사하지 않는다 — 세션이 끝난 뒤에는 그 검사를 통과할 수 없어서
+  // 진단이 영원히 RUNNING으로 남는다.
+  abortDiagnosisBySystem(batteryId: string, reason: string): Promise<DemoDiagnosis | null>;
 
   // 멱등성
   idempotent(actorId: string, key: string, body: unknown): Promise<IdempotencyResult>;

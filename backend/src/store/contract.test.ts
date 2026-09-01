@@ -162,3 +162,100 @@ export function runStoreContractTests(name: string, makeStore: () => Promise<Cel
 }
 
 runStoreContractTests("memory", async () => createMemoryStore());
+
+describe("진단 진행 상태", () => {
+  it("hong이 모드 2 자산을 갖고 있다 — 기본 데모 계정에서 F21 화면이 잠기면 안 된다", async () => {
+    const store = createMemoryStore();
+    const owned = await store.batteries("hong");
+    expect(owned.some((battery) => battery.targetMode === 2)).toBe(true);
+  });
+
+  it("advanceDiagnosis가 단계와 진행 상태를 갱신한다", async () => {
+    const store = createMemoryStore();
+    const battery = (await store.batteries("hong")).find((b) => b.targetMode === 2 && b.opsStatus !== "BLOCKED")!;
+    await store.startSession("hong", battery.id);
+    const started = await store.startDiagnosis("hong", "QUICK", battery.id, { acknowledged: true });
+
+    const advanced = await store.advanceDiagnosis(started.id, "P3", {
+      loadTargetA: 1.5, loadActualA: 1.47, partialMetrics: { vLightLoadV: 5.02 },
+      windows: [], deliveredWh: 0, vLightLoadV: 5.02,
+    });
+
+    expect(advanced.phase).toBe("P3");
+    expect(advanced.progress?.loadTargetA).toBe(1.5);
+  });
+
+  it("completeDiagnosis가 COMPLETED로 닫고 결과를 남긴다", async () => {
+    const store = createMemoryStore();
+    const battery = (await store.batteries("hong")).find((b) => b.targetMode === 2 && b.opsStatus !== "BLOCKED")!;
+    await store.startSession("hong", battery.id);
+    const started = await store.startDiagnosis("hong", "QUICK", battery.id, { acknowledged: true });
+
+    const done = await store.completeDiagnosis(started.id, { quick: { grade: "HEALTHY" } });
+
+    expect(done.status).toBe("COMPLETED");
+    expect(done.progress).toBeNull();
+    expect(await store.activeDiagnosis(battery.id)).toBeNull();
+  });
+
+  it("abortDiagnosisBySystem은 활성 세션 없이도 진단을 닫는다 — 세션 종료 시 필요하다", async () => {
+    const store = createMemoryStore();
+    const battery = (await store.batteries("hong")).find((b) => b.targetMode === 2 && b.opsStatus !== "BLOCKED")!;
+    await store.startSession("hong", battery.id);
+    const started = await store.startDiagnosis("hong", "QUICK", battery.id, { acknowledged: true });
+
+    const aborted = await store.abortDiagnosisBySystem(battery.id, "SESSION_ENDED");
+
+    expect(aborted?.id).toBe(started.id);
+    expect(aborted?.status).toBe("ABORTED");
+    expect(aborted?.result?.abortReason).toBe("SESSION_ENDED");
+  });
+
+  it("진행 중 진단이 없으면 abortDiagnosisBySystem은 null을 낸다 — 던지지 않는다", async () => {
+    const store = createMemoryStore();
+    const battery = (await store.batteries("hong")).find((b) => b.targetMode === 2 && b.opsStatus !== "BLOCKED")!;
+    expect(await store.abortDiagnosisBySystem(battery.id, "SESSION_ENDED")).toBeNull();
+  });
+
+  it("모드 2면 안전 프로필과 무관하게 진단을 시작할 수 있다 (2026-09-01 결정)", async () => {
+    const store = createMemoryStore();
+    const battery = (await store.batteries("hong")).find((b) => b.targetMode === 2 && b.opsStatus !== "BLOCKED")!;
+    await store.startSession("hong", battery.id);
+    await expect(store.startDiagnosis("hong", "QUICK", battery.id, { acknowledged: true })).resolves.toBeDefined();
+  });
+
+  it("모드 1 자산은 여전히 MODE_NOT_SUPPORTED다", async () => {
+    const store = createMemoryStore();
+    const battery = (await store.batteries("hong")).find((b) => b.targetMode === 1 && b.opsStatus !== "BLOCKED")!;
+    await store.startSession("hong", battery.id);
+    await expect(store.startDiagnosis("hong", "QUICK", battery.id, { acknowledged: true })).rejects.toThrow("MODE_NOT_SUPPORTED");
+  });
+
+  it("빠른 진단의 예상 종료는 시작 + 120초다", async () => {
+    const store = createMemoryStore();
+    const battery = (await store.batteries("hong")).find((b) => b.targetMode === 2 && b.opsStatus !== "BLOCKED")!;
+    await store.startSession("hong", battery.id);
+    const started = await store.startDiagnosis("hong", "QUICK", battery.id, { acknowledged: true });
+    const span = new Date(started.estimatedEndAt!).getTime() - new Date(started.startedAt).getTime();
+    expect(span).toBe(120_000);
+  });
+
+  it("정밀 용량의 예상 종료는 ratedWh / (5V × 방전전류) 시간이다", async () => {
+    const store = createMemoryStore();
+    const battery = (await store.batteries("hong")).find((b) => b.targetMode === 2 && b.capacityWh === 37)!;
+    await store.startSession("hong", battery.id);
+    const started = await store.startDiagnosis("hong", "CAPACITY", battery.id, { dischargeCurrentA: 1, acknowledged: true });
+    const hours = (new Date(started.estimatedEndAt!).getTime() - new Date(started.startedAt).getTime()) / 3_600_000;
+    expect(hours).toBeCloseTo(37 / 5, 1);
+  });
+
+  it("완료 시각은 예상 시각이 아니라 실제 완료 시각이다", async () => {
+    const store = createMemoryStore();
+    const battery = (await store.batteries("hong")).find((b) => b.targetMode === 2 && b.opsStatus !== "BLOCKED")!;
+    await store.startSession("hong", battery.id);
+    const started = await store.startDiagnosis("hong", "QUICK", battery.id, { acknowledged: true });
+    const done = await store.completeDiagnosis(started.id, {});
+    expect(done.completedAt).not.toBeNull();
+    expect(done.completedAt).not.toBe(done.estimatedEndAt);
+  });
+});

@@ -21,7 +21,6 @@ import { createLoggingDeviceCommandPort } from "./device/logging.js";
 import { evaluateFailsafe } from "./failsafeRunner.js";
 import type { FailsafeSample, FailsafeThresholds, FailsafeVerdict, HardwareProfile } from "./failsafe.js";
 import {
-  F21_THRESHOLDS,
   abortDiagnosis,
   activeDiagnosis,
   activeSession,
@@ -826,7 +825,7 @@ app.get("/api/admin/audit-logs", requireRole("ADMIN"), asyncRoute(async (_req, r
 
 app.get("/api/admin/health", requireRole("ADMIN"), asyncRoute(async (req, res) => {
   await recordAudit({ actorId: actorId(req), action: "ADMIN_ACCESS", resource: "/api/admin/health", result: "SUCCESS", reason: null });
-  res.json({ status: "ok", scope: "admin", runtime: "demo", safetyProfile: F21_THRESHOLDS });
+  res.json({ status: "ok", scope: "admin", runtime: "demo", safetyProfile: { configured: true, dataSource: "SIMULATED" } });
 }));
 
 app.get("/api/admin/overview", requireRole("ADMIN"), asyncRoute(async (_req, res) => {
