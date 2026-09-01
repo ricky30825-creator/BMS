@@ -18,6 +18,7 @@ import { createExportJob, exportJobById, scheduleExportCompletion, signDownload,
 import { DEFAULT_VOICE_ALERT_SETTINGS, applyVoiceAlertPatch } from "./voiceAlert.js";
 import { asyncRoute } from "./asyncRoute.js";
 import { createLoggingDeviceCommandPort } from "./device/logging.js";
+import { diagnosisJson as buildDiagnosisJson } from "./diagnosis/routes.js";
 import { evaluateFailsafe } from "./failsafeRunner.js";
 import type { FailsafeSample, FailsafeThresholds, FailsafeVerdict, HardwareProfile } from "./failsafe.js";
 import {
@@ -244,32 +245,7 @@ async function ownerBatteries(req: Request): Promise<Awaited<ReturnType<typeof b
 }
 
 async function diagnosisJson(diagnosis: NonNullable<Awaited<ReturnType<typeof diagnosisById>>>) {
-  const battery = await batteryById(diagnosis.batteryId);
-  const result = diagnosis.result ?? {};
-  const progress = diagnosis.progress;
-  return {
-    id: diagnosis.id,
-    batteryId: diagnosis.batteryId,
-    batteryLabel: battery?.label,
-    sessionId: diagnosis.sessionId,
-    kind: diagnosis.kind,
-    status: diagnosis.status,
-    phase: diagnosis.phase,
-    confidence: diagnosis.kind === "QUICK" ? "LOW" : diagnosis.status === "COMPLETED" ? "HIGH" : undefined,
-    startedAt: diagnosis.startedAt,
-    estimatedEndAt: diagnosis.estimatedEndAt,
-    measuredAt: diagnosis.completedAt ?? undefined,
-    loadTargetA: progress?.loadTargetA ?? null,
-    loadActualA: progress?.loadActualA ?? null,
-    socHintLevel: typeof diagnosis.input.socHintLevel === "number" ? diagnosis.input.socHintLevel : null,
-    abortReason: typeof result.abortReason === "string" ? result.abortReason : null,
-    partialMetrics: progress?.partialMetrics ?? null,
-    // 시뮬레이션 시기 데이터를 이력에서 구분하기 위한 출처 표시.
-    dataSource: typeof result.dataSource === "string" ? result.dataSource : null,
-    result: diagnosis.result,
-    quick: (result.quick as Record<string, unknown> | null | undefined) ?? null,
-    capacity: (result.capacity as Record<string, unknown> | null | undefined) ?? null,
-  };
+  return buildDiagnosisJson(diagnosis, await batteryById(diagnosis.batteryId));
 }
 
 async function ensureOwner(req: Request, batteryId: string): Promise<Awaited<ReturnType<typeof batteryById>> | null> {
