@@ -245,7 +245,8 @@ async function ownerBatteries(req: Request): Promise<Awaited<ReturnType<typeof b
 
 async function diagnosisJson(diagnosis: NonNullable<Awaited<ReturnType<typeof diagnosisById>>>) {
   const battery = await batteryById(diagnosis.batteryId);
-  const input = diagnosis.input;
+  const result = diagnosis.result ?? {};
+  const progress = diagnosis.progress;
   return {
     id: diagnosis.id,
     batteryId: diagnosis.batteryId,
@@ -257,15 +258,17 @@ async function diagnosisJson(diagnosis: NonNullable<Awaited<ReturnType<typeof di
     confidence: diagnosis.kind === "QUICK" ? "LOW" : diagnosis.status === "COMPLETED" ? "HIGH" : undefined,
     startedAt: diagnosis.startedAt,
     estimatedEndAt: diagnosis.estimatedEndAt,
-    measuredAt: diagnosis.status === "COMPLETED" ? diagnosis.estimatedEndAt : undefined,
-    loadTargetA: typeof input.loadTargetA === "number" ? input.loadTargetA : null,
-    loadActualA: typeof input.loadActualA === "number" ? input.loadActualA : null,
-    socHintLevel: typeof input.socHintLevel === "number" ? input.socHintLevel : null,
-    abortReason: diagnosis.result && typeof diagnosis.result.abortReason === "string" ? diagnosis.result.abortReason : null,
-    partialMetrics: diagnosis.result?.partialMetrics ?? null,
+    measuredAt: diagnosis.completedAt ?? undefined,
+    loadTargetA: progress?.loadTargetA ?? null,
+    loadActualA: progress?.loadActualA ?? null,
+    socHintLevel: typeof diagnosis.input.socHintLevel === "number" ? diagnosis.input.socHintLevel : null,
+    abortReason: typeof result.abortReason === "string" ? result.abortReason : null,
+    partialMetrics: progress?.partialMetrics ?? null,
+    // 시뮬레이션 시기 데이터를 이력에서 구분하기 위한 출처 표시.
+    dataSource: typeof result.dataSource === "string" ? result.dataSource : null,
     result: diagnosis.result,
-    quick: null,
-    capacity: null
+    quick: (result.quick as Record<string, unknown> | null | undefined) ?? null,
+    capacity: (result.capacity as Record<string, unknown> | null | undefined) ?? null,
   };
 }
 
@@ -911,7 +914,16 @@ app.get("/api/batteries/:id/diagnoses", requireSession, asyncRoute(async (req, r
     confidence: diagnosis.confidence,
     measuredAt: diagnosis.measuredAt,
     socHintLevel: diagnosis.socHintLevel,
-    summary: diagnosis.kind === "QUICK" ? { regulationKneeA: null, thermalSlopeCPerMin: null, grade: null } : { sohRelPct: null, deliveredWh: null }
+    summary: diagnosis.kind === "QUICK"
+      ? {
+          regulationKneeA: (diagnosis.quick?.regulationKneeA as number | null) ?? null,
+          thermalSlopeCPerMin: (diagnosis.quick?.thermalSlopeCPerMin as number | null) ?? null,
+          grade: (diagnosis.quick?.grade as string | null) ?? null,
+        }
+      : {
+          sohRelPct: (diagnosis.capacity?.sohRelPct as number | null) ?? null,
+          deliveredWh: (diagnosis.capacity?.deliveredWh as number | null) ?? null,
+        }
   }));
   res.json(pageEnvelope(items, Number(req.query.page) || 1, Number(req.query.size) || 20));
 }));
