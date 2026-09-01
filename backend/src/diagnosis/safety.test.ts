@@ -36,8 +36,9 @@ describe("judgeDiagnosisAbort", () => {
     expect(judgeDiagnosisAbort("QUICK", sample({ gasRaw: 800 }), 5.0, configured)).toBe("GAS");
   });
 
-  it("QUICK에서 V_light의 80% 미만으로 무너지면 VOLTAGE_COLLAPSE", () => {
-    expect(judgeDiagnosisAbort("QUICK", sample({ voltageV: 3.9 }), 5.0, configured)).toBe("VOLTAGE_COLLAPSE");
+  it("전압 붕괴(래치오프 포함)는 QUICK·CAPACITY 어느 쪽도 중단시키지 않는다 — 스펙 §3-2 ②, 붕괴 전류를 찾는 것 자체가 진단의 목적이다", () => {
+    expect(judgeDiagnosisAbort("QUICK", sample({ voltageV: 3.9 }), 5.0, configured)).toBeNull();
+    expect(judgeDiagnosisAbort("CAPACITY", sample({ voltageV: 3.9 }), 5.0, configured)).toBeNull();
   });
 
   it("⚠️ CAPACITY에서 같은 전압 붕괴는 중단이 아니다 — 정상 컷오프다", () => {

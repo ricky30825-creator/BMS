@@ -59,6 +59,26 @@ describe("stepDiagnosis", () => {
     if (outcome.kind === "ABORTED") expect(outcome.reason).toBe("TEMP_ABSOLUTE");
   });
 
+  it("회귀: 래더 도중 래치오프(출력 소실)로 붕괴해도 빠른 진단은 ABORTED가 아니라 COMPLETED와 등급을 낸다 — 스펙 §3-2 ②, 열화된 팩을 못 재던 결함", () => {
+    // PB-HONG-001은 시뮬레이터 해시상 collapseCurrentA≈1.28A라 P4(2.0A)에서
+    // 0.1V로 래치오프한다 — 열화가 실제로 있는 팩이 이 진단의 존재 이유다.
+    const hongBattery: DemoBattery = { ...battery(), id: "PB-HONG-001" };
+    let diagnosis = running("QUICK", "P0");
+    let outcome: ReturnType<typeof stepDiagnosis> | undefined;
+    for (let elapsedMs = 1_000; elapsedMs <= 120_000; elapsedMs += 1_000) {
+      outcome = stepDiagnosis({ battery: hongBattery, diagnosis, elapsedMs, config });
+      if (outcome.kind !== "RUNNING") break;
+      diagnosis = { ...diagnosis, phase: outcome.phase, progress: outcome.progress };
+    }
+    if (!outcome) throw new Error("no outcome produced");
+    expect(outcome.kind).toBe("COMPLETED");
+    if (outcome.kind !== "COMPLETED") throw new Error("expected COMPLETED");
+    const quick = outcome.result.quick as { grade: unknown; latchOff: unknown } | null;
+    expect(quick).toBeTruthy();
+    expect(quick?.latchOff).toBe(true);
+    expect(quick?.grade).toBeTruthy();
+  });
+
   it("CAPACITY는 용량을 다 뽑으면 COMPLETED다 — 중단이 아니다", () => {
     const diagnosis = running("CAPACITY", "CAPACITY");
     diagnosis.progress!.deliveredWh = 999;

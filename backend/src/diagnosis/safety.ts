@@ -6,8 +6,6 @@
 //
 // failsafe.ts와 마찬가지로 `0`이 미설정 sentinel이다.
 
-import { COLLAPSE_RATIO } from "./metrics.js";
-
 export type DiagnosisAbortReason =
   | "USER"
   | "TEMP_ABSOLUTE"
@@ -54,10 +52,16 @@ export function judgeDiagnosisAbort(
   if (thresholds.tempSlopeCPerMin > 0 && sample.tempSlopeCPerMin !== null && sample.tempSlopeCPerMin > thresholds.tempSlopeCPerMin) {
     return "TEMP_SLOPE";
   }
-  // ⚠️ 전압 붕괴는 QUICK에서만 중단 사유다. CAPACITY에서 같은 조건은
-  // 정상 컷오프(→ COMPLETED)이며, 러너가 그렇게 처리한다.
-  if (kind === "QUICK" && vLightLoadV !== null && sample.voltageV < vLightLoadV * COLLAPSE_RATIO) {
-    return "VOLTAGE_COLLAPSE";
-  }
+  // ⚠️ 전압 붕괴(래치오프 포함)는 중단 사유가 아니다 — 스펙 §3-2 ②.
+  // "이탈은 점진적 처짐만이 아니라 래치오프(출력 소실, 5V→0V)로도
+  // 나타난다 … 소실도 정상적인 이탈 관측으로 기록하고, 부하 0A → 팩
+  // 재기동 대기 절차를 밟는다." 붕괴 전류를 찾는 것 자체가 빠른 진단의
+  // 목적이라, 여기서 중단하면 열화된 팩(이 기능이 존재하는 이유)은
+  // 영원히 등급을 받지 못하고 건강한 팩만 결과가 나오는 역전이 생긴다.
+  // QUICK은 러너가 남은 래더를 마저 돌아 COMPLETED로 등급을 낸다.
+  // CAPACITY는 이미 러너 자신이 같은 조건을 정상 컷오프로 처리한다
+  // (runner.ts의 COLLAPSE_RATIO 사용처 참조). `VOLTAGE_COLLAPSE`는
+  // 공개 API 계약의 `abortReason` enum 멤버로만 남겨 둔다 — 다시
+  // 추가하지 말 것.
   return null;
 }
