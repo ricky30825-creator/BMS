@@ -1,5 +1,7 @@
 // 도메인 타입과 상수. 저장소 구현체(memory/postgres)와 무관하므로 여기 둔다.
 
+import type { PhaseWindow } from "../diagnosis/metrics.js";
+
 export type DemoRole = "USER" | "ADMIN";
 export type DemoStatus = "ACTIVE" | "SUSPENDED";
 export type OpsStatus = "NORMAL" | "WATCH" | "BLOCKED";
@@ -62,6 +64,19 @@ export type DemoSession = {
   endedAt: string | null;
 };
 
+export type DiagnosisProgress = {
+  loadTargetA: number | null;
+  loadActualA: number | null;
+  partialMetrics: Record<string, number | boolean | null> | null;
+  windows: PhaseWindow[];
+  deliveredWh: number;
+  vLightLoadV: number | null;
+  // CAPACITY 브랜치가 실제 경과시간 델타로 Wh를 적산하는 데 쓴다 — 직전
+  // tick의 elapsedMs. tickMs 고정폭을 매번 크레딧하면 타이머 드리프트·
+  // 누락 tick이 여러 시간짜리 테스트에서 체계적으로 어긋난다(2026-09-01).
+  lastElapsedMs: number | null;
+};
+
 export type DemoDiagnosis = {
   id: string;
   batteryId: string;
@@ -73,6 +88,8 @@ export type DemoDiagnosis = {
   result: Record<string, unknown> | null;
   startedAt: string;
   estimatedEndAt: string | null;
+  completedAt: string | null;           // 실제 완료 시각. measuredAt의 근거다
+  progress: DiagnosisProgress | null;   // RUNNING 동안만 채워진다
 };
 
 export type DemoAudit = {
@@ -95,15 +112,6 @@ export type DemoRelay = {
   changedAt: string;
   changedBy: string;
 };
-
-export const F21_THRESHOLDS = Object.freeze({
-  configured: false,
-  thermalSlopeCPerMin: 0,
-  surfaceCutoffC: 0,
-  efficiency: 0,
-  minimumLoadA: 0,
-  autoCutSeconds: 0
-});
 
 export const INPUT_LIMITS = Object.freeze({ reasonChars: 500, memoChars: 2000 });
 

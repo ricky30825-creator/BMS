@@ -65,7 +65,7 @@ function ProtectedRoutes({ me, realtime }: { me: MeResponse; realtime: ReturnTyp
   return <Suspense fallback={<RouteLoading />}><Routes>
     <Route path="/login" element={<Navigate to={landingPath} replace />} />
     {sessionRoute("/dashboard", <DashboardPage realtime={realtime} me={me} />)}
-    <Route path="/battery" element={<BatteryPage />} />
+    <Route path="/battery" element={<BatteryPage me={me} />} />
     <Route path="/battery/:id" element={<RouteWithBatteryId me={me} />} />
     {sessionRoute("/anomaly", <AnomalyPage />)}
     {sessionRoute("/trend", <TrendPage me={me} />)}

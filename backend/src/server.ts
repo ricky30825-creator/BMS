@@ -8,7 +8,8 @@ import cors from "cors";
 import express, { type NextFunction, type Request, type Response } from "express";
 import { fromNodeHeaders, toNodeHandler } from "better-auth/node";
 import { auth } from "./auth.js";
-import { corsOrigins, env } from "./config/env.js";
+import { corsOrigins, diagnosisAssumedEfficiency, diagnosisS1CPerMin, diagnosisSafetyThresholds, env } from "./config/env.js";
+import { applyAbort, stepDiagnosis } from "./diagnosis/runner.js";
 import { demoPasswordMatches, demoUserForToken, issueDemoToken, requireRole, requireSession, revokeDemoToken, setDemoPassword } from "./auth/middleware.js";
 import { resolveDemoUser } from "./demoLogin.js";
 import { writeAuditLog } from "./auth/audit.js";
@@ -18,19 +19,22 @@ import { createExportJob, exportJobById, scheduleExportCompletion, signDownload,
 import { DEFAULT_VOICE_ALERT_SETTINGS, applyVoiceAlertPatch } from "./voiceAlert.js";
 import { asyncRoute } from "./asyncRoute.js";
 import { createLoggingDeviceCommandPort } from "./device/logging.js";
+import { diagnosisJson as buildDiagnosisJson } from "./diagnosis/routes.js";
 import { evaluateFailsafe } from "./failsafeRunner.js";
 import type { FailsafeSample, FailsafeThresholds, FailsafeVerdict, HardwareProfile } from "./failsafe.js";
 import {
-  F21_THRESHOLDS,
   abortDiagnosis,
+  abortDiagnosisBySystem,
   activeDiagnosis,
   activeSession,
+  advanceDiagnosis,
   audits,
   batteries,
   batteryById,
   changeRelay,
   changeOpsStatus,
   changeUserStatus,
+  completeDiagnosis,
   createBattery,
   csvForBattery,
   diagnosisById,
@@ -137,6 +141,7 @@ async function batteryJson(battery: Awaited<ReturnType<typeof batteryById>>) {
   const representativeTempSource = representativeTempC === null ? null : battery.latest.tempContact === representativeTempC ? "CONTACT" : "IR_SURFACE";
   const hardwareProfile = battery.targetMode === 2 ? "COMBINED_EXISTING_PARTS_V1" : "MODE1_EXTERNAL_CELL_V1";
   const mode2ProfileReady = false;
+  const relay = await relayByBattery(battery.id);
   return {
     id: battery.id,
     label: battery.label,
@@ -167,9 +172,14 @@ async function batteryJson(battery: Awaited<ReturnType<typeof batteryById>>) {
     },
     memo: battery.memo,
     health: await mode1Health(battery),
-    diagnosisCapability: battery.targetMode === 2
-      ? { executionAllowed: false, reasonCode: "SAFETY_PROFILE_NOT_READY" }
-      : { executionAllowed: false, reasonCode: "MODE_NOT_SUPPORTED" }
+    // 2026-09-01 결정: 모드 2면 실행을 허용한다. 안전 프로필 게이트
+    // (MODE2_FULL 한정)는 제거됐고, 결과에 dataSource가 실려 시뮬레이션
+    // 시기 데이터를 이력에서 구분한다. 계약서 §4.13도 함께 갱신했다.
+    diagnosisCapability: battery.targetMode !== 2
+      ? { executionAllowed: false, reasonCode: "MODE_NOT_SUPPORTED" }
+      : relay.state === "OPEN"
+        ? { executionAllowed: false, reasonCode: "RELAY_CUT" }
+        : { executionAllowed: true, reasonCode: null }
   };
 }
 
@@ -239,29 +249,7 @@ async function ownerBatteries(req: Request): Promise<Awaited<ReturnType<typeof b
 }
 
 async function diagnosisJson(diagnosis: NonNullable<Awaited<ReturnType<typeof diagnosisById>>>) {
-  const battery = await batteryById(diagnosis.batteryId);
-  const input = diagnosis.input;
-  return {
-    id: diagnosis.id,
-    batteryId: diagnosis.batteryId,
-    batteryLabel: battery?.label,
-    sessionId: diagnosis.sessionId,
-    kind: diagnosis.kind,
-    status: diagnosis.status,
-    phase: diagnosis.phase,
-    confidence: diagnosis.kind === "QUICK" ? "LOW" : diagnosis.status === "COMPLETED" ? "HIGH" : undefined,
-    startedAt: diagnosis.startedAt,
-    estimatedEndAt: diagnosis.estimatedEndAt,
-    measuredAt: diagnosis.status === "COMPLETED" ? diagnosis.estimatedEndAt : undefined,
-    loadTargetA: typeof input.loadTargetA === "number" ? input.loadTargetA : null,
-    loadActualA: typeof input.loadActualA === "number" ? input.loadActualA : null,
-    socHintLevel: typeof input.socHintLevel === "number" ? input.socHintLevel : null,
-    abortReason: diagnosis.result && typeof diagnosis.result.abortReason === "string" ? diagnosis.result.abortReason : null,
-    partialMetrics: diagnosis.result?.partialMetrics ?? null,
-    result: diagnosis.result,
-    quick: null,
-    capacity: null
-  };
+  return buildDiagnosisJson(diagnosis, await batteryById(diagnosis.batteryId));
 }
 
 async function ensureOwner(req: Request, batteryId: string): Promise<Awaited<ReturnType<typeof batteryById>> | null> {
@@ -290,6 +278,9 @@ function errorFromDomain(res: Response, error: unknown): void {
     VERSION_CONFLICT: [409, "VERSION_CONFLICT"],
     BATTERY_NAME_REQUIRED: [422, "BATTERY_NAME_REQUIRED"],
     CAPACITY_REQUIRED: [422, "CAPACITY_REQUIRED"],
+    CAPACITY_NOT_REGISTERED: [409, "CAPACITY_NOT_REGISTERED"],
+    RELAY_CUT: [409, "RELAY_CUT"],
+    DEVICE_OFFLINE: [409, "DEVICE_OFFLINE"],
     RATED_CURRENT_REQUIRED: [422, "RATED_CURRENT_REQUIRED"],
     IDEMPOTENCY_CONFLICT: [409, "IDEMPOTENCY_CONFLICT"],
     VALIDATION_FAILED: [400, "VALIDATION_FAILED"]
@@ -529,6 +520,7 @@ app.post("/api/sessions", requireSession, asyncRoute(async (req, res) => {
     const session = await startSession(actorId(req), battery.id);
     await devicePort.sessionStarted(session.id, session.batteryId, session.targetMode);
     if (priorSession && priorSession.id !== session.id) {
+      await closeDiagnosisFor(priorSession.batteryId, "SESSION_ENDED");
       await broadcast("session.ended", { sessionId: priorSession.id, endReason: "SUPERSEDED" }, null, priorSession.batteryId);
     }
     await recordAudit({ actorId: actorId(req), action: "SESSION_START", resource: session.id, result: "SUCCESS", reason: null });
@@ -579,6 +571,7 @@ async function relayMutation(req: Request, res: Response, action: "cut" | "resto
     const response = { decision: "APPROVED", requestId: `relay_${randomUUID()}`, relay: await relayJson(battery.id) };
     if (action === "cut") await devicePort.relayCut(battery.id, response.relay.reasonCode);
     else await devicePort.relayRestore(battery.id);
+    if (action === "cut") await closeDiagnosisFor(battery.id, "RELAY_CUT");
     await rememberIdempotency(actorId(req), key, requestBody, 200, response);
     await broadcast("relay.changed", await relayJson(battery.id), response.requestId, battery.id);
     const latestAudit = (await audits()).find((audit) => audit.resource === battery.id && audit.action === (action === "cut" ? "RELAY_CUT" : "RELAY_RESTORE"));
@@ -804,6 +797,7 @@ app.patch("/api/admin/batteries/:id/ops-status", requireRole("ADMIN"), asyncRout
     const version = Number.isInteger(req.body?.version) ? req.body.version : undefined;
     const battery = await changeOpsStatus(actorId(req), req.params.id, next as "NORMAL" | "WATCH" | "BLOCKED", reason, version);
     if (next === "BLOCKED" && priorSession && priorSession.batteryId === req.params.id) {
+      await closeDiagnosisFor(req.params.id, "SESSION_ENDED");
       await broadcast("session.ended", { sessionId: priorSession.id, endReason: "BLOCKED" }, null, req.params.id);
     }
     res.json({ opsStatus: battery.opsStatus, version: battery.version, updatedAt: battery.latest.measuredAt, updatedBy: actorName(req) });
@@ -826,7 +820,7 @@ app.get("/api/admin/audit-logs", requireRole("ADMIN"), asyncRoute(async (_req, r
 
 app.get("/api/admin/health", requireRole("ADMIN"), asyncRoute(async (req, res) => {
   await recordAudit({ actorId: actorId(req), action: "ADMIN_ACCESS", resource: "/api/admin/health", result: "SUCCESS", reason: null });
-  res.json({ status: "ok", scope: "admin", runtime: "demo", safetyProfile: F21_THRESHOLDS });
+  res.json({ status: "ok", scope: "admin", runtime: "demo", safetyProfile: { configured: true, dataSource: "SIMULATED" } });
 }));
 
 app.get("/api/admin/overview", requireRole("ADMIN"), asyncRoute(async (_req, res) => {
@@ -862,6 +856,8 @@ async function diagnosisStart(req: Request, res: Response, kind: "QUICK" | "CAPA
   const body = req.body ?? {};
   if (body.acknowledged !== true) { apiError(res, 400, "ACK_REQUIRED", "Safety acknowledgement is required."); return; }
   if (kind === "CAPACITY" && body.fullyChargedConfirmed !== true) { apiError(res, 400, "FULL_CHARGE_REQUIRED", "Full-charge confirmation is required."); return; }
+  const relay = await relayByBattery(batteryId);
+  if (relay.state === "OPEN") { apiError(res, 409, "RELAY_CUT", "The relay is cut, so there is no load path."); return; }
   try {
     const diagnosis = await startDiagnosis(actorId(req), kind, batteryId, body);
     await recordAudit({ actorId: actorId(req), action: kind === "QUICK" ? "DIAGNOSIS_QUICK_START" : "DIAGNOSIS_CAPACITY_START", resource: diagnosis.id, result: "SUCCESS", reason: null });
@@ -900,8 +896,18 @@ app.get("/api/batteries/:id/diagnoses", requireSession, asyncRoute(async (req, r
     status: diagnosis.status,
     confidence: diagnosis.confidence,
     measuredAt: diagnosis.measuredAt,
+    startedAt: diagnosis.startedAt,
     socHintLevel: diagnosis.socHintLevel,
-    summary: diagnosis.kind === "QUICK" ? { regulationKneeA: null, thermalSlopeCPerMin: null, grade: null } : { sohRelPct: null, deliveredWh: null }
+    summary: diagnosis.kind === "QUICK"
+      ? {
+          regulationKneeA: (diagnosis.quick?.regulationKneeA as number | null) ?? null,
+          thermalSlopeCPerMin: (diagnosis.quick?.thermalSlopeCPerMin as number | null) ?? null,
+          grade: (diagnosis.quick?.grade as string | null) ?? null,
+        }
+      : {
+          sohRelPct: (diagnosis.capacity?.sohRelPct as number | null) ?? null,
+          deliveredWh: (diagnosis.capacity?.deliveredWh as number | null) ?? null,
+        }
   }));
   res.json(pageEnvelope(items, Number(req.query.page) || 1, Number(req.query.size) || 20));
 }));
@@ -1208,8 +1214,82 @@ async function tickActiveBattery(): Promise<void> {
   await broadcast("alert.created", alertJson(alert), null, battery.id);
 }
 
+const DIAGNOSIS_TICK_MS = 1000;
+
+async function tickActiveDiagnosis(): Promise<void> {
+  const session = await activeSession();
+  if (!session) return;
+  const diagnosis = await activeDiagnosis(session.batteryId);
+  if (!diagnosis) return;
+  const battery = await batteryById(diagnosis.batteryId);
+  if (!battery) return;
+
+  const elapsedMs = Date.now() - new Date(diagnosis.startedAt).getTime();
+  const previous = (await diagnosesForBattery(battery.id))
+    .filter((item) => item.kind === "CAPACITY" && item.status === "COMPLETED")
+    .map((item) => {
+      const capacity = (item.result?.capacity ?? {}) as { deliveredWh?: number | null; partial?: boolean };
+      return { deliveredWh: capacity.deliveredWh ?? null, partial: capacity.partial === true };
+    });
+
+  const outcome = stepDiagnosis({
+    battery,
+    diagnosis,
+    elapsedMs,
+    previousCapacity: previous,
+    config: {
+      thresholds: diagnosisSafetyThresholds,
+      s1CPerMin: diagnosisS1CPerMin,
+      assumedEfficiency: diagnosisAssumedEfficiency,
+      tickMs: DIAGNOSIS_TICK_MS,
+    },
+  });
+
+  if (outcome.kind === "RUNNING") {
+    const updated = await advanceDiagnosis(diagnosis.id, outcome.phase, outcome.progress);
+    // 계약 §5.3: 매 tick이 아니라 단계 전환 시에만 보낸다.
+    if (outcome.phaseChanged) {
+      await broadcast("diagnosis.progress", {
+        id: updated.id,
+        kind: updated.kind,
+        phase: updated.phase,
+        loadTargetA: outcome.progress.loadTargetA,
+        loadActualA: outcome.progress.loadActualA,
+        estimatedEndAt: updated.estimatedEndAt,
+        partialMetrics: outcome.progress.partialMetrics,
+      }, null, battery.id);
+    }
+    return;
+  }
+
+  if (outcome.kind === "COMPLETED") {
+    const done = await completeDiagnosis(diagnosis.id, outcome.result);
+    await broadcast("diagnosis.done", await diagnosisJson(done), null, battery.id);
+    return;
+  }
+
+  // ⚠️ 부하를 0A로 내린 다음 릴레이를 차단한다. 순서가 뒤바뀌면 아크가 생긴다.
+  await applyAbort({
+    setLoadA: async () => { /* 부하 제어는 에지가 붙을 때 연결한다 */ },
+    relayCut: async (reason) => { await engageFailsafe(battery.id, reason, "DIAGNOSIS_ABORT"); },
+  }, outcome.reason);
+  const aborted = await abortDiagnosisBySystem(battery.id, outcome.reason);
+  if (aborted) {
+    await broadcast("diagnosis.aborted", { id: aborted.id, kind: aborted.kind, abortReason: outcome.reason }, null, battery.id);
+  }
+}
+
+// 계약 §4.13: 세션이 끝나면 진행 중 진단을 ABORTED로 닫는다.
+// 안 닫으면 영원히 RUNNING으로 남는다.
+async function closeDiagnosisFor(batteryId: string, reason: "SESSION_ENDED" | "RELAY_CUT"): Promise<void> {
+  const aborted = await abortDiagnosisBySystem(batteryId, reason);
+  if (!aborted) return;
+  await broadcast("diagnosis.aborted", { id: aborted.id, kind: aborted.kind, abortReason: reason }, null, batteryId);
+}
+
 setInterval(() => {
   void tickActiveBattery().catch((error) => { console.error("tickActiveBattery failed", error); });
+  void tickActiveDiagnosis().catch((error) => { console.error("tickActiveDiagnosis failed", error); });
 }, 1000);
 
 // 계약 §1628: { batteryId, batteryLabel, representativeTempC,

@@ -278,7 +278,7 @@ export type Diagnosis = {
   } | null;
 };
 
-export type DiagnosisListItem = Pick<Diagnosis, "id" | "batteryId" | "batteryLabel" | "kind" | "status" | "confidence" | "measuredAt" | "socHintLevel"> & {
+export type DiagnosisListItem = Pick<Diagnosis, "id" | "batteryId" | "batteryLabel" | "kind" | "status" | "confidence" | "measuredAt" | "startedAt" | "socHintLevel"> & {
   summary?: Record<string, number | string | null> | null;
 };
 
@@ -304,4 +304,5 @@ export type ErrorCode =
   | "BATTERY_BLOCKED" | "NO_ACTIVE_SESSION" | "DEVICE_OFFLINE" | "REASON_REQUIRED" | "INPUT_TOO_LONG"
   | "VERSION_CONFLICT" | "REAUTH_REQUIRED" | "INTERLOCK_LOCKED" | "MODE_NOT_SUPPORTED" | "SAFETY_PROFILE_NOT_READY"
   | "DIAGNOSIS_IN_PROGRESS" | "NO_DIAGNOSIS_IN_PROGRESS" | "ACK_REQUIRED" | "FULL_CHARGE_REQUIRED" | "IDEMPOTENCY_CONFLICT"
-  | "BATTERY_NAME_REQUIRED" | "CAPACITY_REQUIRED" | "RATED_CURRENT_REQUIRED" | "RUNTIME_NOT_READY" | "UNKNOWN";
+  | "BATTERY_NAME_REQUIRED" | "CAPACITY_REQUIRED" | "RATED_CURRENT_REQUIRED"
+  | "CAPACITY_NOT_REGISTERED" | "RELAY_CUT" | "RUNTIME_NOT_READY" | "UNKNOWN";
