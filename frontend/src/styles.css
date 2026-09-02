@@ -187,7 +187,8 @@ h3 { font-size: 14px; }
 
 .app-shell { min-height: 100vh; display: flex; }
 .sidebar { position: fixed; inset: 0 auto 0 0; z-index: 40; width: var(--sidebar); display: flex; flex-direction: column; padding: 16px 12px 12px; background: var(--surface); border-right: 1px solid var(--border); transition: width 180ms ease; }
-.sidebar.collapsed { width: 76px; }
+.sidebar.collapsed { width: 108px; }
+.sidebar.collapsed .shell-brand { padding-right: 0; }
 .shell-brand { height: 48px; display: flex; align-items: center; gap: 7px; padding: 0 8px 16px; border-bottom: 1px solid var(--border); overflow: hidden; }
 .environment-tag { padding: 2px 6px; border-radius: 999px; color: var(--fg-muted); background: var(--surface-sunken); font-size: 10px; font-weight: 800; }
 .side-nav { display: flex; flex: 1; flex-direction: column; gap: 3px; padding-top: 14px; overflow-y: auto; }
@@ -206,7 +207,7 @@ h3 { font-size: 14px; }
 .account-copy strong, .account-copy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .account-copy strong { font-size: 13px; }
 .account-copy small { color: var(--fg-muted); font-size: 11px; }
-.collapse-button { position: absolute; right: -15px; bottom: 72px; width: 30px; height: 30px; display: grid; place-items: center; border: 1px solid var(--border); border-radius: 50%; color: var(--fg-muted); background: var(--surface); }
+.collapse-button { flex: 0 0 auto; width: 26px; height: 26px; display: grid; place-items: center; margin-left: auto; border: 1px solid var(--border); border-radius: 50%; color: var(--fg-muted); background: var(--surface); }
 .collapsed .shell-brand .logo span:not(.logo-mark), .collapsed .environment-tag, .collapsed .nav-item span, .collapsed .account-copy { display: none; }
 .collapsed .nav-item { justify-content: center; padding: 9px; }
 .main-column { min-width: 0; flex: 1; margin-left: var(--sidebar); }
