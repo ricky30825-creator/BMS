@@ -13,6 +13,15 @@ export const MIN_HOLD_LOAD_A = 0.1;
 
 export const CAPACITY_PHASE = "CAPACITY";
 
+// 사다리 천장. 붕괴점을 못 찾았을 때(끝까지 버팀) P7이 쓰는 부하다.
+const LADDER_CEILING_A = 2.0;
+
+// P7 발열 탐침 — 붕괴점 직하로 민다. 한계 위로는 물리적으로 못 뽑고,
+// 한계에서 너무 멀면 자극이 약해 기울기가 노이즈에 묻힌다. 0.9는
+// 스펙 §9-2 S1d가 EIS 변조 중심으로 쓰는 값과 같다.
+export const THERMAL_PROBE_PHASE = "P7";
+export const THERMAL_PROBE_LOAD_FRACTION = 0.9;
+
 // BW150 설정 분해능이 0.01A다.
 const LOAD_RESOLUTION_A = 0.01;
 
@@ -28,7 +37,7 @@ const LOAD_RESOLUTION_A = 0.01;
 // ⚠️ 미해결 — 지금 측정원은 시뮬레이터라 물리적 위험이 없지만, 실기기에서
 // 빠른 진단도 정격 전류로 상한을 걸어야 하는지는 실측이 필요한 열린
 // 질문이다(§3-3의 미측정 중단 문턱들과 같은 부류). 정하지 말고 남겨둔다.
-const QUICK_TABLE: readonly { phase: string; durationMs: number; baseLoadA: number }[] = [
+const QUICK_TABLE: readonly { phase: string; durationMs: number; baseLoadA: number | null }[] = [
   { phase: "P0", durationMs: 10_000, baseLoadA: 0.1 },
   { phase: "P1", durationMs: 20_000, baseLoadA: 0.5 },
   { phase: "P2", durationMs: 20_000, baseLoadA: 1.0 },
@@ -36,7 +45,15 @@ const QUICK_TABLE: readonly { phase: string; durationMs: number; baseLoadA: numb
   // 노이즈에 묻힌다. 발열 기울기를 재는 구간만 두 배로 둔다(스펙 §3-1).
   { phase: "P3", durationMs: 40_000, baseLoadA: 1.5 },
   { phase: "P4", durationMs: 20_000, baseLoadA: 2.0 },
-  { phase: "P5", durationMs: 10_000, baseLoadA: 0.1 },
+  // P7(발열 탐침): 사다리를 다 올라가 붕괴점을 확정한 뒤, 그 붕괴점의
+  // 0.9배로 40초 발열 구간을 둔다. 부하는 붕괴점에서 나오므로 표에
+  // 상수로 못 박는다 — `null`로 두고 quickPhases에서 계산한다(§3-1·§9-2).
+  { phase: THERMAL_PROBE_PHASE, durationMs: 40_000, baseLoadA: null },
+  // P5(회복 구간)를 10초 → 30초로 늘렸다. P7 직후가 P5이므로, 부하를
+  // 내렸는데 온도가 계속 오르는지(§9-3 스칼라 ⑩ T_recover_slope)를 볼 수
+  // 있게 된다. §9-7은 이게 양수면 "내부 발열 확정 — 최강 적신호"라 안전
+  // 바닥 조건으로 쓴다. 10초로는 최소자승 기울기가 안 나온다.
+  { phase: "P5", durationMs: 30_000, baseLoadA: 0.1 },
   // P6(미세 스윕)은 스윕 알고리즘이 미정이라 시퀀스에 넣지 않는다.
 ];
 
@@ -52,13 +69,27 @@ function roundLoad(value: number): number {
 // 이미 자산의 정격 전류를 넘겨 호출하고 있고, 이번 수정의 범위는
 // `phases.ts`·`phases.test.ts` 두 파일뿐이라 그 호출부를 고칠 수 없다.
 // 파라미터를 지우면 시그니처가 깨져 두 호출부가 컴파일에 실패한다.
-export function quickPhases(ratedOutputCurrentA: number | null): PhaseSpec[] {
+//
+// `regulationKneeA`는 확정된 붕괴점(레귤레이션 이탈 전류)이다. 아직
+// 모르거나 사다리를 끝까지 버텨서 못 찾았으면 `null`이다 — 호출부
+// (`store/memory.ts:288`)가 인자 1개로 부르므로 기본값이 반드시 필요하다.
+export function quickPhases(
+  ratedOutputCurrentA: number | null,
+  regulationKneeA: number | null = null,
+): PhaseSpec[] {
   void ratedOutputCurrentA;
-  return QUICK_TABLE.map(({ phase, durationMs, baseLoadA }) => ({
-    phase,
-    durationMs,
-    loadTargetA: roundLoad(Math.max(MIN_HOLD_LOAD_A, baseLoadA)),
-  }));
+  return QUICK_TABLE.map(({ phase, durationMs, baseLoadA }) => {
+    if (phase === THERMAL_PROBE_PHASE) {
+      const target =
+        regulationKneeA === null ? LADDER_CEILING_A : regulationKneeA * THERMAL_PROBE_LOAD_FRACTION;
+      return { phase, durationMs, loadTargetA: roundLoad(Math.max(MIN_HOLD_LOAD_A, target)) };
+    }
+    return {
+      phase,
+      durationMs,
+      loadTargetA: roundLoad(Math.max(MIN_HOLD_LOAD_A, baseLoadA as number)),
+    };
+  });
 }
 
 export function totalDurationMs(specs: PhaseSpec[]): number {

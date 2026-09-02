@@ -1479,21 +1479,25 @@ F21 화면이 실행 전에 잠금 사유를 알 수 있도록 `GET /api/batteri
   "loadTargetA": 1.5,
   "loadActualA": 1.47,
   "startedAt": "2026-07-28T05:20:00.000Z",
-  "estimatedEndAt": "2026-07-28T05:22:40.000Z",
+  "estimatedEndAt": "2026-07-28T05:23:00.000Z",
   "socHintLevel": 3,
   "partialMetrics": {
     "vLightLoadV": 5.06,
     "regulationKneeA": null,
     "kneeIsUpperBound": null,
     "thermalSlopeCPerMin": 2.1,
-    "specAttainmentPct": null
+    "specAttainmentPct": null,
+    "thermalProbeLoadA": null,
+    "thermalPerWattCPerMinPerW": null,
+    "recoverySlopeCPerMin": null
   }
 }
 ```
 
 - 진행 중인 진단이 없으면 `200`에 `null`을 준다. `404`가 아니다 — "없음"은 정상 상태다
-- `phase`는 `P0`~`P6` \| `CAPACITY`. `battery-raw-metrics`의 `diag_phase`와 **같은 값**이다(스펙 §6-1)
+- `phase`는 `P0`~`P7` \| `CAPACITY`. `battery-raw-metrics`의 `diag_phase`와 **같은 값**이다(스펙 §6-1). `P6`(붕괴 구간 미세 스윕, 미구현)과 `P7`(붕괴점의 0.9배로 40초 거는 발열 탐침 구간, §3-2 ④)은 다른 단계다
 - `partialMetrics`는 아직 확정되지 않은 지표를 `null`로 둔다. 중간값을 추정해 채우지 않는다
+- `thermalProbeLoadA`·`thermalPerWattCPerMinPerW`는 **P7이 시작되기 전에는 `null`**이고, `recoverySlopeCPerMin`은 **P5 전에는 `null`**이다. 셋 다 진행 중에도 실리지만 완료 전 값은 그 단계의 부분 집계다 — 완료 결과(`GET /api/diagnoses/{id}`)의 값이 정본이다
 
 #### `DELETE /api/diagnosis/active` — 중단 `[REQ-WEB-141]`
 
@@ -1559,6 +1563,9 @@ F21 화면이 실행 전에 잠금 사유를 알 수 있도록 `GET /api/batteri
   "kneeIsUpperBound": false,
   "latchOff": false,
   "thermalSlopeCPerMin": 2.4,
+  "thermalProbeLoadA": 1.44,
+  "thermalPerWattCPerMinPerW": 0.31,
+  "recoverySlopeCPerMin": -0.15,
   "specAttainmentPct": 80,
   "ratedOutputCurrentA": 2.0,
   "grade": "SUSPECT_DEGRADED",
@@ -1567,7 +1574,11 @@ F21 화면이 실행 전에 잠금 사유를 알 수 있도록 `GET /api/batteri
 ```
 
 - `latchOff` — 출력 소실(5V→0V)로 이탈이 관측됐는지. 점진적 처짐과 구분한다(스펙 §3-2 ②)
-- `gradeProvisional` — 발열 기울기 상한 `S1`이 미설정(`0`)인 상태로 낸 등급이라는 표시. H3 실측 후 `false`가 된다
+- `thermalSlopeCPerMin` — **여전히 P3(1.5A 고정) 40초 구간 기준이다.** 아래 P7·P5 원값과 구간이 다르니 섞지 않는다(스펙 §3-2 ①·§3-1)
+- `thermalProbeLoadA` — P7에 실제로 건 전류(`regulationKneeA`의 0.9배, 스펙 §3-1 P7)
+- `thermalPerWattCPerMinPerW` — P7 구간 발열 기울기를 그 구간 전력으로 정규화한 원값. **판정 산식이 아니다** — 문턱·등급이 아직 없다(스펙 §3-2 ④, §8 H21)
+- `recoverySlopeCPerMin` — P5(회복, 30초) 구간 온도 기울기 원값. 부호가 정보이며 **판정으로 승격되지 않았다**(스펙 §3-1·§8 H21)
+- `gradeProvisional` — 발열 기울기 상한 `S1`이 미설정(`0`)인 상태로 낸 등급이라는 표시. H3 실측 후 `false`가 된다. **`grade` 산식은 P7·P5 원값 추가로 바뀌지 않았다** — 여전히 이탈점·`thermalSlopeCPerMin`(P3 기준)·도달률 세 조건뿐이다(스펙 §3-4)
 - `dataSource` (최상위) — `SIMULATED` \| `MEASURED`
 
 **enum**

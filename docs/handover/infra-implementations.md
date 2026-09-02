@@ -148,6 +148,45 @@ const [a, b] = await Promise.allSettled([
 
 호출부가 저장소가 반환한 객체를 마음대로 고쳐도 저장소 내부 상태가 오염되면 안 된다. SQL 쿼리는 매번 새 JS 객체를 만들어 반환하므로 이 규칙은 자연히 지켜진다. **단, 조회 성능을 위해 인메모리 캐시를 얹는다면** — 캐시에 저장한 객체의 참조를 그대로 반환하지 말고, 반환 직전에 얕은 복사(`{ ...cached }`)를 거친다. 이 규칙을 깨면 프론트가 받은 객체를 로컬에서 mutate했을 때 다음 조회 결과가 오염된 값을 보여주는, 재현하기 어려운 버그가 난다.
 
+### 8-1. ⚠️ `advanceDiagnosis`의 `progress` — 스키마에 자리가 없다 (2026-09-02 발견, 미결정)
+
+**이 문서가 여태 한 번도 다루지 않은 메서드다.** 스토어 계약에는 있다:
+
+```ts
+// backend/src/store/contract.ts:66
+advanceDiagnosis(id: string, phase: string, progress: DiagnosisProgress): Promise<DemoDiagnosis>;
+```
+
+그런데 `diagnosis` 테이블에는 **대응 컬럼이 없다**(`id`, `battery_id`, `session_id`, `kind`, `status`, `phase`, `input`, `result`, `started_at`, `estimated_end_at`, `completed_at`). 인메모리 구현체는 객체에 그냥 들고 있어서 문제가 드러나지 않았다.
+
+`DiagnosisProgress`(`backend/src/store/types.ts:67`)는 진행 중 진단의 작업 상태다 — 단계별 집계 창(`windows`: 전압 원자료 배열 + 온도 샘플 배열), 안전 판정용 롤링 온도 창(`tempTrail`), 누적 Wh, 부분 지표. **완료 결과(`result`)와 달리 완료되면 버려지는 값이다.**
+
+**실측 (빠른 진단 1회, 1초 tick, 2026-09-02)**
+
+| 항목 | 값 |
+|---|---|
+| `advanceDiagnosis` 호출 횟수 | **179회** (진단 1회당) |
+| 마지막 tick의 `progress` 직렬화 크기 | **7.6KB** |
+| 세션 1회 누적 기록량(매 tick 저장 시) | **813KB** |
+
+⚠️ **이건 1초 tick 기준이다.** 에지·Kafka consumer가 **100ms 프레임**을 넣기 시작하면 tick 수도, 창당 샘플 수도 10배가 된다. 같은 경고가 `runner.ts`의 `appendTempSample`에도 붙어 있다(창을 개수가 아니라 시간으로 트리밍하는 이유).
+
+> 참고: 2026-09-02에 빠른 진단에 P7(발열 탐침) 구간이 추가되며 총 시간이 120초 → 180초가 됐다. 위 수치는 그 이후 값이며, 이전 대비 약 1.5배다.
+
+**선택지 (백엔드 담당자와 함께 정한다 — 지금 결정하지 않는다)**
+
+| 안 | 내용 | 대가 |
+|---|---|---|
+| **㉮ 저장하지 않는다** | `progress`를 프로세스 메모리에만 두고 DB에는 `phase`만 갱신한다 | 서버가 재시작하면 **진행 중 진단의 작업 상태가 사라진다.** 그 진단을 `ABORTED`로 닫아야 하며(§10의 "재시작해도 남아 있을 것"과 어긋나는 지점이므로 명시적으로 합의해야 한다), 다시 시작해야 한다 |
+| **㉯ `jsonb` 컬럼을 만든다** | `diagnosis`에 `progress jsonb` 추가(새 번호 마이그레이션) | 매 tick 최대 7.6KB UPDATE. 100ms 프레임에서는 재검토가 필요하다. TOAST 압축과 행 팽창(dead tuple)을 감안해야 한다 |
+| **㉰ 단계 전환에서만 쓴다** | 창을 메모리에 들고, `diag_phase`가 바뀌는 순간에만 스냅샷 저장 | 쓰기가 179회 → **7회**로 준다. 재시작 시 마지막 단계 경계까지 복구된다 — ㉮와 ㉯의 절충 |
+
+**결정에 필요한 사실 3가지**
+
+1. **`progress`는 완료 결과가 아니다.** 이력·리포트가 읽는 건 `result`(§4.13 `Diagnosis` 객체)뿐이고, `progress`는 완료 시점에 버려진다. 즉 **영속성이 필요한 이유는 "재시작 복구" 하나뿐**이다.
+2. **`WebSocket diagnosis.progress` 이벤트는 단계 전환에서만 나간다**(`docs/backend_contract.md` §5). 매 tick 저장이 실시간 전송 때문에 필요한 것은 아니다.
+3. **`result`는 `jsonb`라 이번에 추가된 원값 3개(`thermalProbeLoadA`·`thermalPerWattCPerMinPerW`·`recoverySlopeCPerMin`)는 마이그레이션이 필요 없다.** 다만 그 자산의 첫 `QUICK` 값을 기준선으로 뽑으려면(스펙 §8 H21 ②) `result->'quick'->>'thermalPerWattCPerMinPerW'` 경로 조회가 되고 **인덱스가 없다.** 기준선을 `battery_asset` 컬럼으로 승격할지가 H21 ②의 실질적 내용이다.
+
 ### 9. 게이트를 여는 시점
 
 구현이 끝나기 전까지 두 지점을 건드리지 않는다:
@@ -284,6 +323,7 @@ onAutoCut: (relay, verdict) => { void broadcastAutoCut(battery, relay, verdict.t
 
 - ✅ **스키마** — `migrations/000`~`005`, `npm run db:migrate`로 적용. 결정 근거는 `schema-open-questions.md`.
 - **PostgreSQL 구현체** — 본 문서 1부. `backend/src/store/postgres.ts` 신규 작성 + 계약 테스트 20건 통과 + 동시성 테스트(§6) + **다른 진단기로 두 번째 세션을 여는 테스트**(§2) 추가.
+- **`advanceDiagnosis`의 `progress` 영속화 방침** — 본 문서 §8-1. 스키마에 자리가 없고 세 가지 선택지가 열려 있다. **구현 착수 전에 백엔드 담당자와 먼저 합의한다** — 뒤늦게 바꾸면 마이그레이션과 러너 양쪽을 건드리게 된다.
 - **`store/types.ts`·`contract.ts` 델타 — 백엔드 몫**(§3). `anomaly_score`·`battery_latest`·`battery_health`를 읽을 조회 메서드가 없으면 `DemoBattery.latest.score`를 채울 수 없다.
 - **Kafka 구현체** — 본 문서 2부. `backend/src/device/kafka.ts` 신규 작성 + 도메인 코드를 outbox 방식으로 전환(§13·§15, 백엔드와 함께) + `runFailsafe`를 `server.ts` 밖으로 이동(§14a).
 - **Consumer의 `battery_id` 태깅** — `docs/handover/b2-session-tagging.md` (Task 14 산출물, 규칙 5개 확정).

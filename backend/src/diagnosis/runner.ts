@@ -7,7 +7,8 @@ import { CAPACITY_PHASE, isInAggregationWindow, phaseAt, quickPhases } from "./p
 import type { PhaseSpec } from "./phases.js";
 import {
   accumulateWh, baselineWhFrom, capacityResult, COLLAPSE_RATIO, LATCH_OFF_VOLTAGE_V,
-  median, quickGrade, regulationKnee, rollingTempSlopeCPerMin, specAttainmentPct, thermalSlopeCPerMin, vLightLoadV,
+  median, quickGrade, recoverySlopeCPerMin, regulationKnee, rollingTempSlopeCPerMin, specAttainmentPct,
+  thermalPerWattCPerMinPerW, thermalProbeLoadA, thermalSlopeCPerMin, vLightLoadV,
 } from "./metrics.js";
 import type { PhaseWindow } from "./metrics.js";
 import { judgeDiagnosisAbort } from "./safety.js";
@@ -107,7 +108,22 @@ export function stepDiagnosis(input: StepInput): RunnerOutcome {
   const progress = diagnosis.progress ?? { loadTargetA: null, loadActualA: null, partialMetrics: null, windows: [], deliveredWh: 0, vLightLoadV: null, lastElapsedMs: null, tempTrail: [] };
 
   const isQuick = diagnosis.kind === "QUICK";
-  const specs = isQuick ? quickPhases(battery.ratedOutputCurrentA) : [];
+
+  // P7(발열 탐침)의 부하는 사다리가 찾아낸 붕괴점의 0.9배다 — 그래서
+  // 시퀀스가 여기서 처음으로 동적이 된다. 붕괴점은 직전 tick까지 쌓인
+  // 창에서 나오고, P7이 시작되는 t=110s에는 P0~P4 창이 이미 다 차 있다.
+  // 아직 못 찾았으면(사다리를 끝까지 버팀) null을 넘겨 사다리 천장을 쓴다.
+  //
+  // ⚠️ 동적인 것은 loadTargetA 하나뿐이고 지속시간은 여전히 정적이다 —
+  // "단계는 경과시간에서만 계산된다"는 phases.ts의 불변이 깨지면 tick이
+  // 밀릴 때 단계가 어긋난다.
+  const kneeSoFar = isQuick ? regulationKnee(progress.windows) : null;
+  const specs = isQuick
+    ? quickPhases(
+        battery.ratedOutputCurrentA,
+        kneeSoFar!.kneeIsUpperBound ? null : kneeSoFar!.regulationKneeA,
+      )
+    : [];
   const spec: PhaseSpec | null = isQuick
     ? phaseAt(specs, elapsedMs)
     : { phase: CAPACITY_PHASE, durationMs: Number.MAX_SAFE_INTEGER, loadTargetA: capacityLoadA(diagnosis) };
@@ -191,6 +207,10 @@ export function stepDiagnosis(input: StepInput): RunnerOutcome {
         kneeIsUpperBound: knee.kneeIsUpperBound ? null : false,
         thermalSlopeCPerMin: thermalSlopeCPerMin(windows),
         specAttainmentPct: specAttainmentPct(windows, battery.ratedOutputCurrentA),
+        // P7·P5 원값. 판정하지 않는다 — 문턱·등급은 아직 미정이다.
+        thermalProbeLoadA: thermalProbeLoadA(windows),
+        thermalPerWattCPerMinPerW: thermalPerWattCPerMinPerW(windows),
+        recoverySlopeCPerMin: recoverySlopeCPerMin(windows),
       },
       windows,
       deliveredWh: progress.deliveredWh,
@@ -226,6 +246,13 @@ function buildQuickResult(progress: DiagnosisProgress, battery: DemoBattery, con
       ratedOutputCurrentA: battery.ratedOutputCurrentA,
       grade,
       gradeProvisional,
+      // ── 측정층 원값 (판정 없음) ────────────────────────────────
+      // 등급에 들어가지 않는다. thermalSlopeCPerMin이 P3(1.5A 고정) 기준인
+      // 반면 아래 둘은 P7(붕괴점의 0.9배) 기준이라 서로 다른 자극의 값이다.
+      // 판정 방식(기준선을 어떻게 잡고 무엇을 문턱으로 둘지)은 미정이다.
+      thermalProbeLoadA: thermalProbeLoadA(windows),
+      thermalPerWattCPerMinPerW: thermalPerWattCPerMinPerW(windows),
+      recoverySlopeCPerMin: recoverySlopeCPerMin(windows),
     },
     capacity: null,
   };

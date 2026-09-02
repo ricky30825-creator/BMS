@@ -65,17 +65,71 @@ describe("stepDiagnosis", () => {
     expect(same.kind === "RUNNING" && same.phaseChanged).toBe(false);
   });
 
-  it("빠른 진단은 120초에 완료된다", () => {
-    const outcome = stepDiagnosis({ battery: battery(), diagnosis: running("QUICK", "P5"), elapsedMs: 120_000, config });
+  // 빠른 진단을 1초 tick으로 끝까지 돌리고, 단계별 목표 전류와 완료
+  // 결과를 함께 돌려준다.
+  const runQuick = (batteryId: string) => {
+    const target: DemoBattery = { ...battery(), id: batteryId };
+    let diagnosis = running("QUICK", "P0");
+    const loads = new Map<string, number>();
+    let outcome: ReturnType<typeof stepDiagnosis> | undefined;
+    for (let elapsedMs = 1_000; elapsedMs <= 180_000; elapsedMs += 1_000) {
+      outcome = stepDiagnosis({ battery: target, diagnosis, elapsedMs, config });
+      if (outcome.kind !== "RUNNING") break;
+      loads.set(outcome.phase, outcome.progress.loadTargetA!);
+      diagnosis = { ...diagnosis, phase: outcome.phase, progress: outcome.progress };
+    }
+    if (outcome?.kind !== "COMPLETED") throw new Error(`expected COMPLETED, got ${outcome?.kind}`);
+    return { loads, result: outcome.result.quick as Record<string, unknown> };
+  };
+
+  it("빠른 진단은 180초에 완료된다", () => {
+    const outcome = stepDiagnosis({ battery: battery(), diagnosis: running("QUICK", "P5"), elapsedMs: 180_000, config });
     expect(outcome.kind).toBe("COMPLETED");
   });
 
   it("완료 결과에 quick 블록과 dataSource가 실린다", () => {
-    const outcome = stepDiagnosis({ battery: battery(), diagnosis: running("QUICK", "P5"), elapsedMs: 120_000, config });
+    const outcome = stepDiagnosis({ battery: battery(), diagnosis: running("QUICK", "P5"), elapsedMs: 180_000, config });
     if (outcome.kind !== "COMPLETED") throw new Error("expected COMPLETED");
     expect(outcome.result.dataSource).toBe("SIMULATED");
     expect(outcome.result.quick).toBeTruthy();
     expect(outcome.result.capacity).toBeNull();
+  });
+
+  // P7(발열 탐침)은 사다리가 확정한 붕괴점의 0.9배로 돈다 — 시퀀스가
+  // 여기서 처음으로 동적이 되므로, 배선이 맞는지는 러너를 실제로 끝까지
+  // 돌려봐야만 확인된다.
+  it("P7의 부하는 확정된 붕괴점의 0.9배다 — 이탈이 관측된 팩", () => {
+    // PB-HONG-001은 P4(2.0A)에서 래치오프한다 → 붕괴점 2.0A → P7 1.8A.
+    const { loads, result } = runQuick("PB-HONG-001");
+    expect(loads.get("P7")).toBe(1.8);
+    expect(result.regulationKneeA).toBe(2.0);
+    expect(result.kneeIsUpperBound).toBe(false);
+  });
+
+  it("붕괴점을 못 찾으면 P7은 사다리 천장(2.0A)을 쓴다", () => {
+    // PB-002는 사다리를 끝까지 버틴다 → kneeIsUpperBound → 천장.
+    const { loads, result } = runQuick("PB-002");
+    expect(loads.get("P7")).toBe(2.0);
+    expect(result.kneeIsUpperBound).toBe(true);
+  });
+
+  it("완료 결과에 측정층 원값 3개가 실린다 — 판정은 없다", () => {
+    const { result } = runQuick("PB-HONG-001");
+    expect(result.thermalProbeLoadA).toBe(1.8);
+    expect(typeof result.thermalPerWattCPerMinPerW).toBe("number");
+    expect(typeof result.recoverySlopeCPerMin).toBe("number");
+    // 원값이지 등급이 아니다 — 새 판정 필드를 늘리지 않았다.
+    expect(result).not.toHaveProperty("thermalFinding");
+  });
+
+  it("회귀: P7이 생겨도 열화 등급의 세 입력이 달라지지 않는다", () => {
+    // P7은 붕괴점(0.9배 되먹임)과 도달률(최댓값)의 후보에서 빠져 있어야
+    // 한다. 빠지지 않으면 등급 산식을 한 줄도 안 고쳤는데 등급이 바뀐다.
+    const hong = runQuick("PB-HONG-001").result;
+    expect(hong.regulationKneeA).toBe(2.0);      // 1.8(=P7 부하)이면 되먹임이다
+    expect(hong.specAttainmentPct).toBe(75);     // P3의 1.5A / 정격 2.0A
+    const healthy = runQuick("PB-002").result;
+    expect(healthy.specAttainmentPct).toBe(100);
   });
 
   it("안전 문턱이 걸리면 ABORTED와 사유를 낸다", () => {
@@ -91,7 +145,7 @@ describe("stepDiagnosis", () => {
     const hongBattery: DemoBattery = { ...battery(), id: "PB-HONG-001" };
     let diagnosis = running("QUICK", "P0");
     let outcome: ReturnType<typeof stepDiagnosis> | undefined;
-    for (let elapsedMs = 1_000; elapsedMs <= 120_000; elapsedMs += 1_000) {
+    for (let elapsedMs = 1_000; elapsedMs <= 180_000; elapsedMs += 1_000) {
       outcome = stepDiagnosis({ battery: hongBattery, diagnosis, elapsedMs, config });
       if (outcome.kind !== "RUNNING") break;
       diagnosis = { ...diagnosis, phase: outcome.phase, progress: outcome.progress };
@@ -195,7 +249,7 @@ describe("stepDiagnosis", () => {
     let diagnosis = running("QUICK", "P0");
     let outcome: ReturnType<typeof stepDiagnosis> | undefined;
     let abortedAtMs: number | null = null;
-    for (let elapsedMs = 1000; elapsedMs <= 120_000; elapsedMs += 1000) {
+    for (let elapsedMs = 1000; elapsedMs <= 180_000; elapsedMs += 1000) {
       outcome = stepDiagnosis({ battery: battery(), diagnosis, elapsedMs, config: hot, source });
       if (outcome.kind === "ABORTED") { abortedAtMs = elapsedMs; break; }
       if (outcome.kind !== "RUNNING") throw new Error("expected RUNNING or ABORTED, got " + outcome.kind);

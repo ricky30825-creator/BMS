@@ -4,6 +4,12 @@
 // ⚠️ 이 파일은 스토어를 import하지 않는다. store/types.ts가 PhaseWindow를
 // import하므로 반대 방향은 순환 참조다.
 
+// 사다리를 소유한 쪽이 phases.ts이므로 단계 이름도 거기서 가져온다.
+// phases.ts는 아무것도 import하지 않아 순환이 생기지 않는다. (P0·P3·P5는
+// 이 파일에 로컬 상수로 남아 있는데, 그건 이 변경보다 앞선 관례라
+// 그대로 뒀다 — 등급 산식이 걸려 있어 함께 손대지 않는다.)
+import { THERMAL_PROBE_PHASE } from "./phases.js";
+
 export type PhaseWindow = {
   phase: string;
   loadTargetA: number;
@@ -27,6 +33,7 @@ export const COLLAPSE_RATIO = 0.8;
 
 const P0_PHASE = "P0";
 const THERMAL_PHASE = "P3";
+const RECOVERY_PHASE = "P5";
 
 export function median(values: number[]): number | null {
   if (values.length === 0) return null;
@@ -54,7 +61,14 @@ export function regulationKnee(windows: PhaseWindow[]): KneeResult {
 
   // P0은 기준을 만드는 단계라 판정 대상에서 뺀다. 부하가 올라가는
   // 순서대로 보므로 저전류→상행이 보장된다(스펙 §3-2 ②).
-  const candidates = windows.filter((w) => w.phase !== P0_PHASE);
+  //
+  // ⚠️ P7(발열 탐침)도 뺀다. 두 가지 이유가 있고 둘 다 조용히 틀린다:
+  // ① 되먹임 — P7의 부하가 이 함수가 낸 붕괴점의 0.9배라, P7을 후보에
+  //    넣으면 다음 tick의 붕괴점이 P7 부하가 되고 그 0.9배가 다시 P7
+  //    부하가 되어 매 tick 0.9배씩 줄어든다.
+  // ② 등급 불변 — P7은 기존 열화 등급의 입력이 아니다. 후보에 넣으면
+  //    등급 산식을 한 줄도 안 고쳤는데 등급이 달라진다.
+  const candidates = windows.filter((w) => w.phase !== P0_PHASE && w.phase !== THERMAL_PROBE_PHASE);
   const departed = candidates.find((w) => w.latchOff || w.voltageMedianV < threshold);
 
   if (departed) {
@@ -81,14 +95,52 @@ function leastSquaresSlopePerMs(points: { atMs: number; tempIrSurfaceC: number }
   return numerator / denominator;
 }
 
+// 한 단계 창의 온도 기울기(°C/분). 두 점 차분은 IR 노이즈에 취약해
+// 최소자승을 쓴다(스펙 §3-2 ②).
+function phaseSlopeCPerMin(windows: PhaseWindow[], phase: string): number | null {
+  const window = windows.find((w) => w.phase === phase);
+  if (!window || window.tempSamples.length < 2) return null;
+  const slopePerMs = leastSquaresSlopePerMs(window.tempSamples);
+  return slopePerMs === null ? null : slopePerMs * 60_000;
+}
+
 // 등급 산식(스펙 §3-2 ②) 전용 — P3 40초 창의 기울기만 본다. 안전 판정에는
 // 쓰지 않는다(P3는 t=70s부터 채워지고 t=90s에 멎는다 — rollingTempSlopeCPerMin
 // 참조).
 export function thermalSlopeCPerMin(windows: PhaseWindow[]): number | null {
-  const window = windows.find((w) => w.phase === THERMAL_PHASE);
-  if (!window || window.tempSamples.length < 2) return null;
-  const slopePerMs = leastSquaresSlopePerMs(window.tempSamples);
-  return slopePerMs === null ? null : slopePerMs * 60_000;
+  return phaseSlopeCPerMin(windows, THERMAL_PHASE);
+}
+
+// P7(발열 탐침) 창에 실제로 걸린 부하 전류. 창이 없으면 null.
+export function thermalProbeLoadA(windows: PhaseWindow[]): number | null {
+  const window = windows.find((w) => w.phase === THERMAL_PROBE_PHASE);
+  return window ? window.loadTargetA : null;
+}
+
+// 정규화된 발열 — P7의 온도 기울기를 그 구간의 전력으로 나눈다(스펙 §9-3
+// 피처 #6 dT_per_W). 발열 기울기는 dT/dt ≈ P/C라 팩의 열용량(무게에 비례)에
+// 좌우된다 — 큰 팩과 작은 팩에 같은 부하를 걸면 열화와 무관하게 작은 팩이
+// 몇 배 빨리 뜬다. 전력으로 정규화하면 부하 크기 차이가 흡수되고, C와
+// 열 결합은 그 팩의 상수라 같은 자산의 세션 간 비교가 성립한다.
+// ⚠️ 판정하지 않는다 — 문턱·등급은 이 함수의 범위 밖이다.
+export function thermalPerWattCPerMinPerW(windows: PhaseWindow[]): number | null {
+  const window = windows.find((w) => w.phase === THERMAL_PROBE_PHASE);
+  if (!window) return null;
+  const slope = phaseSlopeCPerMin(windows, THERMAL_PROBE_PHASE);
+  if (slope === null) return null;
+  // 방전이라 currentMedianA는 음수다 — 반드시 abs()로 전력을 낸다
+  // (PhaseWindow 주석의 부호 규약).
+  const powerW = Math.abs(window.voltageMedianV * window.currentMedianA);
+  if (!Number.isFinite(powerW) || powerW <= 0) return null;
+  return slope / powerW;
+}
+
+// 회복(P5) 구간의 온도 기울기. 부호가 정보다 — 부하를 0.1A로 내렸는데
+// 온도가 계속 오르면(양수) 내부 발열이 확정적이라는 뜻이며, 스펙 §9-7이
+// 안전 바닥에 올려둔 "최강 적신호"다. ⚠️ 다만 이 함수는 원값만 낸다 —
+// 이번 작업에서는 판정에 쓰지 않는다(문턱·승격 여부는 미정).
+export function recoverySlopeCPerMin(windows: PhaseWindow[]): number | null {
+  return phaseSlopeCPerMin(windows, RECOVERY_PHASE);
 }
 
 // 안전 판정 전용 — 단계와 무관하게 최근 창(rollingTempSlopeCPerMin의
@@ -110,7 +162,9 @@ export function specAttainmentPct(windows: PhaseWindow[], ratedOutputCurrentA: n
   if (vLight === null) return null;
   const threshold = vLight * REGULATION_RATIO;
   const sustained = windows
-    .filter((w) => w.phase !== P0_PHASE && !w.latchOff && w.voltageMedianV >= threshold)
+    // P7 제외 이유는 regulationKnee와 같다 — 사다리가 아닌 구간이 "지속
+    // 도달 전류"의 최댓값을 올려 도달률을, 나아가 등급을 바꾼다.
+    .filter((w) => w.phase !== P0_PHASE && w.phase !== THERMAL_PROBE_PHASE && !w.latchOff && w.voltageMedianV >= threshold)
     .reduce((max, w) => Math.max(max, w.loadTargetA), 0);
   return (Math.min(sustained, ratedOutputCurrentA) / ratedOutputCurrentA) * 100;
 }
