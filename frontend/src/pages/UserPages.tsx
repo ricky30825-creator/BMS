@@ -30,11 +30,10 @@ function magnitude(value: number | null | undefined): number | null { return val
 function measuringDurationLabel(startedAt: string | null | undefined): string {
   const started = startedAt ? new Date(startedAt).getTime() : NaN;
   if (Number.isNaN(started)) return "";
-  const totalMinutes = Math.max(0, Math.floor((Date.now() - started) / 60_000));
-  if (totalMinutes < 1) return "방금 측정 시작";
-  const hours = Math.floor(totalMinutes / 60);
-  const minutes = totalMinutes % 60;
-  return `${hours > 0 ? `${hours}시간 ${minutes}분째` : `${minutes}분째`} 측정 중`;
+  const totalSeconds = Math.max(0, Math.floor((Date.now() - started) / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${String(minutes).padStart(2, "0")}분 ${String(seconds).padStart(2, "0")}초째 측정 중`;
 }
 
 // 센서가 아직 이 연결에서 값을 보내오지 않았으면 "연결 중", 이 연결이 시작된
