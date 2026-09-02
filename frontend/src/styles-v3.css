@@ -50,7 +50,7 @@
   align-items: center;
   gap: 10px;
 }
-.dashboard-context .measuring-elapsed { white-space: nowrap; }
+.dashboard-context .measuring-elapsed { white-space: nowrap; font-size: 15px; font-weight: 800; color: var(--fg); }
 .dashboard-battery-icon {
   width: 36px;
   height: 36px;

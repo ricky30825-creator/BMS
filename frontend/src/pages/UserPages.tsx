@@ -45,7 +45,7 @@ function MeasuringElapsed({ startedAt }: { startedAt: string | null | undefined 
     const id = window.setInterval(() => tick((value) => value + 1), 1000);
     return () => window.clearInterval(id);
   }, []);
-  return <span className="stream-status measuring-elapsed"><Clock size={13} />{measuringDurationLabel(startedAt)}</span>;
+  return <span className="stream-status measuring-elapsed"><Clock size={16} />{measuringDurationLabel(startedAt)}</span>;
 }
 
 // 센서가 아직 이 연결에서 값을 보내오지 않았으면 "연결 중", 이 연결이 시작된
