@@ -207,7 +207,7 @@ h3 { font-size: 14px; }
 .account-copy strong, .account-copy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .account-copy strong { font-size: 13px; }
 .account-copy small { color: var(--fg-muted); font-size: 11px; }
-.collapse-button { flex: 0 0 auto; width: 26px; height: 26px; display: grid; place-items: center; margin-left: auto; border: 1px solid var(--border); border-radius: 50%; color: var(--fg-muted); background: var(--surface); }
+.collapse-button { flex: 0 0 auto; width: 26px; height: 26px; padding: 0; display: grid; place-items: center; margin-left: auto; border: 1px solid var(--border); border-radius: 50%; color: var(--fg-muted); background: var(--surface); }
 .collapsed .shell-brand .logo span:not(.logo-mark), .collapsed .environment-tag, .collapsed .nav-item span, .collapsed .account-copy { display: none; }
 .collapsed .nav-item { justify-content: center; padding: 9px; }
 .main-column { min-width: 0; flex: 1; margin-left: var(--sidebar); }
