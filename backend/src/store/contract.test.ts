@@ -231,13 +231,13 @@ describe("진단 진행 상태", () => {
     await expect(store.startDiagnosis("hong", "QUICK", battery.id, { acknowledged: true })).rejects.toThrow("MODE_NOT_SUPPORTED");
   });
 
-  it("빠른 진단의 예상 종료는 시작 + 120초다", async () => {
+  it("빠른 진단의 예상 종료는 시작 + 180초다", async () => {
     const store = createMemoryStore();
     const battery = (await store.batteries("hong")).find((b) => b.targetMode === 2 && b.opsStatus !== "BLOCKED")!;
     await store.startSession("hong", battery.id);
     const started = await store.startDiagnosis("hong", "QUICK", battery.id, { acknowledged: true });
     const span = new Date(started.estimatedEndAt!).getTime() - new Date(started.startedAt).getTime();
-    expect(span).toBe(120_000);
+    expect(span).toBe(180_000);
   });
 
   it("정밀 용량의 예상 종료는 ratedWh / (5V × 방전전류) 시간이다", async () => {

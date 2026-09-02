@@ -64,6 +64,14 @@ export function createSimulatorSource(): DiagnosisSource {
 
       const powerW = voltageV * load;
       const minutes = elapsedMs / 60_000;
+      // ⚠️ 냉각도 열 기억도 없는 모델이다 — 현재 전력 × 총 경과시간이라,
+      // 부하를 내려도 `minutes`가 계속 커지는 한 온도가 오른다. 그래서
+      // 시뮬레이션의 recoverySlopeCPerMin(P5 회복 구간 기울기)은 항상
+      // 양수로 나오며 그건 신호가 아니라 인공물이다. 실물에서 그 값이
+      // 양수면 "부하를 내렸는데 내부 발열이 계속된다"는 최강 적신호지만
+      // (스펙 §9-7), 여기서는 아무 뜻도 없다. **그 조건을 중단 조건으로
+      // 승격하기 전에 이 모델부터 고쳐라** — 안 그러면 모든 시뮬레이션
+      // 진단이 중단된다(스펙 §8 H21).
       const tempIrSurfaceC = AMBIENT_C + traits.thermalCoeffCPerWMin * powerW * minutes;
 
       return {
