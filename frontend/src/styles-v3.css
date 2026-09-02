@@ -46,10 +46,11 @@
 .dashboard-context {
   min-width: 0;
   display: grid;
-  grid-template-columns: 36px minmax(0, 1fr) auto;
+  grid-template-columns: 36px minmax(0, 1fr) auto auto;
   align-items: center;
   gap: 10px;
 }
+.dashboard-context .measuring-elapsed { white-space: nowrap; }
 .dashboard-battery-icon {
   width: 36px;
   height: 36px;
@@ -147,6 +148,7 @@
   .dashboard-hero { gap: 16px; padding: 18px; }
   .dashboard-context { grid-template-columns: 36px minmax(0, 1fr); }
   .dashboard-change { grid-column: 2; justify-self: start; }
+  .dashboard-context .measuring-elapsed { grid-column: 2; justify-self: start; }
   .dashboard-hero-copy h1 { font-size: clamp(26px, 9vw, 34px); }
   .dashboard-hero-actions { align-items: stretch; flex-direction: column; gap: 8px; }
   .dashboard-hero-actions .button { width: 100%; }
