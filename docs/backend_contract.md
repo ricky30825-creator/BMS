@@ -453,7 +453,7 @@ const locked = gated && r !== 'battery';
 ```
 
 - `activeSession`이 `null`이면 프론트는 **§3.1 게이트 모드**로 진입한다.
-- `activeSession.measurementPhase`는 서버가 `battery.latest.measuredAt`와 `startedAt`을 비교해 계산한다. `measuredAt`이 세션 시작 시각보다 **엄격히 이후**인 센서 프레임이 아직 없으면 `WAITING_FOR_MEASUREMENT`(장비 연결 대기), 그런 프레임이 있으면 `MEASURING`(연결됨 · 측정 중)이다. 활성 세션 생성 자체나 이전 세션의 측정값은 측정 증거가 아니다.
+- `activeSession.measurementPhase`는 서버가 `battery.latest.measuredAt`와 `startedAt`을 비교해 계산한다. `measuredAt`이 세션 시작 시각보다 **엄격히 이후**인 센서 프레임이 아직 없으면 `WAITING_FOR_MEASUREMENT`(장비 연결 대기), 그런 프레임이 있으면 `MEASURING`(연결됨 · 측정 중)이다. 활성 세션 생성 자체나 이전 세션의 측정값은 측정 증거가 아니다. 따라서 사용자 UI와 측정 목적지 게이트는 `MEASURING`일 때만 연결 완료로 취급한다.
 - `unreadAlertCount` → 사이드바 `알림 센터` 배지 `[v3: badge '2']`
 - `activeAnomalyCount` → 사이드바 `이상 탐지` 배지 `[v3: badge '9']`
 
@@ -683,7 +683,7 @@ v3 테이블 컬럼: `세션 ID · 기간 · 최고 이상점수 · 상태 · �
 }
 ```
 
-`measurementPhase`는 활성 세션 생성만으로 `MEASURING`이 되지 않는다. 서버는 장비 ACK를 추정하지 않고, 해당 세션의 `startedAt` 이후에 저장된 센서 측정 시각이 있을 때만 `MEASURING`으로 바꾼다.
+`measurementPhase`는 활성 세션 생성만으로 `MEASURING`이 되지 않는다. 서버는 장비 ACK를 추정하지 않고, 해당 세션의 `startedAt` 이후에 저장된 센서 측정 시각이 있을 때만 `MEASURING`으로 바꾼다. `GET /api/batteries`와 `GET /api/batteries/{id}`의 `isConnected`도 같은 규칙을 따르며, 대기 세션에서는 `false`다. `POST /api/sessions`가 `201`과 `WAITING_FOR_MEASUREMENT`를 반환하면 프론트는 대기·실패·재시도 상태를 보여 주고 측정 목적지를 열지 않는다.
 
 - 대상 배터리의 진단기가 오프라인이면 `409 DEVICE_OFFLINE`.
 - 대상 배터리의 운영 상태가 `BLOCKED`이면 `409 BATTERY_BLOCKED` (§4.12).

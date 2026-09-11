@@ -461,7 +461,11 @@ app.patch("/api/settings/voice-alert", requireSession, (req, res) => {
 app.get("/api/batteries", requireSession, asyncRoute(async (req, res) => {
   const mode = req.query.mode === "1" || req.query.mode === "2" ? Number(req.query.mode) : null;
   const list = (await batteries(req.userRole === "ADMIN" ? undefined : actorId(req))).filter((battery) => !mode || battery.targetMode === mode);
-  const connectedBatteryId = (await activeSession(actorId(req)))?.batteryId;
+  const currentSession = await activeSession(actorId(req));
+  const currentSessionJson = currentSession ? await sessionJson(currentSession) : null;
+  // An ACTIVE session only means that a request was accepted. The asset is
+  // connected after the first post-start sensor frame proves MEASURING.
+  const connectedBatteryId = currentSessionJson?.measurementPhase === "MEASURING" ? currentSessionJson.batteryId : null;
   const items = await Promise.all(list.map(async (battery) => ({ ...(await batteryJson(battery)), isConnected: battery.id === connectedBatteryId })));
   res.json({ items, page: { number: 1, size: list.length || 20, total: list.length, totalPages: list.length ? 1 : 0 } });
 }));
@@ -501,7 +505,9 @@ app.get("/api/batteries/:id", requireSession, asyncRoute(async (req, res) => {
     apiError(res, 404, "NOT_FOUND", "Battery was not found.");
     return;
   }
-  res.json({ ...(await batteryJson(battery)), isConnected: (await activeSession(actorId(req)))?.batteryId === battery.id });
+  const currentSession = await activeSession(actorId(req));
+  const isConnected = Boolean(currentSession?.batteryId === battery.id && measurementPhaseFor(currentSession.startedAt, battery.latest.measuredAt) === "MEASURING");
+  res.json({ ...(await batteryJson(battery)), isConnected });
 }));
 
 app.get("/api/batteries/:id/sessions", requireSession, asyncRoute(async (req, res) => {
@@ -791,7 +797,9 @@ app.get("/api/admin/batteries", requireRole("ADMIN"), asyncRoute(async (req, res
 app.get("/api/admin/batteries/:id", requireRole("ADMIN"), asyncRoute(async (req, res) => {
   const battery = await batteryById(req.params.id);
   if (!battery) { apiError(res, 404, "NOT_FOUND", "Battery was not found."); return; }
-  res.json({ ...(await batteryJson(battery)), owner: await userById(battery.ownerId), info: { adminMemo: battery.adminMemo, device: { id: "demo-device-01", label: "진단기 A", status: "ONLINE" } }, opsLogs: (await audits()).filter((audit) => audit.resource === battery.id) });
+  const currentSession = await activeSession();
+  const deviceConnected = Boolean(currentSession?.batteryId === battery.id && measurementPhaseFor(currentSession.startedAt, battery.latest.measuredAt) === "MEASURING");
+  res.json({ ...(await batteryJson(battery)), owner: await userById(battery.ownerId), info: { adminMemo: battery.adminMemo, device: { id: "demo-device-01", label: "진단기 A", status: deviceConnected ? "ONLINE" : "OFFLINE" } }, opsLogs: (await audits()).filter((audit) => audit.resource === battery.id) });
 }));
 
 app.patch("/api/admin/batteries/:id/ops-status", requireRole("ADMIN"), asyncRoute(async (req, res) => {

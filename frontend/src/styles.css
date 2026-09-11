@@ -225,6 +225,7 @@ h3 { font-size: 14px; }
 .connect-phase.connecting .status-dot { animation: pulse 1.3s ease-in-out infinite; }
 .connect-phase.measuring { background: var(--grade-normal-bg); color: #15803d; }
 .connect-phase.measuring .status-dot { background: #15803d; }
+.connection-pending-note { margin: -5px 0 0; color: var(--fg-muted); font-size: 12px; }
 .stream-live .status-dot { background: #15803d; animation: pulse 1.3s ease-in-out infinite; }
 .content-area { padding: 24px 28px 40px; }
 .mobile-menu-button, .mobile-nav, .mobile-scrim { display: none; }

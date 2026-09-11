@@ -34,6 +34,7 @@ let relay: Relay = { batteryId: "b_pack_001", state: "CLOSED", changedAt: now(),
 const page = <T>(items: T[]) => ({ items, page: { number: 1, size: items.length || 20, total: items.length, totalPages: items.length ? 1 : 0 } });
 const currentBattery = () => batteries.find((item) => item.id === session?.batteryId) ?? batteries[0];
 const sessionForResponse = () => session ? { ...session, measurementPhase: measurementPhaseFor(session.startedAt, currentBattery().latest?.measuredAt) } : null;
+const connectedBatteryId = () => sessionForResponse()?.measurementPhase === "MEASURING" ? session?.batteryId : null;
 const bad = (status: number, code: string, message = code) => HttpResponse.json({ error: { code, message } }, { status });
 let testFault: string | null = null;
 const hasTestFault = (fault: string) => testFault === fault;
@@ -76,7 +77,7 @@ const adminBatteryDetail = (battery: Battery): AdminBatteryDetail => ({
   ...adminBatteryListItem(battery),
   info: {
     seriesConfig: battery.seriesCount ? `${battery.seriesCount}S · ${(battery.seriesCount * 3.7).toFixed(1)}V` : "—",
-    device: session?.batteryId === battery.id ? { id: "d_demo", label: "진단기 A", status: "ONLINE" } : null,
+    device: session?.batteryId === battery.id ? { id: "d_demo", label: "진단기 A", status: connectedBatteryId() === battery.id ? "ONLINE" : "OFFLINE" } : null,
     adminMemo: battery.adminMemo ?? "",
   },
   opsLogs: [],
@@ -95,12 +96,36 @@ export const handlers = [
   http.patch("/api/settings/preferences", async ({ request }) => HttpResponse.json({ theme: (await request.json() as { theme: "light" | "dark" | "system" }).theme, lang: "ko" })),
   http.get("/api/settings/alerts", () => hasTestFault("alert-settings") ? bad(503, "RUNTIME_NOT_READY") : HttpResponse.json(alertSettings())),
   http.patch("/api/settings/alerts", async ({ request }) => { const body = await request.json() as { channels?: AlertChannels }; if (!body.channels || ["KAKAO", "EMAIL", "SMS", "WEBPUSH"].some((key) => typeof body.channels?.[key as keyof AlertChannels] !== "boolean")) return bad(422, "VALIDATION_FAILED"); alertChannels = { ...body.channels }; return HttpResponse.json(alertSettings()); }),
-  http.get("/api/batteries", () => HttpResponse.json(page(batteries.map((item) => ({ ...item, isConnected: item.id === session?.batteryId }))))),
+  http.get("/api/batteries", () => HttpResponse.json(page(batteries.map((item) => ({ ...item, isConnected: item.id === connectedBatteryId() }))))),
   http.post("/api/batteries", async ({ request }) => { const body = await request.json() as Partial<Battery>; const created: Battery = { id: `b_${randomId()}`, label: body.label ?? "NEW", chemistry: body.chemistry ?? "LI_ION", seriesCount: body.seriesCount ?? null, maker: body.maker ?? null, model: body.model ?? null, targetMode: body.targetMode ?? 1, capacityWh: body.capacityWh ?? null, ratedOutputCurrentA: body.ratedOutputCurrentA ?? null, opsStatus: "NORMAL", latest: null, health: null, diagnosisCapability: { executionAllowed: false, reasonCode: body.targetMode === 2 ? "SAFETY_PROFILE_NOT_READY" : "MODE_NOT_SUPPORTED" } }; batteries.push(created); return HttpResponse.json(created, { status: 201 }); }),
   http.patch("/api/batteries/:id", async ({ params, request }) => { const battery = batteries.find((item) => item.id === params.id); if (!battery) return bad(404, "NOT_FOUND"); Object.assign(battery, await request.json()); return HttpResponse.json(battery); }),
-  http.get("/api/batteries/:id", ({ params }) => { const battery = batteries.find((item) => item.id === params.id); return battery ? HttpResponse.json(battery) : bad(404, "NOT_FOUND"); }),
+  http.get("/api/batteries/:id", ({ params }) => { const battery = batteries.find((item) => item.id === params.id); return battery ? HttpResponse.json({ ...battery, isConnected: battery.id === connectedBatteryId() }) : bad(404, "NOT_FOUND"); }),
   http.get("/api/batteries/:id/sessions", () => HttpResponse.json(page([]))),
-  http.post("/api/sessions", async ({ request }) => { const body = await request.json() as { batteryId?: string }; const battery = batteries.find((item) => item.id === body.batteryId); if (!battery) return bad(404, "NOT_FOUND"); if (battery.opsStatus === "BLOCKED") return bad(409, "BATTERY_BLOCKED"); session = { id: `s_${randomId()}`, batteryId: battery.id, batteryLabel: battery.label, deviceId: "d_demo", mode: battery.targetMode, targetMode: battery.targetMode, status: "ACTIVE", startedAt: now(), measurementPhase: "WAITING_FOR_MEASUREMENT" }; return HttpResponse.json(sessionForResponse(), { status: 201 }); }),
+  http.post("/api/sessions", async ({ request }) => {
+    const body = await request.json() as { batteryId?: string };
+    const battery = batteries.find((item) => item.id === body.batteryId);
+    if (!battery) return bad(404, "NOT_FOUND");
+    if (battery.opsStatus === "BLOCKED") return bad(409, "BATTERY_BLOCKED");
+    if (hasTestFault("session-start-failed") || hasTestFault("session-offline")) return bad(409, "DEVICE_OFFLINE");
+    if (hasTestFault("session-timeout")) return bad(504, "DEVICE_OFFLINE");
+    session = { id: `s_${randomId()}`, batteryId: battery.id, batteryLabel: battery.label, deviceId: "d_demo", mode: battery.targetMode, targetMode: battery.targetMode, status: "ACTIVE", startedAt: now(), measurementPhase: "WAITING_FOR_MEASUREMENT" };
+    return HttpResponse.json(sessionForResponse(), { status: 201 });
+  }),
+  // Test-only sensor injection makes the transition explicit. The default
+  // MSW path never changes a timestamp or claims that the physical device is
+  // connected; tests must opt into a fresh frame before unlocking monitoring.
+  http.post("/api/__test/sensor-frame", async ({ request }) => {
+    const body = await request.json() as { batteryId?: string };
+    if (!session || session.batteryId !== body.batteryId) return bad(409, "NO_ACTIVE_SESSION");
+    const battery = batteries.find((item) => item.id === body.batteryId);
+    if (!battery) return bad(404, "NOT_FOUND");
+    if (!battery.latest) {
+      return bad(409, "DEVICE_OFFLINE");
+    }
+    const startedMs = Date.parse(session.startedAt);
+    battery.latest.measuredAt = new Date(Math.max(Date.now(), startedMs + 1)).toISOString();
+    return HttpResponse.json({ ok: true, measuredAt: battery.latest.measuredAt });
+  }),
   http.get("/api/dashboard", () => {
     if (hasTestFault("dashboard-shape")) return HttpResponse.json({});
     if (!session) return bad(409, "NO_ACTIVE_SESSION");

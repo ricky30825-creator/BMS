@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it } from "vitest";
@@ -28,6 +28,7 @@ describe("app shell connection state", () => {
     renderShell(baseMe);
     expect(screen.getByText("장비 연결 대기")).toBeInTheDocument();
     expect(screen.queryByText("연결됨 · 측정 중")).not.toBeInTheDocument();
+    expect(within(screen.getByRole("navigation", { name: "주 메뉴" })).getByRole("button", { name: /대시보드/ })).toHaveAttribute("aria-disabled", "true");
   });
 
   it("shows measuring only for a session with a post-start sensor frame", () => {

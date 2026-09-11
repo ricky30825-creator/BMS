@@ -10,7 +10,7 @@ import { buildCapacityDiagnosisBody, buildQuickDiagnosisBody, type SocHintLevel 
 import { abortReasonLabel, capabilityLock, gradeLabel, progressPct, statusLabel } from "../api/diagnosisLabels";
 import { dashboardMetricKey, dashboardMetricParam, normalizeBattery, type DashboardMetricKey, type DashboardMetricParam } from "../api/normalize";
 import { useAckAlert, useAckAll, useActiveDiagnosis, useAnomalySummary, useBattery, useBatteries, useCreateBattery, useDashboard, useDiagnosisDetail, useDiagnosisHistory, useDiagnosisStart, useDiagnosisStop, useEvidence, useEvents, useNotices, useRelay, useRelayHistory, useRelayMutation, useStartSession, useTrends, useUpdateBattery, useAlertSummary, useAlerts } from "../api/hooks";
-import { measurementPhaseLabel } from "../measurementState";
+import { isMeasuringSession, measurementPhaseLabel } from "../measurementState";
 import { useRealtime, type RealtimeState } from "../realtime/useRealtime";
 import type { Alert, AlertChannels, Battery, BatteryEvent, Dashboard, Grade, MeResponse, NoticeCategory, Relay, TrendResponse, VoiceAlertSettings } from "../types";
 import { Button, Card, EmptyState, Field, MetricStatusBadge, Modal, PageHeading, Pagination, StatusBadge, TableState, Tabs, formatDateTime, formatTime, relativeTime, score100 } from "../components/ui";
@@ -18,7 +18,7 @@ import { Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis, BarChart, 
 
 function errorMessage(error: unknown): string {
   if (!(error instanceof ApiError)) return "잠시 후 다시 시도하세요.";
-  const messages: Record<string, string> = { NO_ACTIVE_SESSION: "활성 측정 세션이 없습니다. 배터리를 연결하세요.", BATTERY_BLOCKED: "운영 상태가 BLOCKED인 배터리는 연결할 수 없습니다.", DEVICE_OFFLINE: "진단기가 오프라인입니다.", REAUTH_REQUIRED: "비밀번호 재인증에 실패했습니다.", REASON_REQUIRED: "사유를 입력하세요.", INTERLOCK_LOCKED: "Fail-Safe 인터락이 유지 중이라 복구할 수 없습니다.", SAFETY_PROFILE_NOT_READY: "안전 프로필이 준비되지 않아 실행할 수 없습니다.", MODE_NOT_SUPPORTED: "모드 2 보조배터리에서만 사용할 수 있습니다.", VERSION_CONFLICT: "다른 관리자가 먼저 변경했습니다. 다시 불러오세요.", RUNTIME_NOT_READY: "현재 서버 런타임이 준비되지 않았습니다.", ACK_REQUIRED: "안전 안내를 확인해야 합니다.", FULL_CHARGE_REQUIRED: "완충 확인 후 정밀 진단을 시작할 수 있습니다.", CAPACITY_REQUIRED: "정격 용량이 등록된 자산만 정밀 진단을 실행할 수 있습니다.", CAPACITY_NOT_REGISTERED: "정격 용량이 등록되지 않아 정밀 진단을 실행할 수 없습니다. 자산 정보에 용량을 입력하세요.", RELAY_CUT: "릴레이가 차단되어 있어 진단을 시작할 수 없습니다. 릴레이를 복구한 뒤 다시 시도하세요.", VALIDATION_FAILED: "입력값을 확인하세요." };
+  const messages: Record<string, string> = { NO_ACTIVE_SESSION: "활성 측정 세션이 없습니다. 배터리를 연결하세요.", BATTERY_BLOCKED: "운영 상태가 BLOCKED인 배터리는 연결할 수 없습니다.", DEVICE_OFFLINE: "진단기가 오프라인이거나 응답하지 않습니다. 연결 상태를 확인하고 다시 시도하세요.", REAUTH_REQUIRED: "비밀번호 재인증에 실패했습니다.", REASON_REQUIRED: "사유를 입력하세요.", INTERLOCK_LOCKED: "Fail-Safe 인터락이 유지 중이라 복구할 수 없습니다.", SAFETY_PROFILE_NOT_READY: "안전 프로필이 준비되지 않아 실행할 수 없습니다.", MODE_NOT_SUPPORTED: "모드 2 보조배터리에서만 사용할 수 있습니다.", VERSION_CONFLICT: "다른 관리자가 먼저 변경했습니다. 다시 불러오세요.", RUNTIME_NOT_READY: "현재 서버 런타임이 준비되지 않았습니다.", ACK_REQUIRED: "안전 안내를 확인해야 합니다.", FULL_CHARGE_REQUIRED: "완충 확인 후 정밀 진단을 시작할 수 있습니다.", CAPACITY_REQUIRED: "정격 용량이 등록된 자산만 정밀 진단을 실행할 수 있습니다.", CAPACITY_NOT_REGISTERED: "정격 용량이 등록되지 않아 정밀 진단을 실행할 수 없습니다. 자산 정보에 용량을 입력하세요.", RELAY_CUT: "릴레이가 차단되어 있어 진단을 시작할 수 없습니다. 릴레이를 복구한 뒤 다시 시도하세요.", VALIDATION_FAILED: "입력값을 확인하세요." };
   return messages[error.code] ?? "요청을 처리하지 못했습니다.";
 }
 
@@ -52,8 +52,8 @@ function MeasuringElapsed({ startedAt }: { startedAt: string | null | undefined 
 // 센서가 아직 이 연결에서 값을 보내오지 않았으면 "장비 연결 대기", 이 연결이 시작된
 // 뒤로 값이 도착했으면 "측정 중" — latest 값은 이전 세션의 잔여값일 수 있어
 // 세션 시작 시각과 비교해야 한다.
-function isMeasuringNow(battery: Battery, activeSession: MeResponse["activeSession"]): boolean {
-  return Boolean(battery.isConnected && activeSession?.batteryId === battery.id && activeSession.measurementPhase === "MEASURING");
+export function isMeasuringNow(battery: Battery, activeSession: MeResponse["activeSession"]): boolean {
+  return Boolean(activeSession?.batteryId === battery.id && isMeasuringSession(activeSession));
 }
 
 export function DashboardPage({ realtime, me }: { realtime: { state: RealtimeState; dashboard: Dashboard | null; lastAt: string | null; refetchMetric: (metric: DashboardMetricParam) => Promise<void> }; me: MeResponse }) {
@@ -126,14 +126,34 @@ export function BatteryPage({ me }: { me: MeResponse }) {
     const items = list.data?.items.filter((battery) => mode === "all" || String(battery.targetMode) === mode) ?? [];
     return [...items].sort((a, b) => sort === "score" ? (b.latest?.score ?? -1) - (a.latest?.score ?? -1) : sort === "soc" ? (a.latest?.socPct ?? 101) - (b.latest?.socPct ?? 101) : String(b.latest?.measuredAt).localeCompare(String(a.latest?.measuredAt)));
   }, [list.data, mode, sort]);
-  const doConnect = async () => { if (!connect) return; try { await start.mutateAsync(connect.id); setConnect(null); navigate("/dashboard"); } catch (error) { setMessage(errorMessage(error)); } };
+  const openConnect = (battery: Battery) => { start.reset(); setMessage(""); setConnect(battery); };
+  const doConnect = async () => {
+    if (!connect) return;
+    const target = connect;
+    try {
+      const started = await start.mutateAsync(target.id);
+      setConnect(null);
+      if (isMeasuringSession(started)) navigate("/dashboard");
+      else setMessage(`${target.label} 연결 요청을 보냈습니다. 장비의 첫 센서 프레임을 기다리는 중입니다. 응답이 없으면 다시 시도하세요.`);
+    } catch (error) { setMessage(errorMessage(error)); }
+  };
   const openCreate = () => { setSelected(undefined); setModal("create"); };
   return <div className="page-stack battery-page"><PageHeading eyebrow="ASSET MANAGEMENT" title="배터리 관리" description="저장된 배터리 선택 · 새 배터리 등록" actions={<Button variant="primary" onClick={openCreate}>+ 새 배터리 등록</Button>} />
     {list.error ? <Card><TableState state="error" message="배터리 데이터를 불러오지 못했습니다." /></Card> : !list.isPending && !list.data?.items.length ? <Card><EmptyState title="등록된 배터리가 없습니다." description="첫 배터리를 등록하면 측정을 시작할 수 있습니다." action={<Button variant="primary" onClick={openCreate}>배터리 등록</Button>} /></Card> : <>
       <div className="battery-register-card" role="button" tabIndex={0} onClick={openCreate} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); openCreate(); } }}><span className="register-icon">+</span><span><strong>새 배터리 등록</strong><small>이름·종류·측정 모드·직렬 셀 수 입력 → battery_id 발급</small></span></div>
       <div className="battery-list-heading"><strong>저장된 배터리 <span>{list.data?.items.length ?? 0}</span></strong><div className="toolbar"><div className="segmented"><button className={mode === "all" ? "active" : ""} onClick={() => setMode("all")}>전체</button><button className={mode === "1" ? "active" : ""} onClick={() => setMode("1")}>모드 1</button><button className={mode === "2" ? "active" : ""} onClick={() => setMode("2")}>모드 2</button></div><select value={sort} onChange={(event) => setSort(event.target.value)} aria-label="배터리 정렬"><option value="recent">최근 측정순</option><option value="score">이상점수 높은순</option><option value="soc">SOC 낮은순</option></select></div></div>
-      <div className="battery-grid">{list.isPending ? <TableState state="loading" /> : batteries.map((battery) => { const measuring = isMeasuringNow(battery, me.activeSession); const phaseLabel = measurementPhaseLabel(measuring ? "MEASURING" : "WAITING_FOR_MEASUREMENT"); return <Card className={`battery-card ${battery.isConnected ? "connected" : ""}`} key={battery.id}><div className="battery-card-head"><div className="battery-icon"><BatteryCharging size={22} /></div><div><h2>{battery.label}</h2><p>{battery.maker ? `${battery.maker} · ` : ""}{battery.model || (battery.targetMode === 1 ? "리튬이온" : "보조배터리")} · {battery.targetMode === 1 ? "모드 1" : "모드 2"}</p></div>{battery.isConnected ? <span className={`connect-phase ${measuring ? "measuring" : "connecting"}`}><span className="status-dot" />{phaseLabel}</span> : battery.latest?.grade != null && battery.latest?.score != null ? <StatusBadge grade={battery.latest.grade} score={battery.latest.score} /> : <span className="plain-status">측정 없음</span>}</div><div className="battery-values"><span><small>{battery.targetMode === 2 ? "상대 SOC" : "SOC"}</small><strong className="mono">{metricValue(battery.latest?.socPct, 0)}{battery.latest?.socPct == null ? "" : " %"}</strong></span><span><small>최근 측정</small><strong>{battery.latest?.measuredAt ? relativeTime(battery.latest.measuredAt) : "측정 없음"}</strong></span><span><small>이상점수</small><strong className={`mono ${battery.latest?.grade?.toLowerCase() ?? ""}`}>{score100(battery.latest?.score)}</strong></span></div><div className="battery-card-foot"><span className="battery-mode-chip">{battery.targetMode === 2 ? "모드 2 · 보조배터리" : "모드 1 · 외부 셀"}</span><div><Button variant="ghost" onClick={() => { setSelected(battery); setModal("edit"); }}>수정</Button><Button variant="primary" onClick={() => setConnect(battery)} disabled={battery.opsStatus === "BLOCKED"}>{battery.opsStatus === "BLOCKED" ? "연결 잠김" : battery.isConnected ? (measuring ? "측정 중" : "장비 연결 대기") : "연결하고 측정"}</Button></div></div></Card>; })}</div>
-    </>}{message && <div className="toast" role="alert">{message}</div>}{modal && <BatteryForm initial={modal === "edit" ? selected : undefined} onClose={() => setModal(null)} />}{connect && <Modal title={`${connect.label}을(를) 측정할까요?`} description="연결하면 기존 측정 세션은 서버에서 자동 종료됩니다." onClose={() => setConnect(null)}><div className="confirm-panel"><div className="confirm-icon"><BatteryCharging size={22} /></div><p>한 번에 하나의 배터리만 연결됩니다. 기존 연결은 해제되고 이 배터리로 새 세션이 시작됩니다.</p></div>{start.error && <p className="form-error">{errorMessage(start.error)}</p>}<div className="modal-actions"><Button variant="secondary" onClick={() => setConnect(null)}>취소</Button><Button variant="primary" loading={start.isPending} onClick={() => void doConnect()}>연결하고 측정</Button></div></Modal>}</div>;
+      <div className="battery-grid">{list.isPending ? <TableState state="loading" /> : batteries.map((battery) => {
+        const measuring = isMeasuringNow(battery, me.activeSession);
+        const waiting = me.activeSession?.batteryId === battery.id && !measuring;
+        const phaseLabel = measurementPhaseLabel(measuring ? "MEASURING" : "WAITING_FOR_MEASUREMENT");
+        return <Card className={`battery-card ${measuring ? "connected" : ""} ${waiting ? "waiting" : ""}`} key={battery.id}>
+          <div className="battery-card-head"><div className="battery-icon"><BatteryCharging size={22} /></div><div><h2>{battery.label}</h2><p>{battery.maker ? `${battery.maker} · ` : ""}{battery.model || (battery.targetMode === 1 ? "리튬이온" : "보조배터리")} · {battery.targetMode === 1 ? "모드 1" : "모드 2"}</p></div>{waiting || measuring ? <span className={`connect-phase ${measuring ? "measuring" : "connecting"}`}><span className="status-dot" />{phaseLabel}</span> : battery.latest?.grade != null && battery.latest?.score != null ? <StatusBadge grade={battery.latest.grade} score={battery.latest.score} /> : <span className="plain-status">측정 없음</span>}</div>
+          {waiting && <p className="connection-pending-note">장비 응답 대기 중입니다. 첫 센서 프레임이 도착하면 측정이 시작됩니다.</p>}
+          <div className="battery-values"><span><small>{battery.targetMode === 2 ? "상대 SOC" : "SOC"}</small><strong className="mono">{metricValue(battery.latest?.socPct, 0)}{battery.latest?.socPct == null ? "" : " %"}</strong></span><span><small>최근 측정</small><strong>{battery.latest?.measuredAt ? relativeTime(battery.latest.measuredAt) : "측정 없음"}</strong></span><span><small>이상점수</small><strong className={`mono ${battery.latest?.grade?.toLowerCase() ?? ""}`}>{score100(battery.latest?.score)}</strong></span></div>
+          <div className="battery-card-foot"><span className="battery-mode-chip">{battery.targetMode === 2 ? "모드 2 · 보조배터리" : "모드 1 · 외부 셀"}</span><div><Button variant="ghost" onClick={() => { setSelected(battery); setModal("edit"); }}>수정</Button><Button variant="primary" onClick={() => openConnect(battery)} disabled={battery.opsStatus === "BLOCKED"}>{battery.opsStatus === "BLOCKED" ? "연결 잠김" : measuring ? "측정 중" : waiting ? "응답 대기 · 다시 시도" : "연결하고 측정"}</Button></div></div>
+        </Card>;
+      })}</div>
+    </>}{message && <div className="toast" role="alert">{message}</div>}{modal && <BatteryForm initial={modal === "edit" ? selected : undefined} onClose={() => setModal(null)} />}{connect && (() => { const waiting = me.activeSession?.batteryId === connect.id && !isMeasuringSession(me.activeSession); const actionLabel = waiting ? "다시 연결 요청" : "연결하고 측정"; return <Modal title={`${connect.label}을(를) 측정할까요?`} description={waiting ? "현재 세션이 장비 응답을 기다리고 있습니다. 다시 요청하면 기존 대기 세션을 종료하고 재시도합니다." : "연결하면 기존 측정 세션은 서버에서 자동 종료됩니다."} onClose={() => setConnect(null)}><div className="confirm-panel"><div className="confirm-icon"><BatteryCharging size={22} /></div><p>한 번에 하나의 배터리만 연결됩니다. 기존 연결은 해제되고 이 배터리로 새 세션이 시작됩니다.</p></div>{start.error && <p className="form-error">{errorMessage(start.error)}</p>}<div className="modal-actions"><Button variant="secondary" onClick={() => setConnect(null)}>취소</Button><Button variant="primary" loading={start.isPending} onClick={() => void doConnect()}>{actionLabel}</Button></div></Modal>; })()}</div>;
 }
 
 export function BatteryDetailPage({ id }: { id: string }) {

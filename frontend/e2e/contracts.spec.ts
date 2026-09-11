@@ -14,7 +14,20 @@ async function signIn(page: Page, email: string) {
   }
 }
 
-async function connectBattery(page: Page, label: string) {
+async function markSensorFrame(page: Page, batteryId: string) {
+  await page.evaluate(async (id) => {
+    const response = await fetch("/api/__test/sensor-frame", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ batteryId: id }) });
+    if (!response.ok) throw new Error("failed to inject a test sensor frame");
+    const modulePath = "/src/queryClient.ts";
+    const { queryClient } = await import(modulePath);
+    await Promise.all([
+      queryClient.refetchQueries({ queryKey: ["me"] }),
+      queryClient.refetchQueries({ queryKey: ["batteries"] }),
+    ]);
+  }, batteryId);
+}
+
+async function connectBattery(page: Page, label: string, measuring = true) {
   const card = page.locator("section.battery-card").filter({ hasText: label });
   await expect(card).toBeVisible();
   await card.getByRole("button", { name: "연결하고 측정" }).click();
@@ -22,6 +35,13 @@ async function connectBattery(page: Page, label: string) {
   const dialog = page.getByRole("dialog", { name: `${label}을(를) 측정할까요?` });
   await expect(dialog).toBeVisible();
   await dialog.getByRole("button", { name: "연결하고 측정" }).click();
+  await expect(page).toHaveURL(/\/battery$/);
+  if (!measuring) return;
+  const batteryId = ({ "PACK-001": "b_pack_001", "PACK-002": "b_pack_002", "PACK-003": "b_pack_003", "PACK-004": "b_pack_004" } as Record<string, string>)[label];
+  if (!batteryId) throw new Error(`no test battery id for ${label}`);
+  await markSensorFrame(page, batteryId);
+  await expect(page.locator(".connection-pill")).toHaveText("연결됨 · 측정 중");
+  await page.locator("aside").getByRole("button", { name: /대시보드/ }).click();
   await expect(page).toHaveURL(/\/dashboard$/);
 }
 
@@ -35,17 +55,17 @@ test.describe("CellGuard contract flows (MSW)", () => {
     await expect(page.getByRole("status")).toHaveText("먼저 배터리를 연결하면 이 화면을 사용할 수 있습니다.");
   });
 
-  test("keeps the default F21 safety profile locked", async ({ page }) => {
+  test("requires explicit F21 safety acknowledgement before running", async ({ page }) => {
     await signIn(page, "hong@cellguard.io");
     await connectBattery(page, "PACK-002");
 
     await page.locator("aside").getByRole("button", { name: "보조배터리 진단" }).click();
     await expect(page).toHaveURL(/\/powerbankDiag$/);
     await expect(page.getByRole("heading", { name: "보조배터리 진단" })).toBeVisible();
-    await expect(page.getByText("SAFETY_PROFILE_NOT_READY", { exact: true })).toBeVisible();
+    await expect(page.getByText("SAFETY_PROFILE_NOT_READY", { exact: true })).toHaveCount(0);
     await expect(page.getByRole("button", { name: "빠른 진단 시작" })).toBeDisabled();
     await expect(page.getByRole("button", { name: "정밀 용량 테스트 시작" })).toBeDisabled();
-    await expect(page.getByLabel("진단 중 이상 알림은 억제되지만 Fail-Safe 자동 차단은 항상 우선함을 확인했습니다.")).toBeDisabled();
+    await expect(page.getByLabel("진단 중 이상 알림은 억제되지만 Fail-Safe 자동 차단은 항상 우선함을 확인했습니다.")).toBeEnabled();
   });
 
   test("enters the MSW-only capability=true flow and sends the diagnosis requests", async ({ page }) => {

@@ -8,6 +8,7 @@ import { useMe } from "./api/hooks";
 import { useRealtime } from "./realtime/useRealtime";
 import type { MeResponse } from "./types";
 import { queryClient } from "./queryClient";
+import { isMeasuringSession } from "./measurementState";
 
 const AdminAuditPage = lazy(() => import("./pages/AdminPages").then(({ AdminAuditPage: Page }) => ({ default: Page })));
 const AdminBatteryPage = lazy(() => import("./pages/AdminPages").then(({ AdminBatteryPage: Page }) => ({ default: Page })));
@@ -93,16 +94,16 @@ function RouteLoading() {
 
 function ActiveSessionRoute({ children }: { children: ReactNode }) {
   const { data: me, refetch } = useMe();
-  const [sessionChecked, setSessionChecked] = useState(Boolean(me?.activeSession));
+  const [sessionChecked, setSessionChecked] = useState(isMeasuringSession(me?.activeSession));
 
   useEffect(() => {
-    if (me?.activeSession) return;
+    if (isMeasuringSession(me?.activeSession)) return;
     let disposed = false;
     void refetch().finally(() => { if (!disposed) setSessionChecked(true); });
     return () => { disposed = true; };
-  }, [refetch]);
+  }, [me?.activeSession?.id, me?.activeSession?.measurementPhase, refetch]);
 
-  if (me?.activeSession) return children;
+  if (isMeasuringSession(me?.activeSession)) return children;
   if (!sessionChecked) return <div className="boot-screen"><div className="boot-mark">⌁</div><p>측정 세션을 확인하는 중입니다.</p></div>;
   return <Navigate to="/battery" replace />;
 }
