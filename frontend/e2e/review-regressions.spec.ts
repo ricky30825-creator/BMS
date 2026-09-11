@@ -34,6 +34,8 @@ test.describe("frontend review regressions", () => {
     await signIn(page, "hong@cellguard.io");
     await connectBattery(page, "PACK-003");
     await expect(page.locator(".topbar-subtitle")).toHaveText("PACK-003 · 세션 진행 중");
+    await expect(page.locator(".connection-pill")).toHaveText("장비 연결 대기");
+    await expect(page.locator(".connection-pill")).not.toContainText("측정 중");
     await expect(page.getByRole("heading", { name: "아직 측정 데이터가 없습니다." })).toBeVisible();
     await page.getByRole("button", { name: "알림 열기" }).click();
     await expect(page.locator(".notification-popover")).toContainText("새 알림이 없습니다.");
