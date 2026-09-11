@@ -21,6 +21,7 @@ import { asyncRoute } from "./asyncRoute.js";
 import { createLoggingDeviceCommandPort } from "./device/logging.js";
 import { diagnosisJson as buildDiagnosisJson } from "./diagnosis/routes.js";
 import { evaluateFailsafe } from "./failsafeRunner.js";
+import { measurementPhaseFor } from "./measurementState.js";
 import type { FailsafeSample, FailsafeThresholds, FailsafeVerdict, HardwareProfile } from "./failsafe.js";
 import {
   abortDiagnosis,
@@ -191,7 +192,13 @@ const demoNotices = [
 
 async function sessionJson(session: NonNullable<Awaited<ReturnType<typeof activeSession>>>) {
   const battery = await batteryById(session.batteryId);
-  return { ...session, batteryLabel: battery?.label ?? session.batteryId, mode: session.targetMode, targetMode: session.targetMode };
+  return {
+    ...session,
+    batteryLabel: battery?.label ?? session.batteryId,
+    mode: session.targetMode,
+    targetMode: session.targetMode,
+    measurementPhase: measurementPhaseFor(session.startedAt, battery?.latest.measuredAt),
+  };
 }
 
 async function dashboardMetrics(battery: NonNullable<Awaited<ReturnType<typeof batteryById>>>) {

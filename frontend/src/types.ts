@@ -5,6 +5,7 @@ export type RelayState = "CLOSED" | "OPEN";
 export type Grade = "NORMAL" | "CAUTION" | "WARNING" | "DANGER";
 export type MetricStatus = "OK" | "WARN" | "CRIT" | null;
 export type Mode = 1 | 2;
+export type MeasurementPhase = "WAITING_FOR_MEASUREMENT" | "MEASURING";
 
 export type Page = { number: number; size: number; total: number; totalPages: number };
 
@@ -28,6 +29,7 @@ export type ActiveSession = {
   targetMode?: Mode;
   status: "ACTIVE" | "ENDED";
   startedAt: string;
+  measurementPhase: MeasurementPhase;
 };
 
 export type Preferences = { theme: "light" | "dark" | "system"; lang: "ko" | "en" };

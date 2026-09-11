@@ -1,4 +1,4 @@
-import type { ActiveSession, Battery, BatteryHealth, Dashboard, DashboardMetrics, Grade, LatestMetric, MetricStatus, NoticeSummary, Relay } from "../types";
+import type { ActiveSession, Battery, BatteryHealth, Dashboard, DashboardMetrics, Grade, LatestMetric, MeasurementPhase, MetricStatus, NoticeSummary, Relay } from "../types";
 
 export class ApiShapeError extends Error {
   readonly path: string;
@@ -78,6 +78,10 @@ function isMetricStatus(value: unknown): value is MetricStatus {
 
 function isMode(value: unknown): value is 1 | 2 {
   return value === 1 || value === 2;
+}
+
+function isMeasurementPhase(value: unknown): value is MeasurementPhase {
+  return value === "WAITING_FOR_MEASUREMENT" || value === "MEASURING";
 }
 
 function normalizeLatest(raw: unknown): LatestMetric | null {
@@ -172,6 +176,7 @@ function normalizeSession(raw: unknown): ActiveSession {
   if (status !== "ACTIVE" && status !== "ENDED") throw new ApiShapeError("session.status");
   const mode = value.mode === undefined ? undefined : isMode(value.mode) ? value.mode : (() => { throw new ApiShapeError("session.mode"); })();
   const targetMode = value.targetMode === undefined ? undefined : isMode(value.targetMode) ? value.targetMode : (() => { throw new ApiShapeError("session.targetMode"); })();
+  const measurementPhase = value.measurementPhase === undefined ? "WAITING_FOR_MEASUREMENT" : isMeasurementPhase(value.measurementPhase) ? value.measurementPhase : (() => { throw new ApiShapeError("session.measurementPhase"); })();
   return {
     id: requiredString(value, "id", "session"),
     batteryId: requiredString(value, "batteryId", "session"),
@@ -181,6 +186,7 @@ function normalizeSession(raw: unknown): ActiveSession {
     targetMode,
     status,
     startedAt: requiredString(value, "startedAt", "session"),
+    measurementPhase,
   };
 }
 

@@ -143,7 +143,7 @@ function AppContent() {
   }, [navigate, qc]);
   useEffect(() => subscribeAuthFailure(handleAuthFailure), [handleAuthFailure]);
   useEffect(() => { if (me?.user) authFailureInProgress.current = false; }, [me?.user?.id]);
-  const realtime = useRealtime({ sessionKey: me?.activeSession?.id, enabled: Boolean(me?.activeSession), onAutoCut: (payload) => setAutoCut((payload ?? {}) as Record<string, unknown>), onSessionEnded: () => { void meQuery.refetch(); navigate("/battery"); }, onAuthFailure: handleAuthFailure });
+  const realtime = useRealtime({ sessionKey: me?.activeSession?.id, enabled: Boolean(me?.activeSession), onAutoCut: (payload) => setAutoCut((payload ?? {}) as Record<string, unknown>), onSessionEnded: () => { void meQuery.refetch(); void qc.invalidateQueries({ queryKey: ["batteries"] }); navigate("/battery"); }, onAuthFailure: handleAuthFailure });
   const theme = me?.preferences?.theme ?? "light";
   useEffect(() => { const root = document.documentElement; const systemDark = window.matchMedia?.("(prefers-color-scheme: dark)").matches; root.dataset.theme = theme === "system" ? (systemDark ? "dark" : "light") : theme; }, [theme]);
   useEffect(() => {

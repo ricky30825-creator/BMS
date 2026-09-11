@@ -1,5 +1,6 @@
 import { http, HttpResponse } from "msw";
 import type { AdminBatteryDetail, AdminBatteryListItem, AlertChannels, AlertSettings, Battery, Diagnosis, DiagnosisListItem, Grade, MeResponse, Relay } from "../types";
+import { measurementPhaseFor } from "../measurementState";
 
 const now = () => new Date().toISOString();
 const randomId = () => typeof crypto !== "undefined" && typeof crypto.randomUUID === "function" ? crypto.randomUUID() : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
@@ -11,7 +12,7 @@ export function normalizeAdminInput(value: unknown, maxLength: number, allowEmpt
   return normalized;
 }
 const grade = (score: number): Grade => score < .3 ? "NORMAL" : score < .6 ? "CAUTION" : score < .8 ? "WARNING" : "DANGER";
-const baseMetric = (score: number, temp: number, soc: number | null) => ({ voltageV: 11.9, currentA: -2.4, powerW: -28.56, representativeTempC: temp, representativeTempSource: "CONTACT" as const, tempContact: temp, tempIrSurface: temp - 1.6, socPct: soc, socBasis: "ABSOLUTE_GAUGE" as const, score, grade: grade(score), measuredAt: now() });
+const baseMetric = (score: number, temp: number, soc: number | null) => ({ voltageV: 11.9, currentA: -2.4, powerW: -28.56, representativeTempC: temp, representativeTempSource: "CONTACT" as const, tempContact: temp, tempIrSurface: temp - 1.6, socPct: soc, socBasis: "ABSOLUTE_GAUGE" as const, score, grade: grade(score), measuredAt: "2026-08-06T01:00:00.000Z" });
 const metricStatus = (value: number | null) => value == null ? null : value >= 60 ? "CRIT" : value >= 55 ? "WARN" : "OK";
 const batteries: Battery[] = [
   { id: "b_pack_001", label: "PACK-001", chemistry: "LI_ION", seriesCount: 3, maker: "Samsung SDI", model: "18650", targetMode: 1, capacityWh: null, ratedOutputCurrentA: null, opsStatus: "NORMAL", latest: { ...baseMetric(.18, 31.2, 78) }, health: { source: "BACKEND_BQ27441_AGGREGATE", sohPct: 92, rulCycles: 480, cycleCount: 312, internalResistanceMohm: 18.4 }, diagnosisCapability: { executionAllowed: false, reasonCode: "MODE_NOT_SUPPORTED" } },
@@ -32,6 +33,7 @@ const diagnosisHistory: Record<string, Diagnosis[]> = { b_pack_004: [completedCa
 let relay: Relay = { batteryId: "b_pack_001", state: "CLOSED", changedAt: now(), changedBy: { type: "SYSTEM", systemCode: "SYSTEM" }, interlock: { engaged: false, condition: null, canRestore: true } };
 const page = <T>(items: T[]) => ({ items, page: { number: 1, size: items.length || 20, total: items.length, totalPages: items.length ? 1 : 0 } });
 const currentBattery = () => batteries.find((item) => item.id === session?.batteryId) ?? batteries[0];
+const sessionForResponse = () => session ? { ...session, measurementPhase: measurementPhaseFor(session.startedAt, currentBattery().latest?.measuredAt) } : null;
 const bad = (status: number, code: string, message = code) => HttpResponse.json({ error: { code, message } }, { status });
 let testFault: string | null = null;
 const hasTestFault = (fault: string) => testFault === fault;
@@ -87,7 +89,7 @@ export const handlers = [
   http.post("/api/auth/sign-out", () => { currentUser = null; session = null; return new HttpResponse(null, { status: 204 }); }),
   http.post("/api/account/email-lookup", () => HttpResponse.json({ email: "ho****@cellguard.io" })),
   http.post("/api/auth/forget-password", () => HttpResponse.json({ ok: true })),
-  http.get("/api/me", () => currentUser ? HttpResponse.json({ user: currentUser, activeSession: session, unreadAlertCount: 0, activeAnomalyCount: 2, preferences: { theme: "light", lang: "ko" } }) : bad(401, "UNAUTHENTICATED")),
+  http.get("/api/me", () => currentUser ? HttpResponse.json({ user: currentUser, activeSession: sessionForResponse(), unreadAlertCount: 0, activeAnomalyCount: 2, preferences: { theme: "light", lang: "ko" } }) : bad(401, "UNAUTHENTICATED")),
   http.patch("/api/me", async ({ request }) => { currentUser = { ...currentUser!, ...(await request.json() as object) }; return HttpResponse.json(currentUser); }),
   http.post("/api/me/password", async ({ request }) => { const body = await request.json() as { currentPassword?: string; newPassword?: string }; if (body.currentPassword !== currentPassword) return bad(401, "REAUTH_REQUIRED"); if (!body.newPassword || !/^(?=.*[A-Za-z])(?=.*\d)(?=.*[^A-Za-z\d]).{8,}$/.test(body.newPassword)) return bad(422, "VALIDATION_FAILED"); currentPassword = body.newPassword; return HttpResponse.json({ ok: true }); }),
   http.patch("/api/settings/preferences", async ({ request }) => HttpResponse.json({ theme: (await request.json() as { theme: "light" | "dark" | "system" }).theme, lang: "ko" })),
@@ -98,7 +100,7 @@ export const handlers = [
   http.patch("/api/batteries/:id", async ({ params, request }) => { const battery = batteries.find((item) => item.id === params.id); if (!battery) return bad(404, "NOT_FOUND"); Object.assign(battery, await request.json()); return HttpResponse.json(battery); }),
   http.get("/api/batteries/:id", ({ params }) => { const battery = batteries.find((item) => item.id === params.id); return battery ? HttpResponse.json(battery) : bad(404, "NOT_FOUND"); }),
   http.get("/api/batteries/:id/sessions", () => HttpResponse.json(page([]))),
-  http.post("/api/sessions", async ({ request }) => { const body = await request.json() as { batteryId?: string }; const battery = batteries.find((item) => item.id === body.batteryId); if (!battery) return bad(404, "NOT_FOUND"); if (battery.opsStatus === "BLOCKED") return bad(409, "BATTERY_BLOCKED"); session = { id: `s_${randomId()}`, batteryId: battery.id, batteryLabel: battery.label, deviceId: "d_demo", mode: battery.targetMode, targetMode: battery.targetMode, status: "ACTIVE", startedAt: now() }; return HttpResponse.json(session, { status: 201 }); }),
+  http.post("/api/sessions", async ({ request }) => { const body = await request.json() as { batteryId?: string }; const battery = batteries.find((item) => item.id === body.batteryId); if (!battery) return bad(404, "NOT_FOUND"); if (battery.opsStatus === "BLOCKED") return bad(409, "BATTERY_BLOCKED"); session = { id: `s_${randomId()}`, batteryId: battery.id, batteryLabel: battery.label, deviceId: "d_demo", mode: battery.targetMode, targetMode: battery.targetMode, status: "ACTIVE", startedAt: now(), measurementPhase: "WAITING_FOR_MEASUREMENT" }; return HttpResponse.json(sessionForResponse(), { status: 201 }); }),
   http.get("/api/dashboard", () => {
     if (hasTestFault("dashboard-shape")) return HttpResponse.json({});
     if (!session) return bad(409, "NO_ACTIVE_SESSION");
@@ -119,7 +121,7 @@ export const handlers = [
       tempContact: { value: null, status: null }, tempIrSurface: { value: null, status: null }, representativeTempC: { value: null, source: null, status: null },
       socPct: { value: null, status: null }, socBasis: null, measuredAt: null,
     };
-    return HttpResponse.json({ session, battery, metrics, anomaly: latest ? { score: latest.score, grade: latest.grade, evaluatedAt: latest.measuredAt ?? undefined } : { score: null, grade: null }, relay, notices: [{ id: "n1", category: "MAINTENANCE", title: "7월 정기 서버 점검 (무중단)", summary: "WebSocket 순단이 발생할 수 있습니다.", publishedAt: "2026-07-01T00:00:00.000Z" }], snapshotCursor: "1" });
+    return HttpResponse.json({ session: sessionForResponse(), battery, metrics, anomaly: latest ? { score: latest.score, grade: latest.grade, evaluatedAt: latest.measuredAt ?? undefined } : { score: null, grade: null }, relay, notices: [{ id: "n1", category: "MAINTENANCE", title: "7월 정기 서버 점검 (무중단)", summary: "WebSocket 순단이 발생할 수 있습니다.", publishedAt: "2026-07-01T00:00:00.000Z" }], snapshotCursor: "1" });
   }),
   http.get("/api/relay", () => session ? HttpResponse.json({ ...relay, batteryId: session.batteryId }) : bad(409, "NO_ACTIVE_SESSION")),
   http.get("/api/relay/history", () => HttpResponse.json({ items: [] })),

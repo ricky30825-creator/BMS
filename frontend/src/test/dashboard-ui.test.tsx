@@ -7,7 +7,7 @@ import { DashboardPage } from "../pages/UserPages";
 import type { Dashboard, MeResponse } from "../types";
 import type { DashboardMetricParam } from "../api/normalize";
 
-const session = { id: "ses_1", batteryId: "B1", batteryLabel: "DEMO-PACK-001", status: "ACTIVE" as const, startedAt: "2026-08-25T00:00:00.000Z" };
+const session = { id: "ses_1", batteryId: "B1", batteryLabel: "DEMO-PACK-001", status: "ACTIVE" as const, startedAt: "2026-08-25T00:00:00.000Z", measurementPhase: "MEASURING" as const };
 
 const me: MeResponse = {
   user: { id: "u1", name: "홍길동", email: "hong@example.com", phone: null, role: "USER", status: "ACTIVE" },

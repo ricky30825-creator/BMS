@@ -40,7 +40,7 @@ describe("CellGuard contract adapters", () => {
 
   it("accepts an explicit unmeasured dashboard snapshot without adding a current timestamp", () => {
     const snapshot = normalizeDashboard({
-      session: { id: "s1", batteryId: "b3", batteryLabel: "PACK-003", status: "ACTIVE", startedAt: "2026-08-11T00:00:00Z" },
+      session: { id: "s1", batteryId: "b3", batteryLabel: "PACK-003", status: "ACTIVE", startedAt: "2026-08-11T00:00:00Z", measurementPhase: "WAITING_FOR_MEASUREMENT" },
       battery: { id: "b3", label: "PACK-003", targetMode: 1, chemistry: "LI_ION", seriesCount: 3, maker: null, model: null, capacityWh: null, ratedOutputCurrentA: null, opsStatus: "NORMAL", latest: null, health: null },
       metrics: { voltageV: { value: null, status: null }, currentA: { value: null, status: null }, powerW: { value: null, status: null }, tempContact: { value: null, status: null }, tempIrSurface: { value: null, status: null }, representativeTempC: { value: null, source: null, status: null }, socPct: { value: null, status: null }, socBasis: null, measuredAt: null },
       anomaly: { score: null, grade: null },
@@ -53,6 +53,6 @@ describe("CellGuard contract adapters", () => {
 
   it("rejects a dashboard response with missing required fields", () => {
     expect(() => normalizeDashboard({})).toThrow(ApiShapeError);
-    expect(() => normalizeDashboard({ session: { id: "s1", batteryId: "b1", batteryLabel: "PACK-001", status: "ACTIVE", startedAt: "2026-08-11T00:00:00Z" } })).toThrow(/battery/);
+    expect(() => normalizeDashboard({ session: { id: "s1", batteryId: "b1", batteryLabel: "PACK-001", status: "ACTIVE", startedAt: "2026-08-11T00:00:00Z", measurementPhase: "WAITING_FOR_MEASUREMENT" } })).toThrow(/battery/);
   });
 });

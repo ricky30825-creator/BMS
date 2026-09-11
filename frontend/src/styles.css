@@ -220,6 +220,7 @@ h3 { font-size: 14px; }
 .connection-dot, .status-dot { width: 7px; height: 7px; display: inline-block; flex: 0 0 auto; border-radius: 50%; background: var(--border-strong); }
 .connection-dot.online, .status-dot.online { background: #15803d; }
 .connection-dot.offline { background: #64748b; }
+.connection-dot.waiting { background: #d97706; animation: pulse 1.3s ease-in-out infinite; }
 .connect-phase { display: inline-flex; align-items: center; gap: 6px; padding: 3px 9px; border-radius: 999px; font-size: 11px; font-weight: 800; background: var(--surface-sunken); color: var(--fg-muted); }
 .connect-phase.connecting .status-dot { animation: pulse 1.3s ease-in-out infinite; }
 .connect-phase.measuring { background: var(--grade-normal-bg); color: #15803d; }

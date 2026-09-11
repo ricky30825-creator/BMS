@@ -192,6 +192,7 @@ v3에 흩어져 있던 표시 로직은 아래처럼 하나의 4등급 규칙으
 | 측정 모드 | `1`(외부 셀) `2`(보조배터리) (정수) `[PLAN]` — 2026-07-27 3모드 → 2모드 축소, 구 모드 3이 신 모드 2 |
 | 배터리 종류 | `LI_ION` `LI_PO` `[v3: newChem='li_ion']` |
 | 세션 상태 | `ACTIVE` `COMPLETED` `ABORTED` `[제안]` |
+| 측정 단계 | `WAITING_FOR_MEASUREMENT` `MEASURING` `[제안]` — 세션 상태와 별개로, 세션 시작 이후 센서 프레임 수신 여부를 나타낸다 |
 | 이벤트 심각도 | `NORMAL` `CAUTION` `WARNING` `DANGER` `CUT`(차단) `[v3: evtChips]` |
 | 알림 채널 | `KAKAO` `EMAIL` `SMS` `WEBPUSH` `INAPP` `[v3]` `[REQ-WEB-065]` |
 | 공지 카테고리 | `IMPORTANT`(중요) `MAINTENANCE`(점검) `FEATURE`(기능) `INFO`(안내) `[v3]` |
@@ -442,7 +443,8 @@ const locked = gated && r !== 'battery';
     "batteryLabel": "PACK-001",
     "deviceId": "d_01H...",
     "mode": 1,
-    "startedAt": "2026-07-22T05:12:00.000Z"
+    "startedAt": "2026-07-22T05:12:00.000Z",
+    "measurementPhase": "MEASURING"
   },
   "unreadAlertCount": 2,
   "activeAnomalyCount": 9,
@@ -451,6 +453,7 @@ const locked = gated && r !== 'battery';
 ```
 
 - `activeSession`이 `null`이면 프론트는 **§3.1 게이트 모드**로 진입한다.
+- `activeSession.measurementPhase`는 서버가 `battery.latest.measuredAt`와 `startedAt`을 비교해 계산한다. `measuredAt`이 세션 시작 시각보다 **엄격히 이후**인 센서 프레임이 아직 없으면 `WAITING_FOR_MEASUREMENT`(장비 연결 대기), 그런 프레임이 있으면 `MEASURING`(연결됨 · 측정 중)이다. 활성 세션 생성 자체나 이전 세션의 측정값은 측정 증거가 아니다.
 - `unreadAlertCount` → 사이드바 `알림 센터` 배지 `[v3: badge '2']`
 - `activeAnomalyCount` → 사이드바 `이상 탐지` 배지 `[v3: badge '9']`
 
@@ -675,9 +678,12 @@ v3 테이블 컬럼: `세션 ID · 기간 · 최고 이상점수 · 상태 · �
   "id": "s_01H...", "label": "SES-2045",
   "batteryId": "b_01H...", "batteryLabel": "PACK-001",
   "deviceId": "d_01H...",
-  "mode": 1, "status": "ACTIVE", "startedAt": "..."
+  "mode": 1, "status": "ACTIVE", "startedAt": "...",
+  "measurementPhase": "WAITING_FOR_MEASUREMENT"
 }
 ```
+
+`measurementPhase`는 활성 세션 생성만으로 `MEASURING`이 되지 않는다. 서버는 장비 ACK를 추정하지 않고, 해당 세션의 `startedAt` 이후에 저장된 센서 측정 시각이 있을 때만 `MEASURING`으로 바꾼다.
 
 - 대상 배터리의 진단기가 오프라인이면 `409 DEVICE_OFFLINE`.
 - 대상 배터리의 운영 상태가 `BLOCKED`이면 `409 BATTERY_BLOCKED` (§4.12).
@@ -710,7 +716,7 @@ WebSocket 연결 **전에** 화면을 채우기 위한 1회 조회. 이후 갱�
 
 ```json
 {
-  "session": { "id": "s_01H...", "batteryId": "b_01H...", "batteryLabel": "PACK-001", "mode": 1, "startedAt": "..." },
+  "session": { "id": "s_01H...", "batteryId": "b_01H...", "batteryLabel": "PACK-001", "mode": 1, "startedAt": "...", "measurementPhase": "MEASURING" },
   "metrics": {
     "voltageV":     { "value": 11.9, "status": "OK" },
     "currentA":     { "value": 2.4,  "status": "OK" },

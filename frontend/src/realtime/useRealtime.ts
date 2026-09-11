@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { QueryClient, useQueryClient } from "@tanstack/react-query";
 import { api, apiBaseUrl, demoAuthToken } from "../api/client";
 import { normalizeDashboard, normalizeDashboardAnomaly, normalizeDashboardMetrics, normalizeRelay, type DashboardMetricParam } from "../api/normalize";
+import { measurementPhaseFor } from "../measurementState";
 import type { Alert, BatteryEvent, Dashboard, Diagnosis, Grade, MeResponse, Relay, WsEnvelope } from "../types";
 
 export type RealtimeState = "idle" | "loading" | "connecting" | "live" | "reconnecting" | "offline" | "expired" | "resyncing";
@@ -261,8 +262,19 @@ export function useRealtime({ enabled, sessionKey, onAutoCut, onSessionEnded, on
           if (envelope.type === "metrics.tick") {
             try {
               const metrics = normalizeDashboardMetrics(envelope.payload);
-              setDashboard((current) => current ? { ...current, metrics } : current);
+              setDashboard((current) => {
+                if (!current) return current;
+                const measurementPhase = measurementPhaseFor(current.session.startedAt, metrics.measuredAt);
+                return { ...current, metrics, session: measurementPhase === "MEASURING" ? { ...current.session, measurementPhase } : current.session };
+              });
               updateDashboardCache(queryClient, (current) => ({ ...current, metrics }));
+              const dashboard = queryClient.getQueryData<Dashboard>(["dashboard"]);
+              if (dashboard && measurementPhaseFor(dashboard.session.startedAt, metrics.measuredAt) === "MEASURING") {
+                queryClient.setQueryData<Dashboard>(["dashboard"], { ...dashboard, session: { ...dashboard.session, measurementPhase: "MEASURING" } });
+                queryClient.setQueryData<MeResponse>(["me"], (current) => current?.activeSession?.id === dashboard.session.id
+                  ? { ...current, activeSession: { ...current.activeSession, measurementPhase: "MEASURING" } }
+                  : current);
+              }
             } catch {
               // Ignore malformed live frames and retain the last known snapshot.
             }
