@@ -27,7 +27,7 @@
 ## Task 3 — PostgreSQL Outbox 원자성
 
 - 현재 상태: `IN_PROGRESS`
-- 담당 에이전트: 미배정
+- 담당 에이전트: `/root/task3_postgres_outbox`
 - 기준 커밋: `afb088f`
 - 결과 커밋: 미정
 - 부모 리뷰 결과: 대기
