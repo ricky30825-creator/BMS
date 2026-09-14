@@ -15,9 +15,9 @@
 
 ## Task 2 — AI Anomaly Consumer
 
-- 현재 상태: `PENDING`
+- 현재 상태: `IN_PROGRESS`
 - 담당 에이전트: 미배정
-- 기준 커밋: 미정
+- 기준 커밋: `2ac2daf`
 - 결과 커밋: 미정
 - 부모 리뷰 결과: 대기
 - 실행한 테스트와 결과: 대기
