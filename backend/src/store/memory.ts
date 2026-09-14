@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 
 import type { CellGuardStore, CreateBatteryInput, IdempotencyResult, UpdateBatteryInput } from "./contract.js";
 import { CSV_HEADER, INPUT_LIMITS, csvRow } from "./types.js";
-import type { DemoAudit, DemoBattery, DemoDiagnosis, DemoRelay, DemoSession, DemoStatus, DemoUser, DiagnosisProgress, OpsStatus } from "./types.js";
+import type { AnomalyScoreRecord, DemoAudit, DemoBattery, DemoDiagnosis, DemoRelay, DemoSession, DemoStatus, DemoUser, DiagnosisProgress, OpsStatus } from "./types.js";
 import { quickPhases, totalDurationMs } from "../diagnosis/phases.js";
 
 export function createMemoryStore(): CellGuardStore & { demoUsers: DemoUser[] } {
@@ -399,6 +399,11 @@ export function createMemoryStore(): CellGuardStore & { demoUsers: DemoUser[] } 
     async activeSession(ownerId) { return findActiveSession(ownerId); },
     async sessionById(id) { return findSessionById(id); },
     async sessionsForBattery(batteryId) { return listSessionsForBattery(batteryId); },
+    // The memory provider intentionally has no inferred-result history. Its
+    // static battery.latest score remains the existing demo fixture; exposing
+    // it as a fabricated anomaly row would blur the demo/production boundary.
+    async latestAnomaly(_batteryId): Promise<AnomalyScoreRecord | null> { return null; },
+    async anomalyScoresForBattery(_batteryId, _from, _to): Promise<AnomalyScoreRecord[]> { return []; },
     async activeDiagnosis(batteryId) { return findActiveDiagnosis(batteryId); },
     async diagnosisById(id) { return findDiagnosisById(id); },
     async diagnosesForBattery(batteryId) { return listDiagnosesForBattery(batteryId); },

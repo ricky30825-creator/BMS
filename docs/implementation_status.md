@@ -33,6 +33,16 @@ frame을 PostgreSQL transaction으로 적재한다. 활성 세션은 `device_id`
 `DATA_MODE=postgres`이고 `KAFKA_CONSUMER_ENABLED=true`이며
 `KAFKA_ENABLED=true`일 때만 Consumer를 시작한다.
 
+`backend/src/anomalyConsumer.ts`는 같은 게이트에서
+`battery-anomaly-alerts` version-1 결과를 `anomaly_score`에 적재한다. AI가
+보낸 `device_id`만 신뢰하고 처리 시점의 등록 device와 ACTIVE session으로
+귀속하며, 근거가 없으면 `session_id`·`battery_id`를 모두 `null`로 둔다.
+`(device_id, evaluated_at)` replay는 기존 귀속·필드를 보존하고,
+`battery_latest`가 실제로 전진한 새 결과에만 anomaly/grade/alert WS 이벤트를
+연결한다. 메모리 provider의 기존 정적 demo ticker는 유지하고 PostgreSQL
+provider에서는 정적 anomaly/alert를 만들지 않는다. Task 2의 alert 목록과
+WS 전달은 프로세스 로컬이며, durable alert/outbox 전달은 후속 담당 범위다.
+
 PostgreSQL 계약·동시성 테스트는 `TEST_DATABASE_URL`이 설정된 경우에만 실제
 DB를 초기화해 실행한다. 현재 실행 환경에는 이 변수가 없어 명확한 skip 1건을
 남기고, DB 연결 없이 unit/메모리 테스트를 통과했다.
@@ -52,9 +62,9 @@ DB를 초기화해 실행한다. 현재 실행 환경에는 이 변수가 없어
 | 백엔드 인증 골격 | `backend/src/auth.ts`, 세션 미들웨어, 감사 로그, DB 연결, Better Auth `/api/auth/*`. 데모 토큰 인증으로 RBAC·정지 계정 차단까지 실동작 | 골격 구현 / **실인증 전환은 보류(의도적)** |
 | 백엔드 데모 도메인 API | `backend/src/server.ts`: 발급 토큰 인증, 사용자·관리자 REST 라우트(`/health`·`/api/demo/*` 포함), 계약형 대시보드, F21 fail-closed, 릴레이 승인·재인증·멱등성, Raw CSV. 게이트 실동작 확인(`409 BATTERY_BLOCKED`/`NO_ACTIVE_SESSION`, `401 REAUTH_REQUIRED`, `ACK_REQUIRED`, 관리자 `403`) | **데모 런타임 구현·실 REST 브라우저 검증 완료** |
 | 백엔드 도메인 데이터 저장 | `backend/src/store/contract.ts`의 `CellGuardStore`, `memory.ts` 참조 구현, `postgres.ts` PostgreSQL 구현, `store.ts`의 `DATA_MODE` 분기. PostgreSQL은 자산 최신값·릴레이·진단·건강 집계·텔레메트리 CSV를 읽고, 상태+감사 변경을 트랜잭션으로 처리한다 | **구현 완료 / TEST_DATABASE_URL 설정 시 실 DB 계약 검증** |
-| 백엔드 실시간 스트림 (WS 발신) | **C1 완료(2026-08-25).** 프론트가 처리하는 11종 중 `metrics.tick`·`anomaly.score`·`anomaly.gradeChanged`·`relay.changed`·`alert.created`·`event.created`·`session.ended`·`resync.required` 8종이 실제로 발신되고, `subscribe`/`resume`이 1만 건 링버퍼로 실제 재전송을 수행한다. 단 `metrics.tick`·`anomaly.score`·`anomaly.gradeChanged`·`alert.created`는 이 저장소 안에 `battery.latest.score`를 사후에 바꾸는 코드가 아직 없어 **매초 같은 값을 반복 push하는 휴면 상태**다(AI 추론 연동 후 살아난다) — 이는 버그가 아니라 현재 범위의 자연스러운 결과다. `relay.autoCut`은 **구현됨(문턱 미설정이라 휴면)**(B3 완료, §4 C1 참조), `diagnosis.progress`/`.done`/`.aborted`는 여전히 미발신 | **구현됨(부분 휴면)** — 잔여 `diagnosis.*`(→ F21 안전 프로필) |
+| 백엔드 실시간 스트림 (WS 발신) | **C1 완료(2026-08-25).** 프론트가 처리하는 11종 중 `metrics.tick`·`anomaly.score`·`anomaly.gradeChanged`·`relay.changed`·`alert.created`·`event.created`·`session.ended`·`resync.required` 8종이 실제로 발신되고, `subscribe`/`resume`이 1만 건 링버퍼로 실제 재전송을 수행한다. memory 모드의 정적 `metrics.tick`·`anomaly.score`는 기존 데모 동작을 유지하며, PostgreSQL 모드의 anomaly 이벤트는 새로 커밋된 `anomaly_score` 결과에서만 발신한다. `relay.autoCut`은 **구현됨(문턱 미설정이라 휴면)**(B3 완료, §4 C1 참조), `diagnosis.progress`/`.done`/`.aborted`는 여전히 미발신 | **구현됨(부분 휴면)** — 잔여 `diagnosis.*`(→ F21 안전 프로필) |
 | 에지 명령 경로 | `backend/src/device/port.ts`(`DeviceCommandPort` 인터페이스, 메서드 4개) + `backend/src/device/logging.ts`(로깅 스텁 — 콘솔에만 남기고 실제 전송 없음) + `backend/src/kafka.ts`(version 1 wire contract·Zod 검증·파티션 키). `SESSION_ENDED`도 `batteryId`를 payload·파티션 키에 포함하도록 계약을 고정했다. `battery-events` 발행을 실제로 수행하는 Kafka 구현체는 인프라 인계(`docs/handover/infra-implementations.md` 2부) — dual-write outbox 배선은 미구현 | **wire contract + DeviceCommandPort + 로그 스텁 / Kafka 구현체 대기** (→ B4) |
-| 백엔드 DB 도메인 provider·Consumer·TimescaleDB | `backend/migrations/000_identity.sql`~`007_telemetry_raw_payload.sql`, `postgres.ts`, `telemetryConsumer.ts`. Raw Consumer는 session tagging·raw payload·단조 latest·수동 offset commit·프레임별 Fail-Safe hook을 구현했고, `TEST_DATABASE_URL`이 없으면 실 DB 계약 테스트는 skip한다. Timescale 실측과 anomaly Consumer는 별도다. `AUTH_MODE=betterauth`의 WS 인증은 여전히 보류되고, WS upgrade가 `DATA_MODE`를 별도로 검사하지 않는 갭은 남아 있다 | **Raw Consumer 구현 / 실 Kafka·DB 인수 검증 대기** |
+| 백엔드 DB 도메인 provider·Consumer·TimescaleDB | `backend/migrations/000_identity.sql`~`007_telemetry_raw_payload.sql`, `postgres.ts`, `telemetryConsumer.ts`, `anomalyConsumer.ts`. Raw Consumer는 session tagging·raw payload·단조 latest·수동 offset commit·프레임별 Fail-Safe hook을, Anomaly Consumer는 device 기준 ACTIVE session tagging·anomaly 이력·단조 score latest·replay-safe 이벤트·수동 offset commit을 구현했다. `TEST_DATABASE_URL`이 없으면 실 DB 계약 테스트는 skip한다. Kafka/Timescale 실측 부하는 별도이며 `AUTH_MODE=betterauth`의 WS 인증은 여전히 보류되고, WS upgrade가 `DATA_MODE`를 별도로 검사하지 않는 갭은 남아 있다 | **Raw/Anomaly Consumer 구현 / 실 Kafka·DB 인수 검증 대기** |
 | 알림 발송 (카카오·SMS·메일) | 채널 ON/OFF 토글과 policy 응답만 있고(`server.ts:405`·`:409`), **실제로 메시지를 보내는 코드는 `backend/src`에 없다** | **보류(의도적)** — 토글 현행 유지, 추가 작업 없음 |
 | AI 로컬 추론 프로세스 | 코드 없음. `ai/` 디렉터리도 없다. 학습(Colab)·체크포인트 반출 절차·추론 프로세스 모두 미착수 | 미착수 — **별도 담당자** |
 | 로컬 실행 패키징 | **C8 완료(2026-08-25)** — 단일 오리진(`:3005`), `start-local.bat`(Windows, 수동 실행), `docs/local_run.md`. memory 모드 한정(Kafka·PostgreSQL·추론은 별도) | 완료 (memory 모드) |
@@ -117,7 +127,7 @@ v3 프로토타입과 정본 문서에는 모드 1/2, 대표 온도 최댓값, s
 |---|---|---|
 | Phase 1 인프라·백엔드 기반 | 백엔드 초기화·인증 골격만 완료 | 부분 구현. 로컬 Kafka·PostgreSQL/TimescaleDB 미착수. **EC2 항목은 삭제**(로컬 구성), **Better Auth 실인증은 보류** |
 | Phase 2 에지 수집 | 센서·100ms 폴링·릴레이·음성·프로듀서 | 미착수 (BW150 도구만 존재) |
-| Phase 3 스트리밍 | Consumer·세션 태깅·적재·오프셋 | Raw Consumer·세션 태깅·적재·오프셋 구현 / 실 Kafka·Timescale 인수 및 anomaly Consumer 대기 |
+| Phase 3 스트리밍 | Consumer·세션 태깅·적재·오프셋 | Raw/Anomaly Consumer·세션 태깅·적재·오프셋 구현 / 실 Kafka·Timescale 인수 대기 |
 | Phase 4 AI | 데이터셋·특징·AE·Informer·추론 | 미착수. **추론이 Colab에서 호스트 PC로 내려왔고 별도 담당자 몫** |
 | Phase 5 웹 | React 초기화·라우팅·화면·관리자 | 부분 구현. v3 화면·계약 계층·mock QA·localhost demo REST 연결 완료. **WS 서버 발신이 1/11종 → 8/11종으로 확장**(C1, 2026-08-25)됐으나 잔여 2종은 각각 B3·F21 안전 프로필 선행. production DB provider 통합(B1)은 구현 완료, 실 DB 인수 검증 대기 |
 | Phase 6 알림·차단 | 카카오·Fail-Safe·음성 설정 | **카카오는 보류(의도적).** Fail-Safe 판정·구독 배선은 구현됐고 실측 문턱이 대기 중이며, 음성 설정은 API·화면 모두 없음 |
@@ -189,12 +199,12 @@ Timescale 적재, 물리 Fail-Safe는 여전히 별도 범위다.
 | A1 | 호스트 PC에 Kafka 설치·토픽 3개 생성, LAN 한정 PLAINTEXT | 에지·추론·백엔드가 LAN에서 접속 성공 |
 | A2 | `battery-raw-metrics` Consumer → `telemetry_metric` 적재 | version-1 frame이 session tagging·raw payload와 함께 테이블에 초 단위 지연으로 쌓임 |
 | A3 | TimescaleDB 하이퍼테이블·압축·보존정책 (`telemetry_metric`) | 100ms × 다중 세션 부하에서 조회 지연 확인 |
-| A4 | `battery-anomaly-alerts`(추론 결과) Consumer | 이상점수·AE/Informer 개별 점수·파생 온도가 적재됨 |
+| A4 | `battery-anomaly-alerts`(추론 결과) Consumer | **구현 완료(2026-09-14).** v1 결과를 `anomaly_score`에 device 기준 ACTIVE session tagging으로 적재하고, AE/Informer 개별 점수·XAI contributions·model version·파생 온도를 보존한다. `(device_id,evaluated_at)` replay는 무해하며 `battery_latest` 단조 갱신·실제 적재 기반 WS/alert를 사용한다. 실 Kafka/Timescale 인수는 `TEST_DATABASE_URL`·브로커 준비 후 별도 |
 | A5 | Consumer 오프셋·재처리·중복 방지 | DB transaction 이후에만 offset commit, `(device_id, measured_at)` replay 무해 |
 
 > ⚠️ **`advertised.listeners`를 `localhost`로 두면 라즈베리파이가 못 붙는다.** 브로커가 클라이언트에게 자기 주소를 되돌려주는 값이라, `localhost`면 에지가 자기 자신에게 접속을 시도하며 조용히 실패한다. 호스트의 LAN IP로 잡는다.
 
-> **✅ Raw A2/A5 구현에 필요한 스키마가 반영됐다** — 추론 결과 적재 테이블, `age_ms`·`temp_points`·`mode`·`soc_basis`, TimescaleDB 하이퍼테이블, 진단기(`device`) 테이블, 중복 방지 키, `battery_asset.memo`, `diagnosis.progress_snapshot`, `telemetry_metric.raw_payload`가 `backend/migrations/002`~`007`에 있다. 실 Kafka·PostgreSQL/Timescale 인수 검증과 anomaly Consumer는 남아 있으며, 결정 기록은 [`docs/handover/schema-open-questions.md`](handover/schema-open-questions.md)다.
+> **✅ Raw A2/A5와 Anomaly A4 구현에 필요한 스키마가 반영됐다** — 추론 결과 적재 테이블, `age_ms`·`temp_points`·`mode`·`soc_basis`, TimescaleDB 하이퍼테이블, 진단기(`device`) 테이블, 중복 방지 키, `battery_asset.memo`, `diagnosis.progress_snapshot`, `telemetry_metric.raw_payload`가 `backend/migrations/002`~`007`에 있다. 실 Kafka·PostgreSQL/Timescale 인수 검증은 남아 있으며, 결정 기록은 [`docs/handover/schema-open-questions.md`](handover/schema-open-questions.md)다.
 
 > ✅ **마이그레이션 실행 선행 문제는 해소됐다** — `000_identity.sql`이 `"user"` 테이블과 데모 seed를 먼저 만들고, `001`~`007`이 파일명 순서대로 적용된다. 실행기는 [`docs/handover/infra-implementations.md` §3-1·§4](handover/infra-implementations.md)를 따른다.
 

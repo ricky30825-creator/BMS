@@ -7,6 +7,26 @@ export type DemoStatus = "ACTIVE" | "SUSPENDED";
 export type OpsStatus = "NORMAL" | "WATCH" | "BLOCKED";
 export type RelayState = "CLOSED" | "OPEN";
 
+export type AnomalyContribution = {
+  feature: string;
+  contribution: number;
+};
+
+/** A persisted inference result. `grade` remains a server-derived value. */
+export type AnomalyScoreRecord = {
+  deviceId: string;
+  batteryId: string | null;
+  sessionId: string | null;
+  evaluatedAt: string;
+  score: number;
+  aeScore: number | null;
+  informerScore: number | null;
+  contributions: AnomalyContribution[] | null;
+  modelVersion: string | null;
+  tempKalman: number | null;
+  tempCellEstimated: number | null;
+};
+
 export type DemoUser = {
   id: string;
   email: string;

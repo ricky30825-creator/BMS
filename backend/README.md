@@ -134,3 +134,26 @@ cannot wedge forever. DB or safety-hook failures remain uncommitted for
 retry. The Consumer is never connected in `DATA_MODE=memory` or
 `NODE_ENV=test`; invalid enabled configuration fails startup before HTTP
 listen.
+
+## Anomaly score Consumer
+
+The same PostgreSQL-only runtime gate starts the `battery-anomaly-alerts`
+Consumer with its own group (`KAFKA_ANOMALY_GROUP_ID`, default
+`cellguard-backend-anomaly`). The version-1 AI payload is strict and contains
+only the authoritative `device_id`; the Consumer resolves a registered
+device's processing-time ACTIVE session and writes both `session_id` and
+`battery_id`. If that relationship is absent or the session and asset modes
+disagree, both foreign keys remain `null`.
+
+Each result is inserted with the natural key `(device_id, evaluated_at)` and
+preserves the AE/Informer scores, XAI contributions, model version, and both
+derived temperatures. A newly inserted result updates only the score fields in
+`battery_latest`, and only when `evaluated_at` is newer; telemetry fields and a
+newer score are never overwritten. Replays use the original persisted
+attribution and do not emit another grade transition or alert. The server's
+`anomaly.score`, `anomaly.gradeChanged`, and `alert.created` WebSocket events
+are derived from the committed row. Invalid JSON/contract messages are
+explicitly skipped; database or post-commit notification failures leave the
+offset uncommitted for retry. The Task 2 alert list is process-local and is
+fed only by committed anomaly transitions; durable alert/outbox delivery is a
+later task.

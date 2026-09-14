@@ -18,6 +18,7 @@ const envSchema = z.object({
   KAFKA_BROKERS: z.string().trim().min(1).default("127.0.0.1:9092"),
   KAFKA_CLIENT_ID: z.string().trim().min(1).default("cellguard-backend"),
   KAFKA_GROUP_ID: z.string().trim().min(1).default("cellguard-backend"),
+  KAFKA_ANOMALY_GROUP_ID: z.string().trim().min(1).default("cellguard-backend-anomaly"),
   KAFKA_RAW_METRICS_TOPIC: z.string().trim().min(1).default(KAFKA_TOPICS.rawMetrics),
   KAFKA_ANOMALY_ALERTS_TOPIC: z.string().trim().min(1).default(KAFKA_TOPICS.anomalyAlerts),
   KAFKA_EVENTS_TOPIC: z.string().trim().min(1).default(KAFKA_TOPICS.events),
@@ -79,6 +80,7 @@ export const kafkaConfig = Object.freeze({
   brokers: env.KAFKA_BROKERS.split(",").map((broker) => broker.trim()).filter(Boolean),
   clientId: env.KAFKA_CLIENT_ID,
   groupId: env.KAFKA_GROUP_ID,
+  anomalyGroupId: env.KAFKA_ANOMALY_GROUP_ID,
   topics: Object.freeze({
     rawMetrics: env.KAFKA_RAW_METRICS_TOPIC,
     anomalyAlerts: env.KAFKA_ANOMALY_ALERTS_TOPIC,

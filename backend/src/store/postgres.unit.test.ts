@@ -58,6 +58,7 @@ type FakeOptions = {
   emptyTelemetry?: boolean;
   missingBattery?: boolean;
   noLatest?: boolean;
+  anomalyRows?: Record<string, unknown>[];
 };
 
 function fakePool(options: FakeOptions = {}) {
@@ -85,6 +86,7 @@ function fakePool(options: FakeOptions = {}) {
       throw Object.assign(new Error("duplicate active diagnosis"), { code: "23505", constraint: "uq_active_diagnosis_battery" });
     }
     if (normalized.includes("from battery_asset")) return { rows: options.missingBattery ? [] : [batteryRow] };
+    if (normalized.includes("from anomaly_score")) return { rows: options.anomalyRows ?? [] };
     if (normalized.startsWith("update battery_asset")) {
       if (normalized.includes("ops_status")) batteryRow = { ...batteryRow, ops_status: values[1], version: 1 };
       return { rows: [] };
@@ -178,6 +180,38 @@ describe("PostgreSQL store query mapping", () => {
     const created = await store.createBattery("hong", { label: "Fresh battery", targetMode: 1, chemistry: "LI_ION", seriesCount: 3 });
     expect(created.latest.measuredAt).toBeNull();
     expect(fake.queries.some(({ text }) => text.toLowerCase().includes("insert into battery_latest"))).toBe(false);
+  });
+
+  it("maps persisted anomaly fields and returns defensive copies", async () => {
+    const fake = fakePool({ anomalyRows: [{
+      device_id: "demo-device-01",
+      battery_id: "b1",
+      session_id: "ses1",
+      evaluated_at: "2026-09-14T04:00:00.100Z",
+      score: "0.82",
+      ae_score: "0.79",
+      informer_score: "0.86",
+      contributions: [{ feature: "dT_dt", contribution: 0.41 }],
+      model_version: "ae-1.3+informer-0.9",
+      temp_kalman: "42.1",
+      temp_cell_estimated: "43.5",
+    }] });
+    const store = createPostgresStore(fake.pool);
+    const first = await store.latestAnomaly("b1");
+    expect(first).toMatchObject({
+      deviceId: "demo-device-01",
+      batteryId: "b1",
+      sessionId: "ses1",
+      score: 0.82,
+      aeScore: 0.79,
+      informerScore: 0.86,
+      modelVersion: "ae-1.3+informer-0.9",
+      tempKalman: 42.1,
+      tempCellEstimated: 43.5,
+      evaluatedAt: "2026-09-14T04:00:00.100Z",
+    });
+    first!.contributions![0].contribution = 99;
+    expect((await store.latestAnomaly("b1"))?.contributions).toEqual([{ feature: "dT_dt", contribution: 0.41 }]);
   });
 
   it("rejects a session request for another owner's battery before device lookup", async () => {

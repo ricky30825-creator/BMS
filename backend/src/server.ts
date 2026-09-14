@@ -24,6 +24,7 @@ import { evaluateFailsafe } from "./failsafeRunner.js";
 import { measurementPhaseFor } from "./measurementState.js";
 import { UNSET_THRESHOLDS, type FailsafeSample, type FailsafeThresholds, type FailsafeVerdict, type HardwareProfile } from "./failsafe.js";
 import { db } from "./db.js";
+import { createKafkaAnomalyAlertsConsumer, type AnomalyAlertsConsumer, type AnomalyIngestResult } from "./anomalyConsumer.js";
 import { createKafkaRawMetricsConsumer, type RawMetricsConsumer, type UnassignedTelemetryEvent } from "./telemetryConsumer.js";
 import {
   abortDiagnosis,
@@ -44,6 +45,8 @@ import {
   diagnosesForBattery,
   engageFailsafe,
   idempotent,
+  latestAnomaly,
+  anomalyScoresForBattery,
   mode1Health,
   recordAudit,
   relayByBattery,
@@ -220,9 +223,19 @@ async function dashboardMetrics(battery: NonNullable<Awaited<ReturnType<typeof b
   };
 }
 
-function anomalyJson(battery: NonNullable<Awaited<ReturnType<typeof batteryById>>>) {
-  const score = battery.latest.score;
-  return { score, grade: gradeForScore(score), aeScore: null, informerScore: null, evaluatedAt: battery.latest.measuredAt };
+async function anomalyJson(battery: NonNullable<Awaited<ReturnType<typeof batteryById>>>) {
+  // Memory mode keeps the established static demo score. PostgreSQL reads the
+  // actual persisted inference row; no production response is synthesized by
+  // the runtime ticker.
+  const persisted = env.DATA_MODE === "postgres" ? await latestAnomaly(battery.id) : null;
+  const score = persisted?.score ?? battery.latest.score;
+  return {
+    score,
+    grade: gradeForScore(score),
+    aeScore: persisted?.aeScore ?? null,
+    informerScore: persisted?.informerScore ?? null,
+    evaluatedAt: persisted?.evaluatedAt ?? battery.latest.measuredAt,
+  };
 }
 
 async function quickTrend(battery: NonNullable<Awaited<ReturnType<typeof batteryById>>>, metricName: string) {
@@ -240,7 +253,7 @@ async function dashboardJson(session: NonNullable<Awaited<ReturnType<typeof acti
     session: await sessionJson(session),
     battery: payload,
     metrics: await dashboardMetrics(battery),
-    anomaly: anomalyJson(battery),
+    anomaly: await anomalyJson(battery),
     relay: await relayJson(battery.id),
     notices: demoNotices.slice(0, 3).map(({ body: _body, status: _status, views: _views, ...notice }) => notice),
     quickTrend: await quickTrend(battery, metricName),
@@ -637,15 +650,53 @@ app.get("/api/anomaly/summary", requireSession, asyncRoute(async (req, res) => {
   if (!scoped) { apiError(res, 409, "NO_ACTIVE_SESSION", "An active session is required."); return; }
   const owned = await ownerBatteries(req);
   const distribution = { NORMAL: 0, CAUTION: 0, WARNING: 0, DANGER: 0 };
-  for (const battery of owned) distribution[gradeForScore(battery.latest.score) ?? "NORMAL"] += 1;
-  res.json({ activeCount: owned.filter((battery) => (gradeForScore(battery.latest.score) ?? "NORMAL") !== "NORMAL").length, todayCount: 0, peakScore: scoped.battery.latest.score, peakAt: scoped.battery.latest.measuredAt, model: { status: "DEGRADED", lastInferenceAt: scoped.battery.latest.measuredAt, version: "demo-fixture-no-provider" }, riskDistribution: distribution });
+  if (env.DATA_MODE === "memory") {
+    for (const battery of owned) distribution[gradeForScore(battery.latest.score) ?? "NORMAL"] += 1;
+    res.json({ activeCount: owned.filter((battery) => (gradeForScore(battery.latest.score) ?? "NORMAL") !== "NORMAL").length, todayCount: 0, peakScore: scoped.battery.latest.score, peakAt: scoped.battery.latest.measuredAt, model: { status: "DEGRADED", lastInferenceAt: scoped.battery.latest.measuredAt, version: "demo-fixture-no-provider" }, riskDistribution: distribution });
+    return;
+  }
+
+  const rows = (await Promise.all(owned.map((battery) => anomalyScoresForBattery(battery.id)))).flat();
+  const latestByBattery = new Map<string, typeof rows[number]>();
+  for (const row of rows) {
+    if (!latestByBattery.has(row.batteryId ?? "")) latestByBattery.set(row.batteryId ?? "", row);
+  }
+  for (const battery of owned) {
+    const score = latestByBattery.get(battery.id)?.score ?? battery.latest.score;
+    distribution[gradeForScore(score) ?? "NORMAL"] += 1;
+  }
+  const dayStart = new Date();
+  dayStart.setUTCHours(0, 0, 0, 0);
+  const todayCount = rows.filter((row) => Date.parse(row.evaluatedAt) >= dayStart.getTime()).length;
+  const peak = rows.reduce<typeof rows[number] | null>((current, row) => !current || row.score > current.score ? row : current, null);
+  const latest = [...rows].sort(
+    (left, right) => Date.parse(right.evaluatedAt) - Date.parse(left.evaluatedAt),
+  )[0] ?? null;
+  res.json({
+    activeCount: owned.filter((battery) => (gradeForScore(latestByBattery.get(battery.id)?.score ?? battery.latest.score) ?? "NORMAL") !== "NORMAL").length,
+    todayCount,
+    peakScore: peak?.score ?? scoped.battery.latest.score,
+    peakAt: peak?.evaluatedAt ?? scoped.battery.latest.measuredAt,
+    model: {
+      status: latest ? "RUNNING" : "DEGRADED",
+      lastInferenceAt: latest?.evaluatedAt ?? scoped.battery.latest.measuredAt,
+      version: latest?.modelVersion ?? "unknown",
+    },
+    riskDistribution: distribution,
+  });
 }));
 
 app.get("/api/anomaly/evidence", requireSession, asyncRoute(async (req, res) => {
   const scoped = await sessionBattery(req);
   if (!scoped) { apiError(res, 409, "NO_ACTIVE_SESSION", "An active session is required."); return; }
   if (typeof req.query.batteryId === "string" && req.query.batteryId !== scoped.battery.id) { apiError(res, 404, "NOT_FOUND", "Battery was not found."); return; }
-  res.json({ batteryId: scoped.battery.id, score: scoped.battery.latest.score, evaluatedAt: scoped.battery.latest.measuredAt, contributions: [] });
+  const persisted = env.DATA_MODE === "postgres" ? await latestAnomaly(scoped.battery.id) : null;
+  res.json({
+    batteryId: scoped.battery.id,
+    score: persisted?.score ?? scoped.battery.latest.score,
+    evaluatedAt: persisted?.evaluatedAt ?? scoped.battery.latest.measuredAt,
+    contributions: persisted?.contributions ?? [],
+  });
 }));
 
 app.get("/api/anomaly/events", requireSession, asyncRoute(async (req, res) => {
@@ -703,9 +754,11 @@ app.get("/api/trends", requireSession, asyncRoute(async (req, res) => {
 }));
 
 const demoAlerts: Array<Record<string, unknown>> = [];
+const runtimeAlerts: Array<Record<string, unknown>> = [];
 function ownerAlerts(req: Request): Array<Record<string, unknown>> {
   const actor = actorId(req);
-  return demoAlerts.filter((alert) => alert.ownerId === actor);
+  const alerts = env.DATA_MODE === "memory" ? demoAlerts : runtimeAlerts;
+  return alerts.filter((alert) => alert.ownerId === actor);
 }
 function alertJson(alert: Record<string, unknown>): Record<string, unknown> {
   const { ownerId: _ownerId, ...rest } = alert;
@@ -1208,6 +1261,93 @@ httpServer.on("upgrade", async (req: IncomingMessage, socket: Socket) => {
 });
 
 const lastBroadcastGrade = new Map<string, Grade>();
+type AnomalyPublicationState = {
+  scorePublished: boolean;
+  gradePublished: boolean;
+  alertPublished: boolean;
+  alert: Record<string, unknown> | null;
+};
+const anomalyPublicationStates = new Map<string, AnomalyPublicationState>();
+
+function anomalyPublicationStateFor(result: AnomalyIngestResult): AnomalyPublicationState {
+  const key = `${result.anomaly.deviceId}:${result.anomaly.evaluatedAt.toISOString()}`;
+  const existing = anomalyPublicationStates.get(key);
+  if (existing) return existing;
+  const state: AnomalyPublicationState = { scorePublished: false, gradePublished: false, alertPublished: false, alert: null };
+  anomalyPublicationStates.set(key, state);
+  // This is only a process-local retry guard. The durable natural key remains
+  // the source of truth, while Task 3 owns a cross-process notification log.
+  if (anomalyPublicationStates.size > 2048) {
+    anomalyPublicationStates.delete(anomalyPublicationStates.keys().next().value as string);
+  }
+  return state;
+}
+
+/** Publish inference events from the durable anomaly row, not from the demo ticker. */
+async function publishDurableAnomaly(result: AnomalyIngestResult): Promise<void> {
+  if (!result.shouldEmitEvents || !result.anomaly.batteryId || !result.grade) return;
+  const battery = await batteryById(result.anomaly.batteryId);
+  if (!battery) return;
+  const state = anomalyPublicationStateFor(result);
+
+  const anomaly = {
+    score: result.anomaly.score,
+    grade: result.grade,
+    aeScore: result.anomaly.aeScore,
+    informerScore: result.anomaly.informerScore,
+    evaluatedAt: result.anomaly.evaluatedAt.toISOString(),
+  };
+  if (!state.scorePublished) {
+    await broadcast("anomaly.score", anomaly, null, battery.id);
+    state.scorePublished = true;
+  }
+
+  const previousGrade = result.previousGrade;
+  const transition = detectGradeTransition(previousGrade, result.grade);
+  if (!transition) return;
+  if (!state.gradePublished) {
+    await broadcast("anomaly.gradeChanged", {
+      from: transition.from,
+      to: transition.to,
+      score: result.anomaly.score,
+      batteryId: battery.id,
+      batteryLabel: battery.label,
+    }, null, battery.id);
+    state.gradePublished = true;
+    lastBroadcastGrade.set(battery.id, result.grade);
+  }
+  if (transition.to !== "WARNING" && transition.to !== "DANGER") return;
+
+  // This list is intentionally process-local until the alert/outbox owner
+  // adds durable alert delivery. The row and all event values originate from
+  // the committed anomaly_score result; PostgreSQL starts with no demo alerts.
+  if (!state.alert) {
+    const key = `${result.anomaly.deviceId}:${result.anomaly.evaluatedAt.toISOString()}`;
+    state.alert = {
+      id: `al_${createHash("sha256").update(`anomaly:${key}:${transition.from}:${transition.to}`).digest("hex").slice(0, 24)}`,
+      severity: transition.to,
+      titleCode: "ANOMALY_GRADE_ESCALATED",
+      params: {
+        score: result.anomaly.score,
+        from: transition.from,
+        to: transition.to,
+        evaluatedAt: result.anomaly.evaluatedAt.toISOString(),
+      },
+      batteryId: battery.id,
+      batteryLabel: battery.label,
+      subjectType: "BATTERY" as const,
+      occurredAt: new Date().toISOString(),
+      acknowledgedAt: null as string | null,
+      channels: channelsForAlert(battery.ownerId, transition.to),
+      ownerId: battery.ownerId,
+    };
+    if (!runtimeAlerts.some((item) => item.id === state.alert?.id)) runtimeAlerts.unshift(state.alert);
+  }
+  if (!state.alertPublished) {
+    await broadcast("alert.created", alertJson(state.alert), null, battery.id);
+    state.alertPublished = true;
+  }
+}
 
 async function tickActiveBattery(): Promise<void> {
   const session = await activeSession();
@@ -1215,7 +1355,11 @@ async function tickActiveBattery(): Promise<void> {
   const battery = await batteryById(session.batteryId);
   if (!battery) return;
   await broadcast("metrics.tick", await dashboardMetrics(battery), null, battery.id);
-  const anomaly = anomalyJson(battery);
+  // PostgreSQL anomaly.score/grade/alert events are emitted by the Kafka
+  // Consumer after its transaction commits. Keep the existing static demo
+  // ticker only for memory mode.
+  if (env.DATA_MODE !== "memory") return;
+  const anomaly = await anomalyJson(battery);
   await broadcast("anomaly.score", anomaly, null, battery.id);
   const previousGrade = lastBroadcastGrade.get(battery.id) ?? null;
   const nextGrade = anomaly.grade;
@@ -1381,6 +1525,7 @@ function listen(): Promise<void> {
 
 let shuttingDown = false;
 let telemetryConsumer: RawMetricsConsumer | null = null;
+let anomalyConsumer: AnomalyAlertsConsumer | null = null;
 
 async function startTelemetryConsumer(): Promise<void> {
   // Memory mode and test mode must stay independent of broker availability.
@@ -1388,7 +1533,7 @@ async function startTelemetryConsumer(): Promise<void> {
   if (!kafkaConfig.enabled) {
     throw new Error("KAFKA_ENABLED must be true when KAFKA_CONSUMER_ENABLED is true");
   }
-  telemetryConsumer = createKafkaRawMetricsConsumer({
+  const rawConsumer = createKafkaRawMetricsConsumer({
     db,
     brokers: kafkaConfig.brokers,
     clientId: kafkaConfig.clientId,
@@ -1428,12 +1573,40 @@ async function startTelemetryConsumer(): Promise<void> {
       }, null, session.batteryId);
     },
   });
-  await telemetryConsumer.start();
+  telemetryConsumer = rawConsumer;
+  try {
+    await rawConsumer.start();
+    const scoreConsumer = createKafkaAnomalyAlertsConsumer({
+      db,
+      brokers: kafkaConfig.brokers,
+      clientId: kafkaConfig.clientId,
+      groupId: kafkaConfig.anomalyGroupId,
+      topic: kafkaConfig.topics.anomalyAlerts,
+      onDurableAnomaly: publishDurableAnomaly,
+    });
+    anomalyConsumer = scoreConsumer;
+    await scoreConsumer.start();
+  } catch (error) {
+    anomalyConsumer = null;
+    await rawConsumer.stop().catch(() => undefined);
+    telemetryConsumer = null;
+    throw error;
+  }
 }
 
 async function stopTelemetryConsumer(): Promise<void> {
   const consumer = telemetryConsumer;
+  const scoreConsumer = anomalyConsumer;
   telemetryConsumer = null;
+  anomalyConsumer = null;
+  if (scoreConsumer) {
+    try {
+      await scoreConsumer.stop();
+    } finally {
+      if (consumer) await consumer.stop();
+    }
+    return;
+  }
   if (consumer) await consumer.stop();
 }
 

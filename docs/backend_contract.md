@@ -801,6 +801,16 @@ WebSocket 연결 **전에** 화면을 채우기 위한 1회 조회. 이후 갱�
 - **`riskDistribution`은 요청한 사용자가 소유한 배터리만 집계한다.** v3 화면은 `정상 112 / 주의 11 / 경고 3 / 위험 2`(합 128)를 보여주지만 해당 계정의 배터리는 5개뿐이며, 이는 프로토타입 더미 숫자다. 실제로는 소유 배터리 수와 합이 일치해야 한다.
 - 4등급 전부를 키로 내려준다. 0건인 등급도 `0`으로 포함한다(프론트가 4칸 고정 레이아웃).
 
+**Kafka Consumer 귀속 규칙 (A4)**: version-1 `battery-anomaly-alerts` payload의
+권위값은 `device_id`뿐이다. 백엔드는 처리 시점의 등록된 device와
+`status = 'ACTIVE'`인 `measurement_session`을 확인해 `session_id`·`battery_id`를
+`anomaly_score`에 함께 적재한다. 활성 세션이 없거나 세션/자산 모드가 일치하지
+않으면 두 값 모두 `null`이며, `evaluated_at`으로 사후 귀속하지 않는다.
+`(device_id, evaluated_at)`은 replay 자연키다. 새 결과가 실제로
+`battery_latest.evaluated_at`을 전진시킨 경우에만 서버가 해당 행에서
+`anomaly.score`를 발신하고, 등급 전이와 `alert.created`를 한 번 생성한다.
+오래된 결과는 이력에는 보존하지만 최신 score/evaluated_at을 역행시키지 않는다.
+
 #### `GET /api/anomaly/evidence` — XAI 기여 요인 `[REQ-WEB-043]`
 
 쿼리: `batteryId`(생략 시 **활성 세션의 배터리**). v3 패널 제목이 `PACK-001 · 이상점수 82`로 특정 배터리를 가리킨다 `[v3]`.

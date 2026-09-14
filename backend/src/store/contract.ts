@@ -1,4 +1,4 @@
-import type { DemoAudit, DemoBattery, DemoDiagnosis, DemoRelay, DemoSession, DemoStatus, DemoUser, DiagnosisProgress, OpsStatus } from "./types.js";
+import type { AnomalyScoreRecord, DemoAudit, DemoBattery, DemoDiagnosis, DemoRelay, DemoSession, DemoStatus, DemoUser, DiagnosisProgress, OpsStatus } from "./types.js";
 
 export type CreateBatteryInput = {
   label: string;
@@ -41,6 +41,8 @@ export interface CellGuardStore {
   activeSession(ownerId?: string): Promise<DemoSession | null>;
   sessionById(id: string): Promise<DemoSession | undefined>;
   sessionsForBattery(batteryId: string): Promise<DemoSession[]>;
+  latestAnomaly(batteryId: string): Promise<AnomalyScoreRecord | null>;
+  anomalyScoresForBattery(batteryId: string, from?: string, to?: string): Promise<AnomalyScoreRecord[]>;
   activeDiagnosis(batteryId?: string): Promise<DemoDiagnosis | null>;
   diagnosisById(id: string): Promise<DemoDiagnosis | undefined>;
   diagnosesForBattery(batteryId: string): Promise<DemoDiagnosis[]>;

@@ -4,6 +4,7 @@ import type pg from "pg";
 import type { CellGuardStore, CreateBatteryInput, IdempotencyResult, UpdateBatteryInput } from "./contract.js";
 import { CSV_HEADER, INPUT_LIMITS } from "./types.js";
 import type {
+  AnomalyScoreRecord,
   DemoAudit,
   DemoBattery,
   DemoDiagnosis,
@@ -112,6 +113,32 @@ function jsonProgress(value: unknown): DiagnosisProgress | null {
   return parsed && typeof parsed === "object" && !Array.isArray(parsed)
     ? clone(parsed as DiagnosisProgress)
     : null;
+}
+
+function anomalyContributions(value: unknown): AnomalyScoreRecord["contributions"] {
+  const parsed = jsonValue(value);
+  if (parsed === null || parsed === undefined) return null;
+  if (!Array.isArray(parsed)) return null;
+  return parsed.map((item) => ({
+    feature: String((item as { feature?: unknown }).feature ?? ""),
+    contribution: numberOrNull((item as { contribution?: unknown }).contribution) ?? 0,
+  }));
+}
+
+function mapAnomalyScore(row: AnyRow): AnomalyScoreRecord {
+  return {
+    deviceId: String(row.device_id),
+    batteryId: row.battery_id == null ? null : String(row.battery_id),
+    sessionId: row.session_id == null ? null : String(row.session_id),
+    evaluatedAt: iso(row.evaluated_at),
+    score: numberOrNull(row.score) ?? 0,
+    aeScore: numberOrNull(row.ae_score),
+    informerScore: numberOrNull(row.informer_score),
+    contributions: anomalyContributions(row.contributions),
+    modelVersion: row.model_version == null ? null : String(row.model_version),
+    tempKalman: numberOrNull(row.temp_kalman),
+    tempCellEstimated: numberOrNull(row.temp_cell_estimated),
+  };
 }
 
 function bodyHash(body: unknown): string {
@@ -531,6 +558,39 @@ export function createPostgresStore(pool: pg.Pool): CellGuardStore {
           order by started_at desc, id desc
         `, [batteryId]);
         return result.rows.map((row) => clone(mapSession(row)));
+      });
+    },
+
+    async latestAnomaly(batteryId) {
+      return dbCall(async () => {
+        const result = await query<AnyRow>(pool, `
+          select device_id, battery_id, session_id, evaluated_at, score,
+                 ae_score, informer_score, contributions, model_version,
+                 temp_kalman, temp_cell_estimated
+          from anomaly_score
+          where battery_id = $1
+          order by evaluated_at desc
+          limit 1
+        `, [batteryId]);
+        return result.rows[0] ? clone(mapAnomalyScore(result.rows[0])) : null;
+      });
+    },
+
+    async anomalyScoresForBattery(batteryId, from, to) {
+      return dbCall(async () => {
+        if (from && Number.isNaN(Date.parse(from))) throw new Error("VALIDATION_FAILED");
+        if (to && Number.isNaN(Date.parse(to))) throw new Error("VALIDATION_FAILED");
+        const result = await query<AnyRow>(pool, `
+          select device_id, battery_id, session_id, evaluated_at, score,
+                 ae_score, informer_score, contributions, model_version,
+                 temp_kalman, temp_cell_estimated
+          from anomaly_score
+          where battery_id = $1
+            and ($2::timestamptz is null or evaluated_at >= $2::timestamptz)
+            and ($3::timestamptz is null or evaluated_at <= $3::timestamptz)
+          order by evaluated_at desc
+        `, [batteryId, from ?? null, to ?? null]);
+        return result.rows.map((row) => clone(mapAnomalyScore(row)));
       });
     },
 
