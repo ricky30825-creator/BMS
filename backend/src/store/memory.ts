@@ -186,6 +186,7 @@ export function createMemoryStore(): CellGuardStore & { demoUsers: DemoUser[] } 
     }
     const session: DemoSession = { id: `ses_${randomUUID()}`, batteryId, ownerId, deviceId: "demo-device-01", targetMode: battery.targetMode, status: "ACTIVE", endReason: null, startedAt: isoNow(), endedAt: null };
     demoSessions.set(session.id, session);
+    audit({ actorId: ownerId, action: "SESSION_START", resource: session.id, result: "SUCCESS", reason: null });
     return { ...session };
   };
 
@@ -371,9 +372,13 @@ export function createMemoryStore(): CellGuardStore & { demoUsers: DemoUser[] } 
     };
   };
 
-  const buildCsv = (batteryId: string, sessionId: string | null): string => {
+  const buildCsv = (batteryId: string, sessionId: string | null, from?: string, to?: string): string => {
     const battery = findBattery(batteryId);
     if (!battery) throw new Error("NOT_FOUND");
+    const measuredAt = Date.parse(battery.latest.measuredAt);
+    if (from && Number.isNaN(Date.parse(from))) throw new Error("VALIDATION_FAILED");
+    if (to && Number.isNaN(Date.parse(to))) throw new Error("VALIDATION_FAILED");
+    if ((from && measuredAt < Date.parse(from)) || (to && measuredAt > Date.parse(to))) return `${CSV_HEADER}\n`;
     return `${CSV_HEADER}\n${csvRow(battery, sessionId)}\n`;
   };
 
@@ -412,6 +417,6 @@ export function createMemoryStore(): CellGuardStore & { demoUsers: DemoUser[] } 
     async rememberIdempotency(actorId, key, body, status, response) { storeIdempotency(actorId, key, body, status, response); },
 
     async mode1Health(battery) { return health1(battery); },
-    async csvForBattery(batteryId, sessionId) { return buildCsv(batteryId, sessionId); }
+    async csvForBattery(batteryId, sessionId, from, to) { return buildCsv(batteryId, sessionId, from, to); }
   };
 }

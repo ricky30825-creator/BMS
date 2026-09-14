@@ -40,7 +40,6 @@ import {
   csvForBattery,
   diagnosisById,
   diagnosesForBattery,
-  demoUsers,
   engageFailsafe,
   idempotent,
   mode1Health,
@@ -51,9 +50,11 @@ import {
   startDiagnosis,
   startSession,
   sessionsForBattery,
+  users,
   updateBattery,
   userById
 } from "./store.js";
+import { closeStore, initializeStore } from "./store.js";
 import type { DemoBattery, DemoRelay } from "./store.js";
 
 const app = express();
@@ -318,7 +319,7 @@ app.post("/api/demo/login", asyncRoute(async (req, res) => {
   const password = typeof req.body?.password === "string" ? req.body.password : "";
   // 비밀번호는 검증하지 않고 기억만 한다. 재인증(릴레이 차단·비밀번호 변경)은
   // 계속 진짜로 검사하므로, 로그인 때 친 값을 그대로 쳐야 통과한다.
-  const user = resolveDemoUser(email, demoUsers);
+  const user = resolveDemoUser(email, await users());
   if (!user) {
     apiError(res, 401, "UNAUTHENTICATED", "Demo credentials are invalid.");
     return;
@@ -347,31 +348,30 @@ app.post("/api/demo/logout", asyncRoute(async (req, res) => {
   res.status(204).send();
 }));
 
-// DATA_MODE=memory serves the explicit in-memory demo store (store.ts).
-// DATA_MODE=postgres stays fail-closed until the real repository (B1) exists
-// — a process must never silently serve fabricated telemetry or admin state
-// under a "real database" label.
+// Both supported DATA_MODE values have a concrete provider. Startup checks the
+// PostgreSQL schema before opening the listener, so this remains a fail-closed
+// guard for any future unsupported mode.
 app.use("/api", (_req, res, next) => {
-  if (env.DATA_MODE === "memory") {
+  if (env.DATA_MODE === "memory" || env.DATA_MODE === "postgres") {
     next();
     return;
   }
-  apiError(res, 503, "RUNTIME_NOT_READY", "The PostgreSQL-backed domain provider is not implemented yet.");
+  apiError(res, 503, "RUNTIME_NOT_READY", "The configured domain provider is not ready.");
 });
 
-app.post("/api/account/email-lookup", (req, res) => {
+app.post("/api/account/email-lookup", asyncRoute(async (req, res) => {
   const name = typeof req.body?.name === "string" ? req.body.name.normalize("NFKC").trim() : "";
   const phone = typeof req.body?.phone === "string" ? req.body.phone.trim() : "";
-  const user = demoUsers.find((candidate) => candidate.name === name && candidate.phone === phone);
+  const user = (await users()).find((candidate) => candidate.name === name && candidate.phone === phone);
   res.json({ email: user ? maskEmail(user.email) : null });
-});
+}));
 
-app.post("/api/account/email-availability", (req, res) => {
+app.post("/api/account/email-availability", asyncRoute(async (req, res) => {
   const email = typeof req.body?.email === "string" ? req.body.email.trim().toLowerCase() : "";
   if (!email.includes("@")) { apiError(res, 422, "VALIDATION_FAILED", "A valid email is required."); return; }
-  const taken = demoUsers.some((user) => user.email === email);
+  const taken = (await users()).some((user) => user.email === email);
   res.json({ available: !taken });
-});
+}));
 
 app.get("/api/me", requireSession, asyncRoute(async (req, res) => {
   const user = req.appUser;
@@ -536,7 +536,6 @@ app.post("/api/sessions", requireSession, asyncRoute(async (req, res) => {
       await closeDiagnosisFor(priorSession.batteryId, "SESSION_ENDED");
       await broadcast("session.ended", { sessionId: priorSession.id, endReason: "SUPERSEDED" }, null, priorSession.batteryId);
     }
-    await recordAudit({ actorId: actorId(req), action: "SESSION_START", resource: session.id, result: "SUCCESS", reason: null });
     res.status(201).json(await sessionJson(session));
   } catch (error) {
     errorFromDomain(res, error);
@@ -751,7 +750,7 @@ app.get("/api/admin/users", requireRole("ADMIN"), asyncRoute(async (req, res) =>
   const q = typeof req.query.q === "string" ? req.query.q.toLowerCase() : "";
   const status = req.query.status === "ACTIVE" || req.query.status === "SUSPENDED" ? req.query.status : null;
   const role = req.query.role === "USER" || req.query.role === "ADMIN" ? req.query.role : null;
-  const filtered = demoUsers.filter((user) => (!status || user.status === status) && (!role || user.role === role) && (!q || `${user.name} ${user.email}`.toLowerCase().includes(q)));
+  const filtered = (await users()).filter((user) => (!status || user.status === status) && (!role || user.role === role) && (!q || `${user.name} ${user.email}`.toLowerCase().includes(q)));
   const items = await Promise.all(filtered.map(async (user) => ({ ...user, loginId: user.id, batteryCount: (await batteries(user.id)).length })));
   res.json({ items, page: { number: 1, size: items.length || 20, total: items.length, totalPages: items.length ? 1 : 0 } });
 }));
@@ -839,10 +838,11 @@ app.get("/api/admin/health", requireRole("ADMIN"), asyncRoute(async (req, res) =
 }));
 
 app.get("/api/admin/overview", requireRole("ADMIN"), asyncRoute(async (_req, res) => {
+  const allUsers = await users();
   const allBatteries = await batteries();
   const session = await activeSession();
   const relays = await Promise.all(allBatteries.map((item) => relayByBattery(item.id)));
-  res.json({ users: demoUsers.length, batteries: allBatteries.length, activeSessions: session ? 1 : 0, blockedBatteries: allBatteries.filter((item) => item.opsStatus === "BLOCKED").length, relayOpen: relays.filter((relay) => relay.state === "OPEN").length });
+  res.json({ users: allUsers.length, batteries: allBatteries.length, activeSessions: session ? 1 : 0, blockedBatteries: allBatteries.filter((item) => item.opsStatus === "BLOCKED").length, relayOpen: relays.filter((relay) => relay.state === "OPEN").length });
 }));
 
 app.get("/api/relay/history", requireSession, asyncRoute(async (req, res) => {
@@ -936,9 +936,11 @@ app.get("/api/diagnoses/:id", requireSession, asyncRoute(async (req, res) => {
 app.get("/api/metrics/export.csv", requireSession, asyncRoute(async (req, res) => {
   const session = await activeSession(actorId(req));
   const requestedBatteryId = typeof req.query.batteryId === "string" ? req.query.batteryId : null;
+  const from = typeof req.query.from === "string" ? req.query.from : undefined;
+  const to = typeof req.query.to === "string" ? req.query.to : undefined;
   const batteryId = session?.batteryId;
   if (!batteryId || (requestedBatteryId && requestedBatteryId !== batteryId) || !(await ensureOwner(req, batteryId))) { apiError(res, 409, "NO_ACTIVE_SESSION", "An active session is required."); return; }
-  const csv = await csvForBattery(batteryId, session?.id ?? null);
+  const csv = await csvForBattery(batteryId, session?.id ?? null, from, to);
   res.status(200).type("text/csv").setHeader("Content-Disposition", `attachment; filename="${batteryId}-raw.csv"`).send(csv);
 }));
 
@@ -1304,10 +1306,14 @@ async function closeDiagnosisFor(batteryId: string, reason: "SESSION_ENDED" | "R
   await broadcast("diagnosis.aborted", { id: aborted.id, kind: aborted.kind, abortReason: reason }, null, batteryId);
 }
 
-setInterval(() => {
-  void tickActiveBattery().catch((error) => { console.error("tickActiveBattery failed", error); });
-  void tickActiveDiagnosis().catch((error) => { console.error("tickActiveDiagnosis failed", error); });
-}, 1000);
+let runtimeTicker: NodeJS.Timeout | undefined;
+
+function startRuntimeTicker(): void {
+  runtimeTicker = setInterval(() => {
+    void tickActiveBattery().catch((error) => { console.error("tickActiveBattery failed", error); });
+    void tickActiveDiagnosis().catch((error) => { console.error("tickActiveDiagnosis failed", error); });
+  }, 1000);
+}
 
 // 계약 §1628: { batteryId, batteryLabel, representativeTempC,
 //               representativeTempSource, triggerCode, cutAt }
@@ -1343,6 +1349,56 @@ export async function runFailsafe(
   }, batteryId, profile, sample, thresholds);
 }
 
-httpServer.listen(env.PORT, () => {
-  console.log(`CellGuard backend listening on ${env.PORT} (auth=${env.AUTH_MODE} data=${env.DATA_MODE})`);
-});
+function listen(): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const onError = (error: Error) => {
+      httpServer.off("listening", onListening);
+      reject(error);
+    };
+    const onListening = () => {
+      httpServer.off("error", onError);
+      console.log(`CellGuard backend listening on ${env.PORT} (auth=${env.AUTH_MODE} data=${env.DATA_MODE})`);
+      resolve();
+    };
+    httpServer.once("error", onError);
+    httpServer.once("listening", onListening);
+    httpServer.listen(env.PORT);
+  });
+}
+
+let shuttingDown = false;
+
+async function shutdown(signal: string): Promise<void> {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  if (runtimeTicker) clearInterval(runtimeTicker);
+  try {
+    await new Promise<void>((resolve, reject) => {
+      if (!httpServer.listening) { resolve(); return; }
+      httpServer.close((error) => error ? reject(error) : resolve());
+    });
+    await closeStore();
+    console.log(`CellGuard backend stopped (${signal})`);
+  } catch (error) {
+    console.error("CellGuard backend shutdown failed", error);
+    process.exitCode = 1;
+  }
+}
+
+process.once("SIGTERM", () => { void shutdown("SIGTERM"); });
+process.once("SIGINT", () => { void shutdown("SIGINT"); });
+
+void initializeStore()
+  .then(() => {
+    startRuntimeTicker();
+    return listen();
+  })
+  .catch(async (error) => {
+    console.error("CellGuard backend startup failed", error);
+    process.exitCode = 1;
+    try {
+      await closeStore();
+    } catch (closeError) {
+      console.error("CellGuard backend cleanup failed", closeError);
+    }
+  });

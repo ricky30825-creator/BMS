@@ -1,13 +1,57 @@
 export * from "./store/types.js";
 export type { CellGuardStore, CreateBatteryInput, IdempotencyResult, UpdateBatteryInput } from "./store/contract.js";
 
+import { env } from "./config/env.js";
+import { closeDb, db } from "./db.js";
 import { createMemoryStore } from "./store/memory.js";
+import { createPostgresStore } from "./store/postgres.js";
 
-// DATA_MODE=postgres는 server.ts:356의 가드가 /api/* 전체를 503으로 막으므로
-// 여기까지 오지 않는다. PostgreSQL 구현체가 생기면(B1 2단계) 그때 분기한다.
-const active = createMemoryStore();
+const active = env.DATA_MODE === "postgres" ? createPostgresStore(db) : createMemoryStore();
 
-export const demoUsers = active.demoUsers;
+const REQUIRED_POSTGRES_TABLES = [
+  "user",
+  "app_user_profile",
+  "audit_log",
+  "battery_asset",
+  "measurement_session",
+  "relay_state",
+  "telemetry_metric",
+  "diagnosis",
+  "idempotency_key",
+  "device",
+  "anomaly_score",
+  "battery_latest",
+  "battery_health",
+  "outbox",
+] as const;
+
+// 서버는 listen 전에 스키마와 연결을 확인한다. PostgreSQL 모드에서
+// 초기화가 실패하면 fabricated memory data로 대체하지 않고 프로세스를
+// 시작하지 않는다.
+export async function initializeStore(): Promise<void> {
+  if (env.DATA_MODE !== "postgres") return;
+  const result = await db.query<{
+    table_count: number;
+    progress_snapshot: string | null;
+  }>(`
+    select
+      count(*)::int as table_count,
+      (select column_name
+       from information_schema.columns
+       where table_schema = 'public' and table_name = 'diagnosis'
+         and column_name = 'progress_snapshot') as progress_snapshot
+    from information_schema.tables
+    where table_schema = 'public' and table_name = any($1::text[])
+  `, [REQUIRED_POSTGRES_TABLES]);
+  const schema = result.rows[0];
+  if (!schema || Number(schema.table_count) !== REQUIRED_POSTGRES_TABLES.length || !schema.progress_snapshot) {
+    throw new Error("PostgreSQL schema is not ready; run npm run db:migrate");
+  }
+}
+
+export async function closeStore(): Promise<void> {
+  await closeDb();
+}
 
 // 이름을 유지하는 위임 함수. 호출부는 `await`만 붙이면 되고 함수명은 그대로다.
 export const userById = active.userById.bind(active);

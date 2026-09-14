@@ -76,5 +76,5 @@ export interface CellGuardStore {
 
   // 파생
   mode1Health(battery: DemoBattery): Promise<Record<string, unknown> | null>;
-  csvForBattery(batteryId: string, sessionId: string | null): Promise<string>;
+  csvForBattery(batteryId: string, sessionId: string | null, from?: string, to?: string): Promise<string>;
 }

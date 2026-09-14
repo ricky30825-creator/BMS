@@ -379,7 +379,7 @@ ADS1115          LAN          battery-anomaly-alerts ◀─ alerts 발행 ─┤
 
 > `battery_asset`, `measurement_session` 관계 테이블은 PostgreSQL(비시계열)에 두고, 시계열 하이퍼테이블은 `battery_id` FK로 참조한다.
 >
-> **⚠️ 위 두 스펙은 "설계"가 아니라 "이미 있는 스키마 위의 남은 작업"이다.** 실제 컬럼·제약의 정본은 `backend/migrations/000_identity.sql`~`005_timescale.sql`이며, 기존 8개 테이블에 더해 `002`~`005`가 추론 결과·Raw 보조 필드·하이퍼테이블·진단기·중복 방지·`battery_asset.memo`를 반영했다. **이 문서가 "시계열 하이퍼테이블"이라 부르는 테이블의 실제 이름은 `telemetry_metric`이다.** 과거 6건의 결정 기록은 `docs/handover/schema-open-questions.md`에서 확인하고, 남은 작업은 PostgreSQL/Consumer 구현이다.
+> **⚠️ 위 두 스펙은 "설계"가 아니라 "이미 있는 스키마 위의 남은 작업"이다.** 실제 컬럼·제약의 정본은 `backend/migrations/000_identity.sql`~`006_diagnosis_progress_snapshot.sql`이며, 기존 8개 테이블에 더해 `002`~`005`가 추론 결과·Raw 보조 필드·하이퍼테이블·진단기·중복 방지·`battery_asset.memo`를, `006`이 진단 phase 경계 스냅샷을 반영했다. **이 문서가 "시계열 하이퍼테이블"이라 부르는 테이블의 실제 이름은 `telemetry_metric`이다.** 과거 결정 기록은 `docs/handover/schema-open-questions.md`에서 확인하고, 남은 작업은 Consumer 구현과 실제 인프라 검증이다.
 
 ### AI 모델 (4개)
 | ID | 스펙 |
@@ -619,7 +619,7 @@ ADS1115          LAN          battery-anomaly-alerts ◀─ alerts 발행 ─┤
 > | 5 | `docs/handover/schema-open-questions.md` | **과거 미결정 6건의 결정 기록.** 해당 DDL은 `backend/migrations/002`~`005`에 반영됐고, Consumer 착수 시 실제 컬럼·제약과 함께 확인한다 |
 > | 6 | `docs/verification_matrix.md` | 무엇을 어떻게 검증하면 끝난 것으로 치는지. 백엔드 typecheck·빌드·`/health`·테스트 명령이 여기 있다 |
 >
-> ✅ **DB는 `npm run db:migrate` 하나로 올라간다(2026-08-28).** `backend/migrations/000`~`005`가 파일명 순서대로 적용된다. 예전에 `psql -f 001_app_auth.sql`이 첫 구문에서 멈추던 문제(`"user"` 테이블 DDL 부재)는 `000_identity.sql`이 해결했다. **`psql -f`로 001만 직접 돌리지 마라** — 순서가 있는 6개 파일이다. `npm run auth:generate`·`auth:migrate`는 CLI 패키지가 없어 실패하니 부르지 않는다(Better Auth는 지금 미사용).
+> ✅ **DB는 `npm run db:migrate` 하나로 올라간다(2026-08-28).** `backend/migrations/000`~`006`이 파일명 순서대로 적용된다. 예전에 `psql -f 001_app_auth.sql`이 첫 구문에서 멈추던 문제(`"user"` 테이블 DDL 부재)는 `000_identity.sql`이 해결했다. **`psql -f`로 001만 직접 돌리지 마라** — 순서가 있는 7개 파일이다. `npm run auth:generate`·`auth:migrate`는 CLI 패키지가 없어 실패하니 부르지 않는다(Better Auth는 지금 미사용).
 >
 > 세부 계약이 필요해지면 — 에러 코드는 `docs/backend_contract.md` §1.10, 원자성 요구는 §3.4, 에지 프레임 정의와 `battery-events`의 code+params는 `docs/hardware/mode1_backend_spec.md` §9·§11이다.
 >
@@ -631,7 +631,7 @@ ADS1115          LAN          battery-anomaly-alerts ◀─ alerts 발행 ─┤
 
 - [ ] 호스트 PC에 Kafka 설치·토픽 3개 생성, LAN 한정 PLAINTEXT 구성 (S-BYYPVQ) — `advertised.listeners`를 호스트 LAN IP로 잡아야 에지가 붙는다
 - [ ] 브로커·DB 포트를 방화벽에서 LAN으로 제한
-- [ ] PostgreSQL + TimescaleDB **설치** (S-NFEETD) — 설치만 남았다. ⚠️ **스키마를 새로 설계하지 않는다.** `backend/migrations/`의 6개 파일이 테이블 14개를 정의하고 `npm run db:migrate`가 적용한다. 하이퍼테이블 전환·보존정책(60일)은 `005_timescale.sql`에 이미 들어 있고, PK를 `(device_id, measured_at)`로 바꿔 `create_hypertable` 거부 문제도 해결됐다. 압축 정책은 재처리 창과 충돌해 **일부러 걸지 않았다**(되살리는 두 줄이 `005` 주석에 있다). 결정 근거는 `docs/handover/schema-open-questions.md`
+- [ ] PostgreSQL + TimescaleDB **설치** (S-NFEETD) — 설치만 남았다. ⚠️ **스키마를 새로 설계하지 않는다.** `backend/migrations/`의 7개 파일이 테이블 14개와 진단 progress 스냅샷 컬럼을 정의하고 `npm run db:migrate`가 적용한다. 하이퍼테이블 전환·보존정책(60일)은 `005_timescale.sql`에 이미 들어 있고, PK를 `(device_id, measured_at)`로 바꿔 `create_hypertable` 거부 문제도 해결됐다. 압축 정책은 재처리 창과 충돌해 **일부러 걸지 않았다**(되살리는 두 줄이 `005` 주석에 있다). 결정 근거는 `docs/handover/schema-open-questions.md`
 - [x] 백엔드 프로젝트 초기화 (Node.js + TypeScript + Express)
 - [x] Better Auth 기반 사용자 인증 골격 구현 (R-HBLCDS — F-SDSVND, F-TFJKKF, F-HUYIXC)
 - [ ] ~~Better Auth 실인증 전환~~ — **보류(2026-08-25 결정).** 코드는 그대로 두고 `AUTH_MODE=demo`로 꺼둔다. 나중에 환경변수만 바꿔 켠다. 데모 계정에 ADMIN이 있어 RBAC·감사로그 시연에는 지장이 없다
@@ -645,7 +645,7 @@ ADS1115          LAN          battery-anomaly-alerts ◀─ alerts 발행 ─┤
 
 ### Phase 3 — 스트리밍 파이프라인
 - [ ] Kafka Consumer 구현 → `telemetry_metric` 적재 (S-JGLAAI)
-- [ ] 배터리 자산/측정 세션 테이블 및 API (S-BATAST, S-MSESSN) — **부분 완료: DDL(`battery_asset`·`measurement_session`·`device`)과 REST 라우트는 이미 있다.** 활성 세션은 **설비 전체 1개**이며 `uq_active_session_global`이 강제한다(2026-08-28 확정). 남은 건 그 테이블을 실제로 읽고 쓰는 PostgreSQL 구현체(`docs/handover/infra-implementations.md` 1부)이며, 그전까지 `DATA_MODE=postgres`에서 `/api/*`가 `503`인 것은 의도된 fail-closed다
+- [ ] 배터리 자산/측정 세션 테이블 및 API (S-BATAST, S-MSESSN) — **부분 완료: DDL(`battery_asset`·`measurement_session`·`device`)과 REST 라우트, PostgreSQL `CellGuardStore` 구현이 있다.** 활성 세션은 **설비 전체 1개**이며 `uq_active_session_global`이 강제한다(2026-08-28 확정). 남은 것은 Kafka Consumer 세션 태깅과 `TEST_DATABASE_URL`을 이용한 실제 DB 인수 검증이다.
 - [ ] Consumer 적재 시 active 세션 조회 → `battery_id` 태깅 (S-MSESSN) — 규칙 정본 `docs/handover/b2-session-tagging.md`
 - [ ] 오프셋 커밋 및 재처리 전략 (S-SBCSJU)
 - [ ] 대시보드용 조회 뷰 생성 (S-ROGPIB)

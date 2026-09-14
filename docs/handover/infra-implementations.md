@@ -3,15 +3,17 @@
 > 작성일 2026-08-27 (Task 15, 백엔드 인계 계획의 마지막 태스크). 이 문서 하나로 두 구현체의 경계를 함께 정의한다 — 저장소 커밋과 에지 명령 발행이 서로 맞물려 있어서(§13·§14), 따로 인계하면 그 경계가 두 문서에 나뉘어 드리프트가 난다.
 >
 > 백엔드가 이미 끝낸 것: 비동기 `CellGuardStore` 인터페이스(`backend/src/store/contract.ts`) + 인메모리 구현체(`backend/src/store/memory.ts`) + 계약 테스트 20건, `DeviceCommandPort` 인터페이스(`backend/src/device/port.ts`) + 로깅 스텁(`backend/src/device/logging.ts`), 순수 `judgeFailsafe` 판정 함수(`backend/src/failsafe.ts`) + 그 저장소/에지/WS 배선(`backend/src/failsafeRunner.ts`, `backend/src/server.ts`).
-> 인프라 담당자가 할 것: 두 인터페이스의 **실제 구현체**(PostgreSQL, Kafka)와 그 사이 원자성 결정.
+> **2026-09-14 상태 갱신:** `CellGuardStore` PostgreSQL 구현체와 `DATA_MODE` 분기,
+> 기동 스키마 검사, DB 없는 환경에서 명확히 skip하는 계약 테스트가 추가됐다.
+> 남은 인계 대상은 Kafka 구현체·Consumer·실 DB 인수 검증이다.
 
 ---
 
 ## 1부 — `CellGuardStore` (PostgreSQL)
 
-### 1. 무엇을 만드나
+### 1. 구현 위치와 팩토리
 
-`backend/src/store/postgres.ts`에 아래 팩토리 함수를 구현한다.
+`backend/src/store/postgres.ts`에 아래 팩토리 함수가 구현돼 있다.
 
 ```ts
 import type pg from "pg";
@@ -20,17 +22,17 @@ import type { CellGuardStore } from "../store/contract.js";
 export function createPostgresStore(pool: pg.Pool): CellGuardStore { /* ... */ }
 ```
 
-인터페이스 정본은 `backend/src/store/contract.ts`다. 메서드 시그니처·타입·주석에 적힌 세 가지 규칙(에러는 `throw new Error("<CODE>")`, 반환값 방어 복사, 감사 로그 동반 메서드는 원자적)을 그대로 지킨다 — 이 파일을 고치지 않는다.
+인터페이스 정본은 `backend/src/store/contract.ts`다. 메서드 시그니처·타입·주석에 적힌 세 가지 규칙(에러는 `throw new Error("<CODE>")`, 반환값 방어 복사, 감사 로그 동반 메서드는 원자적)을 구현체가 지킨다. CSV 조회에는 선택적 `from`·`to` 범위가 추가돼 export job이 DB의 `telemetry_metric`을 직접 읽는다.
 
 ### 2. 완료 판정
 
-`backend/src/store/contract.test.ts` 맨 아래(164번째 줄, `runStoreContractTests("memory", ...)` 다음)에 아래 한 줄을 추가하고 계약 테스트 20건을 전부 통과시킨다.
+`backend/src/store/contract.test.ts`에는 아래 호출이 이미 추가돼 있다. `TEST_DATABASE_URL`이 있을 때만 테스트 전용 DB를 초기화하고 계약 테스트 20건을 실행한다.
 
 ```ts
 runStoreContractTests("postgres", async () => createPostgresStore(testPool));
 ```
 
-`testPool`은 테스트 전용 PostgreSQL 인스턴스(또는 트랜잭션 롤백 방식의 격리)를 가리키는 `pg.Pool`이며, 이 명세 밖에서 인프라 담당자가 준비한다. 20건은 인메모리 구현체가 이미 통과하고 있는 계약이므로, PostgreSQL 구현체가 이 중 하나라도 다르게 행동하면 계약 위반이다.
+`testPool`은 `TEST_DATABASE_URL`로 지정한 테스트 전용 PostgreSQL 인스턴스다. URL이 없으면 연결하지 않고 명시적 skip 1건만 남긴다. 실제 DB가 제공되면 20건 계약 스위트와 전역 active-session 경합 테스트를 함께 실행한다.
 
 > **✅ 활성 세션 범위는 확정됐다 — 설비 전체에 1개다(2026-08-28).** `backend/src/store/memory.ts:145-146` 주석(*"for the whole installation"*)이 맞고, per-device를 적던 `docs/backend_contract.md` §3.2와 `001`의 `uq_active_session_device`를 이에 맞춰 고쳤다. 근거는 하드웨어다 — BQ27441(0x55)은 I2C 주소가 고정이라 한 번에 배터리 1개만 측정할 수 있다.
 >
@@ -42,26 +44,27 @@ runStoreContractTests("postgres", async () => createPostgresStore(testPool));
 
 **⚠️ 스키마를 바꾸면 `store/types.ts`도 같이 바뀐다.** 마이그레이션과 타입 정의는 한 쌍이므로, 컬럼을 추가·삭제·이름 변경하기 전에 반드시 백엔드 담당자와 합의한다. 합의 없이 한쪽만 바꾸면 타입은 컴파일되는데 런타임에서 컬럼이 없어 조용히 깨지거나, 반대로 타입에 없는 컬럼이 방치된다.
 
-> **✅ 비어 있던 스키마 6건은 2026-08-28에 전부 결정·구현됐다** — 추론 결과 적재 테이블(`anomaly_score`), `age_ms`·`temp_points`·`mode`·`soc_basis`, TimescaleDB 하이퍼테이블, 진단기(`device`) 테이블, 중복 방지 키, `battery_asset.memo`. 결정 기록과 "왜 그 안이었나"는 [`docs/handover/schema-open-questions.md`](schema-open-questions.md)에, DDL은 `migrations/002`~`005`에 있다.
+> **✅ 비어 있던 스키마와 진단 진행 스냅샷은 마이그레이션에 반영됐다** — 추론 결과 적재 테이블(`anomaly_score`), `age_ms`·`temp_points`·`mode`·`soc_basis`, TimescaleDB 하이퍼테이블, 진단기(`device`) 테이블, 중복 방지 키, `battery_asset.memo`는 `migrations/002`~`005`에, `diagnosis.progress_snapshot`은 `006`에 있다. 결정 기록과 "왜 그 안이었나"는 [`docs/handover/schema-open-questions.md`](schema-open-questions.md)에 있다.
 >
-> **테이블은 이제 8개가 아니라 14개다** — 위 8개 + `"user"`·`device`·`anomaly_score`·`battery_latest`·`battery_health`·`outbox`. 새로 만든 6개는 `store/types.ts`와 아직 짝이 없다(§3-2).
+> **테이블은 이제 8개가 아니라 14개다** — 위 8개 + `"user"`·`device`·`anomaly_score`·`battery_latest`·`battery_health`·`outbox`. PostgreSQL provider는 새 테이블을 기존 `CellGuardStore` 반환 타입으로 매핑하므로 별도 조회 메서드 델타가 필요하지 않다.
 
-> ⚠️ **`store/types.ts`·`contract.ts`에 아직 반영되지 않은 것이 있다 — 백엔드 몫이다.** 스키마와 타입은 한 쌍인데, 이번에 만든 테이블 중 `anomaly_score`·`battery_latest`·`battery_health`를 읽으려면 `CellGuardStore`에 조회 메서드가 늘어난다(예: `latestAnomaly`, `anomalySummary`). 인터페이스 변경이라 DB 담당자가 `contract.ts`를 고치지 않았다(§1의 *"이 파일을 고치지 않는다"*). **백엔드가 이 델타를 반영해야 `postgres.ts`가 `DemoBattery.latest.score`를 채울 수 있다.** `battery_asset.memo`는 반대로 타입에 이미 있어서 변경이 필요 없다.
+> `battery_latest`·`battery_health`·`anomaly_score`의 현재 화면 소비 범위는 기존 `DemoBattery`와 `mode1Health`에 매핑되는 값이다. `telemetry_metric`의 원본 행은 CSV 경로에서 필요한 컬럼만 읽는다. 향후 집계 API가 추가되면 그때 `CellGuardStore` 계약과 타입을 함께 확장한다.
 
 ### 3-1. 처음 DB를 올리는 순서 — **막힘은 2026-08-28에 해소됐다**
 
 > **예전 서술**: 2단계(Better Auth 코어 스키마)에서 멈추고 §4의 선택지를 먼저 골라야 했다.
-> **지금**: `000_identity.sql`이 `"user"` 테이블을 직접 만들고 데모 4명을 seed하므로 1~3단계가 명령 하나로 끝난다(§4). 남은 것은 4·5단계뿐이다.
+> **지금**: `000_identity.sql`이 `"user"` 테이블을 직접 만들고 데모 4명을 seed하므로 1~3단계가 명령 하나로 끝난다(§4). provider와 게이트 배선은 구현됐고, 남은 것은 실제 DB 인수 검증이다.
 
 | 단계 | 하는 일 | 상태 |
 |---|---|---|
 | 1 | PostgreSQL **+ TimescaleDB 확장** 설치, DB·계정 생성, `backend/.env`의 `DATABASE_URL` 설정 | ✅ 문서만으로 됨 (`backend/.env.example`) |
 | 2 | `npm run db:migrate` — `migrations/*.sql`을 파일명 순서대로 적용 | ✅ 실행기 있음 (`backend/scripts/migrate.mjs`) |
-| 3 | `psql`로 테이블 생성 확인 | ✅ 4단계 전까지 유일한 확인 수단 |
-| 4 | `backend/src/store/postgres.ts` 구현 (§1) | 본 인계의 본체 |
-| 5 | `DATA_MODE` 게이트 열기 (§9) | 4단계 완료 후 |
+| 3 | `psql`로 테이블 생성 확인 | ✅ 마이그레이션 적용 확인 수단 |
+| 4 | `backend/src/store/postgres.ts` 구현 (§1) | ✅ 구현 완료(2026-09-14) |
+| 5 | `DATA_MODE` 게이트 열기 (§9) | ✅ 구현 완료(2026-09-14) |
+| 6 | `TEST_DATABASE_URL`로 계약·동시성·재시작 검증 | 실 DB 인수 환경에서 수행 |
 
-**마이그레이션 6개 파일** — 순서가 곧 의존성이다.
+**마이그레이션 7개 파일** — 순서가 곧 의존성이다.
 
 | 파일 | 내용 |
 |---|---|
@@ -71,8 +74,12 @@ runStoreContractTests("postgres", async () => createPostgresStore(testPool));
 | `003_telemetry_columns.sql` | `age_ms`·`temp_points`(jsonb) + `mode`·`soc_basis` |
 | `004_anomaly_and_health.sql` | `anomaly_score`, `battery_latest`, `battery_health`, `outbox` |
 | `005_timescale.sql` | PK 교체 + 하이퍼테이블 2개 + 보존 60일 |
+| `006_diagnosis_progress_snapshot.sql` | 진단 phase 경계 복구용 `progress_snapshot jsonb` |
 
-> **`005`만 실패해도 004까지는 유효하다** — TimescaleDB 확장이 없으면 `telemetry_metric`이 평범한 PostgreSQL 테이블로 남을 뿐, 나머지 스키마는 정상이다. 실행기가 이 경우를 따로 안내한다.
+> **`005`가 실패하면 004까지는 유효하다** — TimescaleDB 확장이 없으면
+> `telemetry_metric`이 평범한 PostgreSQL 테이블로 남지만, 현재 실행기는 순서상
+> `006`까지 진행하지 않는다. 따라서 `DATA_MODE=postgres`를 열려면 TimescaleDB를
+> 설치한 뒤 `npm run db:migrate`가 `006`까지 완료돼야 한다.
 
 **예전에 2단계를 막던 것과, 어떻게 풀었는지:**
 
@@ -81,7 +88,10 @@ runStoreContractTests("postgres", async () => createPostgresStore(testPool));
 
 > **마이그레이션 실행기는 `backend/scripts/migrate.mjs`다(`npm run db:migrate`).** psql에 의존하지 않는다 — 호스트 PC는 Windows이고 개발 장비는 macOS라, 이미 의존성에 있는 `pg`로 도는 편이 양쪽에서 똑같이 동작한다. 적용한 파일은 `schema_migrations`에 기록되어 다시 실행되지 않고, 파일 하나가 트랜잭션 하나다. `start-local.bat`은 여전히 DB를 건드리지 않으므로 이 명령은 손으로 돌린다.
 
-> **5단계까지 끝나기 전에는 앱이 당신의 DB에 쿼리를 한 건도 보내지 않는다 — 그게 정상이다.** `store.ts`가 무조건 `createMemoryStore()`를 쓰고(§9), `db.ts`의 풀은 `auth.ts`만 쓰는데 `AUTH_MODE=demo`면 그 경로도 안 밟는다. 즉 **"DB를 연결했다"를 화면으로 확인할 방법이 4단계 전에는 없다.** `psql`로 테이블이 생겼는지 직접 보는 것이 이 구간의 유일한 확인 수단이다.
+> **PostgreSQL 모드에서는 기동 전에 앱이 DB 스키마를 확인한다.** `store.ts`가
+> `DATA_MODE`에 따라 provider를 선택하고, `initializeStore()`가 핵심 테이블과
+> `progress_snapshot`을 확인한다. 검사가 실패하면 memory 데이터로 대체하지 않고
+> 기동을 중단한다. DB 없는 기본 시연은 `DATA_MODE=memory`로 실행한다.
 
 ### 4. 외래키 문제 — **결정 완료 (2026-08-28)**
 
@@ -104,7 +114,7 @@ runStoreContractTests("postgres", async () => createPostgresStore(testPool));
 
 ### 5. 반드시 한 트랜잭션에 넣어야 하는 메서드 6개
 
-`changeRelay`, `engageFailsafe`, `changeOpsStatus`, `saveMemo`, `changeUserStatus`, `startSession`. 전부 도메인 상태 변경 + `audit_log` 쓰기를 함께 하며, `docs/backend_contract.md` §3.4가 *"승인 후 명령 실행과 감사 기록을 원자적으로 처리하고 실패 시 성공 응답이나 성공 이벤트를 내보내지 않는다"*를 요구한다. `backend/src/db.ts`의 `inTransaction(fn)`을 쓴다 — `pool.connect()` → `begin` → `fn(client)` → `commit`/실패 시 `rollback` → `release`를 이미 감싸고 있다.
+`changeRelay`, `engageFailsafe`, `changeOpsStatus`, `saveMemo`, `changeUserStatus`, `startSession`. 전부 도메인 상태 변경 + `audit_log` 쓰기를 함께 하며, `docs/backend_contract.md` §3.4가 *"승인 후 명령 실행과 감사 기록을 원자적으로 처리하고 실패 시 성공 응답이나 성공 이벤트를 내보내지 않는다"*를 요구한다. `backend/src/store/postgres.ts`의 transaction helper를 쓴다 — `pool.connect()` → `begin` → `fn(client)` → `commit`/실패 시 `rollback` → `release`를 감싼다. 팩토리가 테스트용 pool도 받을 수 있어 전역 `db.ts` helper를 직접 호출하지 않는다.
 
 ```ts
 await inTransaction(async (client) => {
@@ -148,7 +158,7 @@ const [a, b] = await Promise.allSettled([
 
 호출부가 저장소가 반환한 객체를 마음대로 고쳐도 저장소 내부 상태가 오염되면 안 된다. SQL 쿼리는 매번 새 JS 객체를 만들어 반환하므로 이 규칙은 자연히 지켜진다. **단, 조회 성능을 위해 인메모리 캐시를 얹는다면** — 캐시에 저장한 객체의 참조를 그대로 반환하지 말고, 반환 직전에 얕은 복사(`{ ...cached }`)를 거친다. 이 규칙을 깨면 프론트가 받은 객체를 로컬에서 mutate했을 때 다음 조회 결과가 오염된 값을 보여주는, 재현하기 어려운 버그가 난다.
 
-### 8-1. ⚠️ `advanceDiagnosis`의 `progress` — 스키마에 자리가 없다 (2026-09-02 발견, 미결정)
+### 8-1. `advanceDiagnosis`의 `progress` — **결정: ㉰ phase 경계 스냅샷 (2026-09-14)**
 
 **이 문서가 여태 한 번도 다루지 않은 메서드다.** 스토어 계약에는 있다:
 
@@ -157,7 +167,9 @@ const [a, b] = await Promise.allSettled([
 advanceDiagnosis(id: string, phase: string, progress: DiagnosisProgress): Promise<DemoDiagnosis>;
 ```
 
-그런데 `diagnosis` 테이블에는 **대응 컬럼이 없다**(`id`, `battery_id`, `session_id`, `kind`, `status`, `phase`, `input`, `result`, `started_at`, `estimated_end_at`, `completed_at`). 인메모리 구현체는 객체에 그냥 들고 있어서 문제가 드러나지 않았다.
+`diagnosis`에 `progress_snapshot jsonb`를 추가하는 `006_diagnosis_progress_snapshot.sql`을
+적용한다. 인메모리 구현체와 PostgreSQL provider 모두 호출 중 최신 progress를
+런타임 메모리에 유지하고, PostgreSQL은 phase가 바뀌는 순간에만 스냅샷을 쓴다.
 
 `DiagnosisProgress`(`backend/src/store/types.ts:67`)는 진행 중 진단의 작업 상태다 — 단계별 집계 창(`windows`: 전압 원자료 배열 + 온도 샘플 배열), 안전 판정용 롤링 온도 창(`tempTrail`), 누적 Wh, 부분 지표. **완료 결과(`result`)와 달리 완료되면 버려지는 값이다.**
 
@@ -173,13 +185,11 @@ advanceDiagnosis(id: string, phase: string, progress: DiagnosisProgress): Promis
 
 > 참고: 2026-09-02에 빠른 진단에 P7(발열 탐침) 구간이 추가되며 총 시간이 120초 → 180초가 됐다. 위 수치는 그 이후 값이며, 이전 대비 약 1.5배다.
 
-**선택지 (백엔드 담당자와 함께 정한다 — 지금 결정하지 않는다)**
+**결정된 동작**
 
 | 안 | 내용 | 대가 |
 |---|---|---|
-| **㉮ 저장하지 않는다** | `progress`를 프로세스 메모리에만 두고 DB에는 `phase`만 갱신한다 | 서버가 재시작하면 **진행 중 진단의 작업 상태가 사라진다.** 그 진단을 `ABORTED`로 닫아야 하며(§10의 "재시작해도 남아 있을 것"과 어긋나는 지점이므로 명시적으로 합의해야 한다), 다시 시작해야 한다 |
-| **㉯ `jsonb` 컬럼을 만든다** | `diagnosis`에 `progress jsonb` 추가(새 번호 마이그레이션) | 매 tick 최대 7.6KB UPDATE. 100ms 프레임에서는 재검토가 필요하다. TOAST 압축과 행 팽창(dead tuple)을 감안해야 한다 |
-| **㉰ 단계 전환에서만 쓴다** | 창을 메모리에 들고, `diag_phase`가 바뀌는 순간에만 스냅샷 저장 | 쓰기가 179회 → **7회**로 준다. 재시작 시 마지막 단계 경계까지 복구된다 — ㉮와 ㉯의 절충 |
+| **㉰ 단계 전환에서만 쓴다** | 창을 메모리에 들고, `phase`가 바뀌는 순간에만 `progress_snapshot` 저장 | 쓰기가 179회 → **7회**로 준다. 재시작 시 마지막 단계 경계까지 복구된다 |
 
 **결정에 필요한 사실 3가지**
 
@@ -189,16 +199,17 @@ advanceDiagnosis(id: string, phase: string, progress: DiagnosisProgress): Promis
 
 ### 9. 게이트를 여는 시점
 
-구현이 끝나기 전까지 두 지점을 건드리지 않는다:
+구현 완료 후 두 지점이 다음처럼 열려 있다:
 
-- `backend/src/server.ts`의 `app.use("/api", ...)` DATA_MODE 가드(`DATA_MODE === "memory"`가 아니면 `503 RUNTIME_NOT_READY`를 반환하는 미들웨어, 현재 356번째 줄 부근) — 이 가드가 `DATA_MODE=postgres`를 여전히 fail-closed로 막고 있다. **구현이 끝나면** 이 미들웨어에서 `postgres` 분기를 열어 실제로 `/api/*`가 통과하도록 고친다.
-- `backend/src/store.ts`(facade) — 현재 무조건 `createMemoryStore()`를 선택한다(`const active = createMemoryStore();`). `DATA_MODE`에 따라 `createMemoryStore()` 또는 `createPostgresStore(pool)`을 선택하도록 분기를 추가한다.
+- `backend/src/server.ts`의 `app.use("/api", ...)` DATA_MODE 가드는 `memory`와 `postgres` provider를 통과시킨다. PostgreSQL은 listen 전에 `initializeStore()`가 스키마를 확인한다.
+- `backend/src/store.ts`(facade)는 `DATA_MODE`에 따라 `createMemoryStore()` 또는 `createPostgresStore(pool)`을 선택한다.
 
-**그전까지는 503이 정상이다.** 이 가드를 구현 도중에 미리 열면, PostgreSQL 구현체가 미완성인 상태로 "실 DB"라는 라벨을 달고 조작된 데이터를 내보내게 된다(`docs/implementation_status.md`의 C2 절이 이미 이 위험을 명시했다).
+스키마가 불완전하거나 DB 연결이 실패하면 서버가 시작되지 않는다. 이 fail-closed
+경로가 PostgreSQL provider의 memory fallback을 막는다.
 
 ### 10. 최종 확인
 
-`AUTH_MODE=demo DATA_MODE=postgres`로 띄워 브라우저에서 로그인 → 배터리 연결 → 대시보드 → 릴레이 차단까지 끝까지 돌리고, **프로세스를 재시작해도 데이터가 남아 있을 것.** 특히 `engageFailsafe`로 걸린 인터락(`relay_state.interlock_engaged = true`)이 재시작 후에도 유지되어, 그 상태에서 릴레이 복구를 시도하면 `409 INTERLOCK_LOCKED`가 그대로 나와야 한다 — 인메모리 구현체는 프로세스가 죽으면 이 상태가 사라지는 것이 원래 한계였고, **이게 사라지지 않는 것이 Fail-Safe가 실제 안전 기능으로 성립하는 최소 조건**이다.
+`AUTH_MODE=demo DATA_MODE=postgres`로 띄워 브라우저에서 로그인 → 배터리 연결 → 대시보드 → 릴레이 차단까지 끝까지 돌리고, **프로세스를 재시작해도 데이터가 남아 있는지 확인한다.** 특히 `engageFailsafe`로 걸린 인터락(`relay_state.interlock_engaged = true`)이 재시작 후에도 유지되어, 그 상태에서 릴레이 복구를 시도하면 `409 INTERLOCK_LOCKED`가 그대로 나와야 한다. 이 실제 DB 인수 시나리오는 `TEST_DATABASE_URL`을 제공하는 환경에서 수행할 최종 확인으로 남아 있다.
 
 ---
 
@@ -319,12 +330,12 @@ onAutoCut: (relay, verdict) => { void broadcastAutoCut(battery, relay, verdict.t
 
 ## 인계 후 남는 것 (요약)
 
-> **2026-08-28 갱신** — 설계 결정은 전부 닫혔다(스키마 6건 + FK + 활성 세션 범위 + outbox + Consumer 프로세스 경계). 스키마도 적용 가능한 상태다. 남은 것은 아래 **구현**뿐이다.
+> **2026-09-14 갱신** — 설계 결정은 전부 닫혔고 `CellGuardStore` PostgreSQL 구현도 추가됐다. 남은 것은 Kafka·Consumer 구현과 실제 DB 인수 검증이다.
 
-- ✅ **스키마** — `migrations/000`~`005`, `npm run db:migrate`로 적용. 결정 근거는 `schema-open-questions.md`.
-- **PostgreSQL 구현체** — 본 문서 1부. `backend/src/store/postgres.ts` 신규 작성 + 계약 테스트 20건 통과 + 동시성 테스트(§6) + **다른 진단기로 두 번째 세션을 여는 테스트**(§2) 추가.
-- **`advanceDiagnosis`의 `progress` 영속화 방침** — 본 문서 §8-1. 스키마에 자리가 없고 세 가지 선택지가 열려 있다. **구현 착수 전에 백엔드 담당자와 먼저 합의한다** — 뒤늦게 바꾸면 마이그레이션과 러너 양쪽을 건드리게 된다.
-- **`store/types.ts`·`contract.ts` 델타 — 백엔드 몫**(§3). `anomaly_score`·`battery_latest`·`battery_health`를 읽을 조회 메서드가 없으면 `DemoBattery.latest.score`를 채울 수 없다.
+- ✅ **스키마** — `migrations/000`~`006`, `npm run db:migrate`로 적용. 결정 근거는 `schema-open-questions.md`.
+- ✅ **PostgreSQL 구현체** — 본 문서 1부. `backend/src/store/postgres.ts`, 계약 테스트 wiring, 전역 active-session unique 경합 테스트를 추가했다. `TEST_DATABASE_URL`이 없으면 실제 DB 테스트는 명시적으로 skip한다.
+- ✅ **`advanceDiagnosis`의 `progress` 영속화 방침** — 본 문서 §8-1. 런타임 메모리 + phase 경계 `progress_snapshot` 저장으로 결정했고 `006`에 반영했다.
+- ✅ **`store/types.ts`·`contract.ts` 델타** — CSV의 선택적 날짜 범위를 계약에 추가하고, 최신값·건강·텔레메트리 매핑을 기존 반환 타입에 연결했다.
 - **Kafka 구현체** — 본 문서 2부. `backend/src/device/kafka.ts` 신규 작성 + 도메인 코드를 outbox 방식으로 전환(§13·§15, 백엔드와 함께) + `runFailsafe`를 `server.ts` 밖으로 이동(§14a).
 - **Consumer의 `battery_id` 태깅** — `docs/handover/b2-session-tagging.md` (Task 14 산출물, 규칙 5개 확정).
 - **모드 1 SOH/RUL 산출 주체** — `battery_health` 테이블은 만들었지만 **누가 계산해 넣는지는 아직 미정**이다(`backend_contract.md` §9 Q6은 모드 2만 확정). DB는 저장만 맡는다.

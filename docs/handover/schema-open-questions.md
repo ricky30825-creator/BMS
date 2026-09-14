@@ -1,16 +1,16 @@
 # 인프라 담당자 인계 — 결정 기록: 과거 미결정 스키마 6건
 
-> 작성 2026-08-28. 이 문서는 당시 `docs/handover/infra-implementations.md`(구현 명세)와 `docs/handover/b2-session-tagging.md`(태깅 규칙)가 **이미 있는 스키마 위에서** 무엇을 만들지 정하기 전에, **스키마 자체가 없었던 6개 지점**을 모아 둔 결정 기록이다. 6건은 현재 `backend/migrations/002`~`005`에 반영됐다.
+> 작성 2026-08-28. 이 문서는 당시 `docs/handover/infra-implementations.md`(구현 명세)와 `docs/handover/b2-session-tagging.md`(태깅 규칙)가 **이미 있는 스키마 위에서** 무엇을 만들지 정하기 전에, **스키마 자체가 없었던 6개 지점**을 모아 둔 결정 기록이다. 6건은 현재 `backend/migrations/002`~`005`에 반영됐고, 진단 progress 스냅샷은 별도 `006`에 추가됐다.
 >
 > 저장소 실측(`backend/migrations/001_app_auth.sql` 135줄, `backend/src/store/types.ts`, `docs/backend_contract.md`) 기준이다.
 
 ## 0. 이 문서를 쓰는 법
 
-`backend/migrations/000_identity.sql`~`005_timescale.sql`에는 현재 `"user"`를 포함한 14개 테이블과 시계열 제약이 있다. `001_app_auth.sql`의 기존 8개 테이블은 `backend/src/store/types.ts`의 도메인 타입에 대응하며, 이 문서의 Q1~Q6은 그 뒤에 추가된 스키마 결정을 기록한다.
+`backend/migrations/000_identity.sql`~`006_diagnosis_progress_snapshot.sql`에는 현재 `"user"`를 포함한 14개 테이블과 시계열 제약, 진단 progress 스냅샷 컬럼이 있다. `001_app_auth.sql`의 기존 8개 테이블은 `backend/src/store/types.ts`의 도메인 타입에 대응하며, 이 문서의 Q1~Q6은 그 뒤에 추가된 스키마 결정을 기록한다.
 
 > **⚠️ "1:1로 맞다"는 서술은 과장이다.** 컬럼과 타입이 정확히 일치하는 것은 `measurement_session` ↔ `DemoSession` 하나뿐이다. 어긋나는 곳: `telemetry_metric`·`idempotency_key`에 대응하는 행 타입이 아예 없고, `DemoBattery.latest`(8필드, `score` 포함)·`mode1Health`(6필드)·`battery_asset.capacity_mah`·`relay_state.reason_params`·`diagnosis.completed_at`·`app_user_profile.is_active`·`audit_log.ip_address`/`user_agent`가 한쪽에만 있다. 그중 **저장할 곳이 아예 없어 구현을 막는 것 하나**는 Q6으로 따로 뺐다.
 
-당시 없었던 것은 **에지·AI 파이프라인이 실제로 흐르기 시작할 때 필요해지는 것들**이었다. 현재는 DDL이 존재하지만, PostgreSQL provider·Consumer가 이를 실제로 읽고 쓰는 구현은 아직 남아 있다.
+당시 없었던 것은 **에지·AI 파이프라인이 실제로 흐르기 시작할 때 필요해지는 것들**이었다. 현재 DDL과 PostgreSQL provider는 존재하며, Kafka Consumer와 실제 인프라 검증이 남아 있다.
 
 각 항목은 **현재 상태 → 왜 막히는가 → 이미 정해져 있는 것 → 선택지 → 권장 → 결정하면 같이 바뀌는 것** 순서다.
 

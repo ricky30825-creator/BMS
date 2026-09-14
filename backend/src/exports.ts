@@ -1,5 +1,5 @@
 import { createHash, createHmac, randomUUID } from "node:crypto";
-import { CSV_HEADER, batteryById, csvRow, sessionById } from "./store.js";
+import { batteryById, csvForBattery, sessionById } from "./store.js";
 import { env } from "./config/env.js";
 
 export type ExportStatus = "QUEUED" | "RUNNING" | "READY" | "FAILED" | "EXPIRED";
@@ -69,12 +69,9 @@ export async function completeExportJob(id: string): Promise<ExportJob | undefin
     job.status = "FAILED";
     return { ...job };
   }
-  const measuredAtMs = Date.parse(battery.latest.measuredAt);
-  const withinRange = measuredAtMs >= Date.parse(job.from) && measuredAtMs <= Date.parse(job.to);
-  const row = withinRange ? csvRow(battery, job.sessionId) : null;
-  const csv = row ? `${CSV_HEADER}\n${row}\n` : `${CSV_HEADER}\n`;
+  const csv = await csvForBattery(job.batteryId, job.sessionId, job.from, job.to);
   job.csv = csv;
-  job.rowCount = row ? 1 : 0;
+  job.rowCount = Math.max(0, csv.trimEnd().split("\n").length - 1);
   job.sha256 = createHash("sha256").update(csv).digest("hex");
   job.status = "READY";
   job.expiresAt = new Date(Date.now() + DOWNLOAD_TTL_MS).toISOString();

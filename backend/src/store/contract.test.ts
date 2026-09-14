@@ -1,6 +1,8 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import pg from "pg";
+import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import type { CellGuardStore } from "./contract.js";
 import { createMemoryStore } from "./memory.js";
+import { createPostgresStore } from "./postgres.js";
 
 // 저장소 구현체가 지켜야 하는 도메인 계약. 인메모리와 PostgreSQL이 같은
 // 스위트를 통과해야 한다. B1 2단계 담당자는 아래 한 줄을 추가하면 된다:
@@ -162,6 +164,96 @@ export function runStoreContractTests(name: string, makeStore: () => Promise<Cel
 }
 
 runStoreContractTests("memory", async () => createMemoryStore());
+
+const postgresTestUrl = process.env.TEST_DATABASE_URL?.trim();
+const postgresTestPool = postgresTestUrl ? new pg.Pool({ connectionString: postgresTestUrl }) : null;
+
+async function resetPostgresContractDatabase(pool: pg.Pool): Promise<void> {
+  await pool.query(`
+    truncate table audit_log, idempotency_key, diagnosis, telemetry_metric,
+      battery_health, battery_latest, relay_state, measurement_session,
+      battery_asset restart identity cascade
+  `);
+  await pool.query(`
+    insert into "user" (id, name, email, "createdAt", "updatedAt") values
+      ('hong', '홍길동', 'hong@cellguard.io', timestamptz '2025-03-12 00:00:00+00', now()),
+      ('kimeng', '김엔지', 'kim@lab.io', timestamptz '2024-11-02 00:00:00+00', now()),
+      ('leelab', '이연구', 'lee@lab.io', timestamptz '2024-08-19 00:00:00+00', now())
+    on conflict (id) do nothing
+  `);
+  await pool.query(`
+    insert into app_user_profile (user_id, role, status, phone)
+    values
+      ('hong', 'USER', 'ACTIVE', '010-1234-5678'),
+      ('kimeng', 'USER', 'ACTIVE', '010-2345-6789'),
+      ('leelab', 'ADMIN', 'ACTIVE', '010-3456-7890')
+    on conflict (user_id) do update set role = excluded.role, status = excluded.status, phone = excluded.phone
+  `);
+  await pool.query(`
+    insert into device (id, owner_user_id, label, hardware_profile, status)
+    values ('demo-device-01', 'hong', '진단기 A', 'MODE1_EXTERNAL_CELL_V1', 'ONLINE')
+    on conflict (id) do update set owner_user_id = excluded.owner_user_id, status = excluded.status
+  `);
+  await pool.query(`
+    insert into battery_asset
+      (id, owner_user_id, label, chemistry, target_mode, series_count, maker, model,
+       capacity_wh, rated_output_current_a, ops_status, memo, admin_memo, version)
+    values
+      ('pg-blocked', 'hong', 'PG blocked', 'LI_ION', 1, 3, 'CellGuard', 'External', null, null, 'BLOCKED', '', '', 0),
+      ('pg-mode2', 'hong', 'PG mode 2', 'LI_PO', 2, null, 'CellGuard', 'Powerbank', 37, 2, 'NORMAL', '', '', 0),
+      ('pg-mode1', 'hong', 'PG mode 1', 'LI_ION', 1, 3, 'CellGuard', 'External', null, null, 'NORMAL', '', '', 0)
+  `);
+  await pool.query(`
+    insert into battery_latest
+      (battery_id, measured_at, voltage_v, current_a, power_w, temp_contact,
+       temp_ir_surface, soc_pct, soc_basis, score, evaluated_at)
+    values
+      ('pg-blocked', timestamptz '2026-08-06 01:32:10+00', 11.9, -2.4, -28.56, 58, 56.4, 78, 'ABSOLUTE_GAUGE', .82, timestamptz '2026-08-06 01:32:10+00'),
+      ('pg-mode2', timestamptz '2026-08-06 01:29:00+00', 5.1, -1.2, -6.12, null, 34, 64, 'RELATIVE_SESSION_START', .33, timestamptz '2026-08-06 01:29:00+00'),
+      ('pg-mode1', timestamptz '2026-08-06 01:30:00+00', 11.4, -1.6, -18.24, 29, 30.2, 91, 'ABSOLUTE_GAUGE', .18, timestamptz '2026-08-06 01:30:00+00')
+  `);
+  await pool.query(`
+    insert into battery_health
+      (battery_id, design_capacity_mah, full_charge_capacity_mah, cycle_count, rul_cycles, internal_resistance_mohm, calculated_at)
+    values ('pg-blocked', 3000, 2760, 312, 480, 18.4, timestamptz '2026-08-06 00:00:00+00'),
+           ('pg-mode1', 3000, 2820, 88, 560, 16.2, timestamptz '2026-08-06 00:00:00+00')
+  `);
+  await pool.query(`
+    insert into relay_state
+      (battery_id, state, interlock_engaged, interlock_condition, reason_code, changed_at, changed_by)
+    values
+      ('pg-blocked', 'OPEN', true, 'TEMP_OVER_CAP', 'FAILSAFE_TEMP_IR_OVER_CAP', timestamptz '2026-08-06 01:32:10+00', 'SYSTEM'),
+      ('pg-mode2', 'CLOSED', false, null, null, timestamptz '2026-08-06 01:29:00+00', 'SYSTEM'),
+      ('pg-mode1', 'CLOSED', false, null, null, timestamptz '2026-08-06 01:30:00+00', 'SYSTEM')
+  `);
+}
+
+if (postgresTestPool) {
+  runStoreContractTests("postgres", async () => {
+    await resetPostgresContractDatabase(postgresTestPool);
+    return createPostgresStore(postgresTestPool);
+  });
+
+  describe("PostgreSQL 저장소 경쟁 조건", () => {
+    afterAll(async () => { await postgresTestPool.end(); });
+
+    it("전역 active session 유니크 제약을 도메인 에러로 변환한다", async () => {
+      await resetPostgresContractDatabase(postgresTestPool);
+      const stores = [createPostgresStore(postgresTestPool), createPostgresStore(postgresTestPool)];
+      const outcomes = await Promise.allSettled(stores.map((store) => store.startSession("hong", "pg-mode2")));
+      expect(outcomes.filter((outcome) => outcome.status === "fulfilled")).toHaveLength(1);
+      const rejected = outcomes.find((outcome) => outcome.status === "rejected");
+      expect(rejected?.reason).toEqual(expect.objectContaining({ message: "NO_ACTIVE_SESSION" }));
+      expect((await stores[0].activeSession())?.status).toBe("ACTIVE");
+      expect((await stores[0].sessionsForBattery("pg-mode2")).filter((session) => session.status === "ACTIVE")).toHaveLength(1);
+    });
+  });
+} else {
+  console.info("[postgres contract] skipped: TEST_DATABASE_URL is not set; no PostgreSQL connection was attempted.");
+  describe.skip("PostgreSQL 저장소 계약 (skipped)", () => {
+    it("requires TEST_DATABASE_URL for the real database contract suite", () => undefined);
+  });
+}
 
 describe("진단 진행 상태", () => {
   it("hong이 모드 2 자산을 갖고 있다 — 기본 데모 계정에서 F21 화면이 잠기면 안 된다", async () => {

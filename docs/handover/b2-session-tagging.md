@@ -7,7 +7,7 @@
 | 항목 | 값 |
 |---|---|
 | 작성일 | 2026-08-27 |
-| 근거 문서 | CLAUDE.md (센서 스키마 절, 배터리 자산 절), `docs/product_contract.md` (§3.2 사용자당 진단기 1대 규칙), `backend/migrations/000`~`005` (실제 컬럼·제약) |
+| 근거 문서 | CLAUDE.md (센서 스키마 절, 배터리 자산 절), `docs/product_contract.md` (§3.2 사용자당 진단기 1대 규칙), `backend/migrations/000`~`006` (실제 컬럼·제약) |
 | 영역 | `measurement_session` 활성 상태, 세션 생명주기, telemetry_metric 적재 시점 |
 | 대상 구성요소 | Kafka Consumer (인프라 코드) — 이 저장소 밖 |
 

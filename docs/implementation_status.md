@@ -1,6 +1,6 @@
 # 구현 상태 및 문서 지도
 
-> 기준일: **2026-08-25** (직전 갱신 2026-08-11). 아래 표는 브라우저·curl·테스트 실제 실행으로 재확인했다.
+> 기준일: **2026-09-14** (직전 갱신 2026-08-25). 아래 표는 브라우저·curl·테스트 실제 실행으로 재확인했다.
 
 이 문서는 설계 문서의 요구사항과 현재 저장소에 실제로 존재하는 구현을 구분하기 위한 실행용 지도다. 요구사항의 정본이 아니며, 상세 계약은 아래 링크의 원본 문서를 따른다.
 
@@ -15,6 +15,19 @@
 3. **Phase 1 Better Auth 실인증은 보류한다.** 코드는 남기고 `AUTH_MODE=demo`로 꺼둔다. 데모 계정에 ADMIN이 있어 RBAC·감사로그 시연에는 지장이 없다.
 4. **Phase 6 카카오톡 발송은 보류한다.** 설정 화면의 채널 토글은 **현행 유지** — 저장은 되지만 발송은 일어나지 않고, 화면에 미구현 표시를 추가하지 않는다. ⚠️ 시연에서 "알림이 간다"고 설명하지 않도록 주의.
 
+## 2026-09-14 PostgreSQL 저장소 갱신
+
+`backend/src/store/postgres.ts`가 `CellGuardStore` 전체를 구현했고, `store.ts`는
+`DATA_MODE=postgres`에서 이 구현체를 선택한다. `initializeStore()`는 서버가
+listen하기 전에 migrations `000`~`006`의 핵심 스키마와
+`diagnosis.progress_snapshot`을 확인하며, 실패 시 memory 데이터로 대체하지
+않고 기동을 중단한다. `advanceDiagnosis`의 진행 상태는 런타임 메모리에
+유지하고 phase 경계에서만 `progress_snapshot`에 저장한다.
+
+PostgreSQL 계약·동시성 테스트는 `TEST_DATABASE_URL`이 설정된 경우에만 실제
+DB를 초기화해 실행한다. 현재 실행 환경에는 이 변수가 없어 명확한 skip 1건을
+남기고, DB 연결 없이 unit/메모리 테스트를 통과했다.
+
 ## 읽는 법
 
 - **구현됨**: 저장소에서 실행 가능한 코드나 검증 가능한 산출물을 확인할 수 있다.
@@ -28,17 +41,17 @@
 |---|---|---|
 | 요구사항·제품 계약 | [`PLAN.md`](../PLAN.md), [`docs/product_contract.md`](product_contract.md), 기능정의서·유저플로우 | 구현 기준 문서 있음 |
 | 백엔드 인증 골격 | `backend/src/auth.ts`, 세션 미들웨어, 감사 로그, DB 연결, Better Auth `/api/auth/*`. 데모 토큰 인증으로 RBAC·정지 계정 차단까지 실동작 | 골격 구현 / **실인증 전환은 보류(의도적)** |
-| 백엔드 데모 도메인 API | `backend/src/server.ts`(991줄): 발급 토큰 인증, 사용자·관리자 REST 56개 라우트(`/health`·`/api/demo/*` 포함), 계약형 대시보드, F21 fail-closed, 릴레이 승인·재인증·멱등성, Raw CSV. 게이트 실동작 확인(`409 BATTERY_BLOCKED`/`NO_ACTIVE_SESSION`, `401 REAUTH_REQUIRED`, `ACK_REQUIRED`, 관리자 `403`) | **데모 런타임 구현·실 REST 브라우저 검증 완료** |
-| 백엔드 도메인 데이터 저장 | `backend/src/store/contract.ts`(비동기 `CellGuardStore` 인터페이스) + `backend/src/store/memory.ts`(인메모리 구현체, 계약 테스트 20건 통과) + `backend/src/store.ts`(facade). `backend/src/db.ts`의 풀은 아직 `auth.ts`(Better Auth)만 사용. `DATA_MODE=postgres` PostgreSQL 구현체는 인프라 인계(`docs/handover/infra-implementations.md` 1부) | **인터페이스 분리 완료 / PostgreSQL 구현체 대기** (→ B1) |
+| 백엔드 데모 도메인 API | `backend/src/server.ts`: 발급 토큰 인증, 사용자·관리자 REST 라우트(`/health`·`/api/demo/*` 포함), 계약형 대시보드, F21 fail-closed, 릴레이 승인·재인증·멱등성, Raw CSV. 게이트 실동작 확인(`409 BATTERY_BLOCKED`/`NO_ACTIVE_SESSION`, `401 REAUTH_REQUIRED`, `ACK_REQUIRED`, 관리자 `403`) | **데모 런타임 구현·실 REST 브라우저 검증 완료** |
+| 백엔드 도메인 데이터 저장 | `backend/src/store/contract.ts`의 `CellGuardStore`, `memory.ts` 참조 구현, `postgres.ts` PostgreSQL 구현, `store.ts`의 `DATA_MODE` 분기. PostgreSQL은 자산 최신값·릴레이·진단·건강 집계·텔레메트리 CSV를 읽고, 상태+감사 변경을 트랜잭션으로 처리한다 | **구현 완료 / TEST_DATABASE_URL 설정 시 실 DB 계약 검증** |
 | 백엔드 실시간 스트림 (WS 발신) | **C1 완료(2026-08-25).** 프론트가 처리하는 11종 중 `metrics.tick`·`anomaly.score`·`anomaly.gradeChanged`·`relay.changed`·`alert.created`·`event.created`·`session.ended`·`resync.required` 8종이 실제로 발신되고, `subscribe`/`resume`이 1만 건 링버퍼로 실제 재전송을 수행한다. 단 `metrics.tick`·`anomaly.score`·`anomaly.gradeChanged`·`alert.created`는 이 저장소 안에 `battery.latest.score`를 사후에 바꾸는 코드가 아직 없어 **매초 같은 값을 반복 push하는 휴면 상태**다(AI 추론 연동 후 살아난다) — 이는 버그가 아니라 현재 범위의 자연스러운 결과다. `relay.autoCut`은 **구현됨(문턱 미설정이라 휴면)**(B3 완료, §4 C1 참조), `diagnosis.progress`/`.done`/`.aborted`는 여전히 미발신 | **구현됨(부분 휴면)** — 잔여 `diagnosis.*`(→ F21 안전 프로필) |
 | 에지 명령 경로 | `backend/src/device/port.ts`(`DeviceCommandPort` 인터페이스, 메서드 4개) + `backend/src/device/logging.ts`(로깅 스텁 — 콘솔에만 남기고 실제 전송 없음) + `backend/src/kafka.ts`(version 1 wire contract·Zod 검증·파티션 키). `SESSION_ENDED`도 `batteryId`를 payload·파티션 키에 포함하도록 계약을 고정했다. `battery-events` 발행을 실제로 수행하는 Kafka 구현체는 인프라 인계(`docs/handover/infra-implementations.md` 2부) — dual-write outbox 배선은 미구현 | **wire contract + DeviceCommandPort + 로그 스텁 / Kafka 구현체 대기** (→ B4) |
-| 백엔드 DB 도메인 provider·Consumer·TimescaleDB | `backend/migrations/000_identity.sql`~`005_timescale.sql`에 자산/세션/릴레이/텔레메트리/진단/멱등성 및 추가 시계열 스키마가 있고 컬럼이 `store/types.ts` 타입에 대응하나(완전한 1:1은 아니다 — `docs/handover/schema-open-questions.md` §0), production repository·Kafka Consumer·시계열 적재는 없음. `DATA_MODE=postgres`에서는 `/api/*` 전체가 `RUNTIME_NOT_READY`(503)로 fail-closed(C2, 2026-08-25 실측), `AUTH_MODE=betterauth`에서는 WS도 `socket.destroy()`(C2b, 보류) — 단 WS upgrade는 `DATA_MODE`를 보지 않는 갭이 있다(§4 C2 참조) | 마이그레이션·계약 골격만 있음 / provider 미착수 |
+| 백엔드 DB 도메인 provider·Consumer·TimescaleDB | `backend/migrations/000_identity.sql`~`006_diagnosis_progress_snapshot.sql`의 도메인 스키마와 `postgres.ts` provider가 있다. Kafka Consumer·시계열 적재·Timescale 실측은 아직 별도 담당 범위이며, `DATA_MODE=postgres`는 스키마 확인 후 실제 DB provider를 연다. `AUTH_MODE=betterauth`의 WS 인증은 여전히 보류되고, WS upgrade가 `DATA_MODE`를 별도로 검사하지 않는 갭은 남아 있다 | **도메인 provider 구현 / Consumer·Timescale·WS 인증 미착수** |
 | 알림 발송 (카카오·SMS·메일) | 채널 ON/OFF 토글과 policy 응답만 있고(`server.ts:405`·`:409`), **실제로 메시지를 보내는 코드는 `backend/src`에 없다** | **보류(의도적)** — 토글 현행 유지, 추가 작업 없음 |
 | AI 로컬 추론 프로세스 | 코드 없음. `ai/` 디렉터리도 없다. 학습(Colab)·체크포인트 반출 절차·추론 프로세스 모두 미착수 | 미착수 — **별도 담당자** |
 | 로컬 실행 패키징 | **C8 완료(2026-08-25)** — 단일 오리진(`:3005`), `start-local.bat`(Windows, 수동 실행), `docs/local_run.md`. memory 모드 한정(Kafka·PostgreSQL·추론은 별도) | 완료 (memory 모드) |
 | 에지 소프트웨어 | `edge/bw150/`에 BW150 HID 로거·탐지·BLE 프로브(914줄)만 있고, 센서·릴레이·Kafka 프로듀서 구현은 없음 | 부분 구현 (BW150 한정) |
 | AI 소프트웨어 | 모델 설계는 있으나 `ai/` 디렉터리, Colab 노트북, 학습·추론·Kafka 연동 구현은 없음 | 미착수 |
-| 프론트엔드 | [`frontend/src/`](../frontend/src/)의 Vite + React + TypeScript strict 앱, v3 사용자 15·관리자 6 라우트, 계약형 API/WS 계층, MSW 시나리오, `npm run dev:real` 데모 경로. WS 이벤트 11종 핸들러 중 **9종이 서버 발신을 실제로 수신**(C1 8종 + B3의 `relay.autoCut`), 잔여 `diagnosis.*` 2종은 F21이 fail-closed라 도달 불가 | 부분 구현 / production provider 미착수 |
+| 프론트엔드 | [`frontend/src/`](../frontend/src/)의 Vite + React + TypeScript strict 앱, v3 사용자 15·관리자 6 라우트, 계약형 API/WS 계층, MSW 시나리오, `npm run dev:real` 데모 경로. WS 이벤트 11종 핸들러 중 **9종이 서버 발신을 실제로 수신**(C1 8종 + B3의 `relay.autoCut`), 잔여 `diagnosis.*` 2종은 F21이 fail-closed라 도달 불가 | 부분 구현 / Consumer·production WS 인증 미착수 |
 | 프론트엔드 실행 기반 | `frontend/package.json`, React Router, Query, RHF/Zod, 토큰 CSS, 공용 UI, Vitest/RTL/Playwright. **Vitest 44건·Playwright 28건·`tsc --noEmit` 통과**(2026-08-25 실행) | 구현됨 |
 | 미구현 REST·화면 | **C3 완료(2026-08-25)**: `POST /api/account/email-availability`, `POST /api/exports`+`GET /api/exports/{id}`+`GET /api/exports/{id}/download`(QUEUED→READY 비동기 잡, 서명·시한부 다운로드 URL, 멱등성·소유권 검증까지 실측 완료). **C4 완료(2026-08-25)**: `GET`/`PATCH /api/settings/voice-alert` + 설정 화면 새 탭. 남은 것은 `GET /api/trends/export.pdf`(503 스텁 — PDF 생성에 새 의존성이 필요해 이번 라운드는 범위 밖으로 확정) | 부분 구현 — 잔여 `export.pdf`(범위 밖 확정) |
 | 모드 1 하드웨어 | KiCad 회로 파일, [`docs/hardware/mode1_backend_spec.md`](hardware/mode1_backend_spec.md), 조립 안내서 | 문서·설계 있음, 실물 검증 전 |
@@ -66,7 +79,11 @@ cd tools    && python3 -m unittest discover -p "test_*.py"   # ⚠️ tools/ 안
 python3 tools/contract_lint.py docs/product_contract.md      # 인자 없이 부르면 usage만 출력
 ```
 
-데모 계정은 `backend/src/store.ts:132`~`135`에 있다 — `hong@cellguard.io`(USER) / `lee@lab.io`(ADMIN) / `park@test.io`(SUSPENDED), 비밀번호는 모두 `demo-password`. `PACK-001`은 `opsStatus: BLOCKED`라 세션을 시작할 수 없으니(의도된 게이트) 시연에는 `DEMO-PACK-001`을 쓴다.
+데모 계정은 memory mode에서는 `backend/src/store/memory.ts:30`~`35`, PostgreSQL
+mode에서는 migrations `000_identity.sql`·`002_domain_gaps.sql`에 있다 —
+`hong@cellguard.io`(USER) / `lee@lab.io`(ADMIN) / `park@test.io`(SUSPENDED),
+비밀번호는 모두 `demo-password`. `PACK-001`은 `opsStatus: BLOCKED`라 세션을
+시작할 수 없으니(의도된 게이트) memory 시연에는 `DEMO-PACK-001`을 쓴다.
 
 ### 2026-08-25 재확인에서 정정된 것
 
@@ -93,7 +110,7 @@ v3 프로토타입과 정본 문서에는 모드 1/2, 대표 온도 최댓값, s
 | Phase 2 에지 수집 | 센서·100ms 폴링·릴레이·음성·프로듀서 | 미착수 (BW150 도구만 존재) |
 | Phase 3 스트리밍 | Consumer·세션 태깅·적재·오프셋 | 미착수 |
 | Phase 4 AI | 데이터셋·특징·AE·Informer·추론 | 미착수. **추론이 Colab에서 호스트 PC로 내려왔고 별도 담당자 몫** |
-| Phase 5 웹 | React 초기화·라우팅·화면·관리자 | 부분 구현. v3 화면·계약 계층·mock QA·localhost demo REST 연결 완료. **WS 서버 발신이 1/11종 → 8/11종으로 확장**(C1, 2026-08-25)됐으나 잔여 2종은 각각 B3·F21 안전 프로필 선행. production DB provider 통합(B1)은 미완료 |
+| Phase 5 웹 | React 초기화·라우팅·화면·관리자 | 부분 구현. v3 화면·계약 계층·mock QA·localhost demo REST 연결 완료. **WS 서버 발신이 1/11종 → 8/11종으로 확장**(C1, 2026-08-25)됐으나 잔여 2종은 각각 B3·F21 안전 프로필 선행. production DB provider 통합(B1)은 구현 완료, 실 DB 인수 검증 대기 |
 | Phase 6 알림·차단 | 카카오·Fail-Safe·음성 설정 | **카카오는 보류(의도적).** Fail-Safe는 판정 코드 자체가 없고, 음성 설정은 API·화면 모두 없음 — 이 둘은 미착수 |
 | Phase 7 통합·**로컬 실행 패키징** | E2E·시나리오·실행 묶기 | **로컬 실행 패키징은 C8로 완료(2026-08-25)**. **AWS 배포 항목은 삭제**(클라우드 미사용). 프론트 단독 E2E(Playwright 29건, C8에서 1건 추가)는 동작 |
 
@@ -142,14 +159,17 @@ v3 프로토타입과 정본 문서에는 모드 1/2, 대표 온도 최댓값, s
 
 **판단과 구현을 구분한다.** 경계가 애매한 항목에서 *무엇을 언제 어떤 규칙으로* 정하는 것은 백엔드 담당(계약 문서를 읽는 사람)의 몫이고, *어디에 어떻게 적재·전달할지*는 인프라 담당의 몫이다. 판단을 인프라 담당에게 넘기면 안전 로직이 두 곳으로 쪼개진다 — CLAUDE.md가 릴레이 채널 매핑을 모드 1·2에서 통일해 둔 것과 같은 이유다(*"안전 로직에서 두 벌은 곧 버그다"*).
 
-## 1. 지금 실제로 돌아가는 것 (2026-08-25 실측, C1/C2/C3 반영)
+## 1. 지금 실제로 돌아가는 것 (2026-09-14 실측, C1/C2/C3/B1 반영)
 
-- `backend` 타입체크 통과 + Vitest **21건**(신규 — 이번 계획에서 처음 생긴 백엔드 테스트 하네스. `grade.ts`·`eventLog.ts`·`store.ts`(신규 `sessionById`)·`exports.ts`), `frontend` 타입체크 통과 + Vitest 44건 + Playwright 28건, `contract_lint.py` 위반 0건.
+- `backend` 타입체크·빌드 통과 + Vitest **235건 통과, 1건 명시적 skip**(PostgreSQL URL 부재), `frontend` 타입체크 통과 + Vitest 44건 + Playwright 28건, `contract_lint.py` 위반 0건.
 - `AUTH_MODE=demo DATA_MODE=memory` + `npm run dev:real`로 브라우저에서 로그인 → 자산 게이트 → 세션 시작 → 대시보드까지 실제 REST/WS로 동작. 콘솔 에러 없음. (`DEMO_MODE`는 C2에서 완전히 제거됐다 — 아래 참조.)
 - 서버측 게이트 실동작 확인: `409 BATTERY_BLOCKED`, `409 NO_ACTIVE_SESSION`, `401 REAUTH_REQUIRED`, `ACK_REQUIRED`, USER의 관리자 API `403`.
 - **C1**: WebSocket이 `relay.changed` 1종에서 8종 발신으로 확장됐다(§4 C1). **C2**: `DEMO_MODE` → `AUTH_MODE`/`DATA_MODE` 분리 완료. **C3**: `email-availability`·`exports` 계열 REST 2건 신규 구현.
 
-**단, 도메인 데이터는 전부 인메모리다.** `backend/src/store.ts`는 `node:crypto`만 import하며 어떤 SQL도 실행하지 않는다. `backend/src/db.ts`의 풀은 `auth.ts`(Better Auth)만 쓴다. **이 문서의 C1/C2/C3 실측은 모두 인메모리 데이터 위에서 확인한 것이며, `DATA_MODE=postgres`(B1)는 여전히 미착수다.**
+**브라우저 실측 시나리오는 여전히 `DATA_MODE=memory` 기준이다.** 다만 B1
+provider·분기·기동 스키마 검사가 구현됐고, 실제 PostgreSQL 계약/경쟁 검증은
+`TEST_DATABASE_URL`이 제공된 환경에서 추가로 실행해야 한다. Kafka Consumer,
+Timescale 적재, 물리 Fail-Safe는 여전히 별도 범위다.
 
 ## 2. A군 — 타 담당자 몫
 
@@ -165,11 +185,11 @@ v3 프로토타입과 정본 문서에는 모드 1/2, 대표 온도 최댓값, s
 
 > ⚠️ **`advertised.listeners`를 `localhost`로 두면 라즈베리파이가 못 붙는다.** 브로커가 클라이언트에게 자기 주소를 되돌려주는 값이라, `localhost`면 에지가 자기 자신에게 접속을 시도하며 조용히 실패한다. 호스트의 LAN IP로 잡는다.
 
-> **✅ A2~A5에 필요한 스키마 6건은 마이그레이션에 반영됐다** — 추론 결과 적재 테이블, `age_ms`·`temp_points`·`mode`·`soc_basis`, TimescaleDB 하이퍼테이블, 진단기(`device`) 테이블, 중복 방지 키, `battery_asset.memo`가 `backend/migrations/002`~`005`에 있다. A2~A5의 Consumer·provider 구현은 여전히 남아 있으며, 결정 기록은 [`docs/handover/schema-open-questions.md`](handover/schema-open-questions.md)다.
+> **✅ A2~A5에 필요한 스키마와 진단 진행 스냅샷이 마이그레이션에 반영됐다** — 추론 결과 적재 테이블, `age_ms`·`temp_points`·`mode`·`soc_basis`, TimescaleDB 하이퍼테이블, 진단기(`device`) 테이블, 중복 방지 키, `battery_asset.memo`, `diagnosis.progress_snapshot`이 `backend/migrations/002`~`006`에 있다. A2~A5의 Consumer·provider 구현은 여전히 남아 있으며, 결정 기록은 [`docs/handover/schema-open-questions.md`](handover/schema-open-questions.md)다.
 
-> ✅ **마이그레이션 실행 선행 문제는 해소됐다** — `000_identity.sql`이 `"user"` 테이블과 데모 seed를 먼저 만들고, `001`~`005`가 파일명 순서대로 적용된다. 실행기는 [`docs/handover/infra-implementations.md` §3-1·§4](handover/infra-implementations.md)를 따른다.
+> ✅ **마이그레이션 실행 선행 문제는 해소됐다** — `000_identity.sql`이 `"user"` 테이블과 데모 seed를 먼저 만들고, `001`~`006`이 파일명 순서대로 적용된다. 실행기는 [`docs/handover/infra-implementations.md` §3-1·§4](handover/infra-implementations.md)를 따른다.
 
-> 스키마의 정본은 `backend/migrations/000_identity.sql`~`005_timescale.sql`이다. `001`의 기존 8개 테이블과 `002`~`005`의 추가 테이블·컬럼은 `store.ts` 타입과 완전한 1:1이 아니므로, **스키마를 바꾸면 `store.ts` 타입도 같이 바꾸고 반드시 합의 후 변경한다.**
+> 스키마의 정본은 `backend/migrations/000_identity.sql`~`006_diagnosis_progress_snapshot.sql`이다. `001`의 기존 8개 테이블과 `002`~`006`의 추가 테이블·컬럼은 `store.ts` 타입과 완전한 1:1이 아니므로, **스키마를 바꾸면 `store.ts` 타입도 같이 바꾸고 반드시 합의 후 변경한다.**
 
 ### A-2. AI 담당
 
@@ -190,22 +210,22 @@ v3 프로토타입과 정본 문서에는 모드 1/2, 대표 온도 최댓값, s
 
 **이 4건이 지금 가장 위험하다.** "DB는 동료 몫"으로 뭉뚱그리면 양쪽 다 착수하지 않은 채 통합 시점에 드러난다.
 
-### B1. `store.ts` → PostgreSQL 리포지토리 교체 — **1단계 완료(2026-08-27) / 2단계 인계**
+### B1. `store.ts` → PostgreSQL 리포지토리 교체 — **구현 완료(2026-09-14) / 실 DB 인수 검증 대기**
 
 사실 회색지대가 아니다. 버전 충돌(`version` 컬럼), 멱등성 키, `opsStatus` 게이트, 소유자 스코프가 전부 백엔드 계약이라 **DB를 쓰는 애플리케이션 코드**다.
 
 **1단계(백엔드, 완료) 산출물**:
 - 인터페이스 `backend/src/store/contract.ts` — `CellGuardStore`. 에러는 `throw new Error("<CODE>")`, 반환값 방어 복사, 감사 로그 동반 메서드(`changeRelay`·`engageFailsafe`·`changeOpsStatus`·`saveMemo`·`changeUserStatus`·`startSession`)는 원자적이어야 한다는 규칙을 명문화.
 - 인메모리 구현체 `backend/src/store/memory.ts` — 위 인터페이스를 만족하는 참조 구현. 데모 시드(`hong`/`kimeng`/`leelab`/`parktest`, `PACK-001`~`005`, `DEMO-PACK-001`)를 포함.
-- facade `backend/src/store.ts` — 기존 호출부 이름을 유지한 채 `active.<method>.bind(active)`로 위임. `DATA_MODE`에 따른 구현체 분기는 아직 없음(2단계 몫, 지금은 무조건 `createMemoryStore()`).
-- 계약 테스트 20건 — `backend/src/store/contract.test.ts`의 `runStoreContractTests()`. 소유자 스코프, `BATTERY_BLOCKED` 게이트, 세션 SUPERSEDED 전이, 버전 충돌 등 도메인 불변식을 인메모리 구현체로 검증 완료. **PostgreSQL 구현체도 같은 스위트를 통과해야 한다**(2단계 완료 판정).
+- facade `backend/src/store.ts` — 기존 호출부 이름을 유지한 채 `active.<method>.bind(active)`로 위임하고 `DATA_MODE=memory|postgres`에 따라 구현체를 선택한다. PostgreSQL은 listen 전에 핵심 스키마를 검사하며 실패 시 기동하지 않는다.
+- 계약 테스트 20건 — `backend/src/store/contract.test.ts`의 `runStoreContractTests()`가 `TEST_DATABASE_URL`이 있을 때 PostgreSQL에도 같은 스위트를 적용한다. DB가 없는 환경에서는 연결 없이 명시적으로 skip한다. 별도 테스트는 전역 active-session unique 경합을 `Promise.allSettled`로 검증한다.
 - 라우트 57개 async 전환 + `asyncRoute` 래퍼(`backend/src/asyncRoute.ts`) — `store.ts`의 모든 메서드가 `Promise`를 반환하도록 바뀌었으므로 `server.ts`의 호출부 전체가 `await`로 전환됐고, 각 라우트 핸들러를 `asyncRoute(async (req, res) => { ... })`로 감싸 에러를 `errorFromDomain()`으로 일괄 처리한다.
 
-**2단계(인프라 담당, 인계) — 정본은 `docs/handover/infra-implementations.md` 1부**:
-- `backend/src/store/postgres.ts`에 `createPostgresStore(pool: pg.Pool): CellGuardStore` 구현.
-- 계약 테스트 20건에 PostgreSQL 구현체를 추가로 통과시키고, 부분 유니크 인덱스 경합을 노리는 동시성 테스트를 별도로 추가.
-- `battery_asset`/`measurement_session`의 `owner_user_id` FK가 아직 없는 Better Auth `user` 테이블을 참조하는 문제를 먼저 푼다(seed 또는 FK 제거 중 택1).
-- 완료 후 `server.ts`의 `DATA_MODE` 503 가드와 `store.ts`의 구현체 분기를 연다.
+**2단계 산출물(2026-09-14) — 정본은 `docs/handover/infra-implementations.md` 1부**:
+- `backend/src/store/postgres.ts`에 `createPostgresStore(pool: pg.Pool): CellGuardStore` 구현. 자산·세션·릴레이·진단·건강 집계·텔레메트리 CSV 조회와 멱등성/도메인 오류 변환을 포함한다.
+- 상태 변경과 감사 로그 6개 경로를 한 트랜잭션으로 처리하고, `23505` 전역 세션/진단 unique 위반을 기존 도메인 코드로 변환한다.
+- `backend/migrations/006_diagnosis_progress_snapshot.sql`을 추가해 진단 phase 경계 스냅샷을 저장한다. 기존 `000`~`005`는 수정하지 않았다.
+- 남은 인수 조건은 `TEST_DATABASE_URL`을 가진 PostgreSQL에서 migrations 적용 후 계약·동시성 테스트와 실제 `DATA_MODE=postgres` 재시작 시나리오를 수행하는 것이다.
 
 ### B2. `battery_id` 세션 태깅 — **명세 완료(2026-08-27) / Consumer 구현 인계**
 
@@ -261,15 +281,28 @@ v3 프로토타입과 정본 문서에는 모드 1/2, 대표 온도 최댓값, s
 
 - `AUTH_MODE=demo|betterauth`(기본 `demo`), `DATA_MODE=memory|postgres`(기본 `memory`).
 - `GET /health`가 `{ status, auth, data }`를 반환하도록 바뀜 — 지금 어떤 조합으로 떠 있는지 즉시 보인다.
-- `/api/*` 도메인 게이트는 **`DATA_MODE`만 본다**: `memory`면 열려 인메모리 데모 스토어를 정직하게 서빙하고, `postgres`면 여전히 `503 RUNTIME_NOT_READY`다 — 실측으로 양방향 확인했다.
+- `/api/*` 도메인 게이트는 **`DATA_MODE`만 본다**: `memory`면 인메모리
+  provider를, `postgres`면 PostgreSQL provider를 사용한다. PostgreSQL은
+  listen 전 migrations `000`~`006` 핵심 스키마 검사를 통과해야 하며, 실패 시
+  `RUNTIME_NOT_READY`로 요청을 열지 않고 기동을 중단한다.
 
-**⚠️ 이 게이트는 의도된 것이지 미완성이 아니다.** `store.ts`를 대체할 실 PostgreSQL 리포지토리(B1)가 아직 없으므로, `DATA_MODE=postgres`가 게이트를 열면 "실 DB"라는 라벨을 달고 조작된 인메모리 데이터를 내보내게 된다. **B1이 끝나기 전까지 `DATA_MODE=postgres`는 계속 503이어야 정상이다.** "당면 목표 조합 `AUTH_MODE=demo` + `DATA_MODE=postgres`"는 이 문서가 세워질 때부터 B1 완료를 전제로 한 목표였고, 이번 계획(C1/C2/C3)은 B1을 건드리지 않았으므로 아직 도달하지 않았다.
+`DATA_MODE=postgres`는 이제 실제 DB provider를 사용한다. 스키마가 없거나
+연결할 수 없을 때 memory 데이터로 조용히 대체하지 않는 것이 fail-closed
+동작이다. 현재 저장소에서 확인한 PostgreSQL 실 DB 결과는
+`TEST_DATABASE_URL`이 없는 환경에서 생략됐으므로, 별도 DB 인수 테스트가 남아
+있다.
 
-**⚠️ 새로 발견된 실제 갭 — 이번 계획에서 고치지 않음**: WebSocket upgrade 핸들러의 데모/프로덕션 분기 선택이 **`AUTH_MODE`만 보고 `DATA_MODE`를 전혀 보지 않는다.** 즉 `AUTH_MODE=demo`로 데모 인증에 성공한 WS 연결은 `DATA_MODE=postgres`여도 그대로 성공해 (데모) 데이터를 계속 스트리밍한다 — REST가 갖는 "`DATA_MODE=postgres`면 fail-closed" 보장이 WebSocket에는 확장되지 않는다. `backend/README.md`에 이미 명시적으로 기록해뒀지만 **고치지는 않았다.** WS upgrade 경로에 `DATA_MODE` 체크를 추가하는 건 이번 계획 범위 밖의 실제 설계 과제이며, 아래 C2b(프로덕션 WebSocket 인증, 이 문서에 이미 별도로 보류 처리돼 있던 항목)와 묶어 다음에 처리하는 게 자연스럽다.
+**⚠️ 남은 실제 갭 — 이번 계획에서 고치지 않음**: WebSocket upgrade 핸들러의
+데모/프로덕션 분기 선택은 여전히 `AUTH_MODE`만 본다. 따라서
+`AUTH_MODE=demo DATA_MODE=postgres`에서도 데모 토큰 WS가 열리며, 연결 후
+데이터는 선택된 PostgreSQL provider를 조회한다. Better Auth cookie 기반 WS
+인증은 C2b 보류 항목으로 남아 있다.
 
 **주의**: Better Auth 코드와 `/api/auth/*` 라우트는 **삭제하지 않았다**(2026-08-25 결정 유지). `AUTH_MODE=betterauth`로 바꾸면 켜지는 상태로 남아 있다. 데모 쿼리 토큰(`access_token`)은 `AUTH_MODE=betterauth`에서 **절대 허용하지 않는다**(`backend/README.md`).
 
-**완료 판정**: 메커니즘(변수 분리·`/health`·REST 게이트)은 실측 완료. **`AUTH_MODE=demo DATA_MODE=postgres`로 브라우저 시나리오가 끝까지 도는 것은 B1이 끝나야 성립**하며 아직 아니다 — 이 완료 판정 문장은 B1 완료 시점의 기준으로 남겨둔다.
+**완료 판정**: 메커니즘(변수 분리·`/health`·REST provider 분기·기동 스키마
+검사)은 구현 완료. `AUTH_MODE=demo DATA_MODE=postgres`의 브라우저·재시작
+시나리오는 실제 DB가 준비된 인수 환경에서 추가 확인한다.
 
 ### C2b. production 인증 경로 (WebSocket) — **보류(의도적)**
 
@@ -318,14 +351,17 @@ v3 프로토타입과 정본 문서에는 모드 1/2, 대표 온도 최댓값, s
 
 ### C8. 로컬 실행 패키징 (구 Phase 7 배포) — **완료(2026-08-25), 실측 범위는 memory 모드 한정**
 
-정본은 `docs/local_run.md`. AWS 배포는 삭제됐고, 실제로 도는 것은 `AUTH_MODE=demo DATA_MODE=memory`뿐이다(Kafka·PostgreSQL 연동·추론 프로세스는 이 저장소에 아직 없음 — 별도 담당자 몫, CLAUDE.md).
+정본은 `docs/local_run.md`. AWS 배포는 삭제됐고, 기본 시연은
+`AUTH_MODE=demo DATA_MODE=memory`로 한다. PostgreSQL provider는 구현됐지만
+DB 준비와 실측은 별도 인수 환경이 필요하며, Kafka Consumer·추론 프로세스는
+아직 별도 담당자 몫이다.
 
 - **호스트 PC는 Windows로 확인됐다(2026-08-25)** — 이 사실을 CLAUDE.md와 개인 메모리에 남겼다. 이하 전부 Windows 기준.
 - **단일 오리진**: `backend/src/server.ts`에 `/api/*` 명시적 JSON 404(기존엔 Express 기본 HTML 404로 새고 있었음) + `express.static(frontend/dist)` + SPA 폴백(`index.html`)을 추가. `frontend/dist`가 없으면(백엔드 단독 dev 세션) 조용히 스킵된다.
 - **버그 하나 발견·수정**: `frontend/src/api/client.ts`의 `demoTransportEnabled()`(및 `App.tsx`·`PublicPages.tsx`의 동일 로직)가 `__CELLGUARD_DEV_SERVER__`(Vite `dev` 커맨드에서만 `true`) 뒤에 숨어 있어서, 단순히 `vite build`만 하면 데모 로그인이 전혀 안 됐다 — 진짜 Better Auth(C2b)가 아직 없어 대체 경로가 없다. `VITE_DEMO_MODE==="true"` 단독 체크로 게이트를 바꿔 해결(서버가 `AUTH_MODE=demo`로 이미 독립적으로 재검증하므로 안전). `main.tsx`의 MSW 목 게이트는 그대로 dev 전용 유지.
 - **`frontend/.env.production`(신규)**: `npm run build`가 자동으로 읽어 `VITE_API_BASE=`(동일 오리진)·`VITE_DEMO_MODE=true`·`VITE_USE_MOCKS=false`를 굽는다.
 - **Windows 배치 스크립트**: `start-local.bat` — `.env` 확인 → 최초 1회만 `npm install` → 매번 프론트 재빌드 → `npm run start:local`(`tsx src/server.ts`, backend/package.json에 신규 추가)로 백엔드 기동. **작업 스케줄러 등록 등 영구 자동시작은 설치하지 않는다** — 사용자가 명시적으로 이 옵션을 거절했다(재부팅 후 수동 실행).
-- **시드 데이터**: 별도 절차 없음 — `DATA_MODE=memory`의 시드가 곧 `backend/src/store.ts`에 내장된 데모 데이터다. `docs/local_run.md`에 이 사실을 명시해 헛수고로 시딩 스크립트를 찾지 않게 했다.
+- **시드 데이터**: memory mode는 `backend/src/store/memory.ts`에 내장된 데모 데이터, PostgreSQL mode는 migrations `000`·`002`의 사용자/프로필 seed를 사용한다. 배터리 자산은 PostgreSQL에서 등록 또는 테스트 fixture 준비가 필요하다.
 - **`.env` 템플릿**: `backend/.env.example`·`frontend/.env.example`에 주석 보강(왜 `DATABASE_URL`이 memory 모드에서도 필요한지, `.env.production`이 별도 파일인 이유).
 - **실측(이 세션, macOS에서 실제 프로덕션 빌드로 검증)**: `npm run build` → 백엔드 기동 → `curl`로 `/`·`/dashboard`(200 HTML)·`/api/does-not-exist`(404 JSON, HTML로 새지 않음) 확인. 브라우저로 `localhost:3005` 접속 → 데모 로그인 자동 진행 → 배터리 연결 → 대시보드·설정(C4 음성 안내 탭)·`?metric=` 배선(C6)·전류 abs() 추세(C7)까지 전부 단일 오리진에서 재확인. 콘솔 에러 없음.
 - **Playwright**: 기존 `e2e/production-bundle.spec.ts`(실서비스 빌드에 데모 자격증명이 새지 않는지 검증하는 기존 테스트)에 대칭 테스트 1건 추가 — `VITE_DEMO_MODE=true` 빌드에는 데모 로그인 트랜스포트가 **반드시 포함**돼야 함을 검증. 29건 전체 통과.
@@ -348,8 +384,8 @@ v3 프로토타입과 정본 문서에는 모드 1/2, 대표 온도 최댓값, s
 
 1. ~~**B군 4건의 담당을 문서로 확정한다**~~ — 코드보다 먼저. 특히 B3(Fail-Safe)는 넘기지 않는다.
 2. ~~**C1 WebSocket 발신**~~ — **완료(2026-08-25).** 8/11종 발신, 링버퍼 재전송 포함. 잔여는 `relay.autoCut`(B3 선행)·`diagnosis.*`(F21 안전 프로필 선행).
-3. ~~**C2 `AUTH_MODE`/`DATA_MODE` 분리**~~ — **완료(2026-08-25).** 단 `DATA_MODE=postgres`는 B1이 끝날 때까지 계속 503이 맞다. WS upgrade가 `DATA_MODE`를 안 보는 갭이 새로 발견됐다(§4 C2 참조, 미수정).
-4. **B1 리포지토리 교체** — **다음 우선순위.** 분량이 가장 크다(`store.ts` 전체 + 동기→비동기 전환). A-1 담당자의 A2와 병렬 진행 가능. C2가 끝나 `AUTH_MODE=demo DATA_MODE=postgres` 조합의 배선은 준비돼 있으니, B1이 끝나는 즉시 이 조합이 실제로 열린다.
+3. ~~**C2 `AUTH_MODE`/`DATA_MODE` 분리**~~ — **완료(2026-08-25), PostgreSQL provider 배선 보강(2026-09-14).** WS upgrade가 `DATA_MODE`를 별도로 보지 않는 갭은 남아 있다.
+4. ~~**B1 리포지토리 교체**~~ — **구현 완료(2026-09-14).** `TEST_DATABASE_URL`을 가진 DB에서 migrations `000`~`006` 적용 후 계약·동시성·재시작 인수 검증을 남겼다.
 5. **B3·B4 안전 경로** — A2/A4가 데이터를 주기 시작한 뒤. B3이 끝나면 C1의 `relay.autoCut`도 같이 닫힌다.
 6. ~~**C3 REST 미구현**~~ — **완료(2026-08-25).** `email-availability`·`exports` 계열 구현·실측 완료. `export.pdf`는 범위 밖 확정으로 남김.
 7. ~~**C8 로컬 실행 패키징**~~ — **완료(2026-08-25).** memory 모드 한정, Windows 배치 스크립트는 실제 Windows PC에서 미검증.
@@ -360,7 +396,7 @@ v3 프로토타입과 정본 문서에는 모드 1/2, 대표 온도 최댓값, s
 | 항목 | 이유 | 되살릴 때 |
 |---|---|---|
 | Better Auth 실인증 (C2b) | Phase 1 보류 결정 | `AUTH_MODE=betterauth`로 전환 + WS upgrade 분기 연결 |
-| WS upgrade의 `DATA_MODE` 인지 (C2 갭, 2026-08-25 신규 발견) | 이번 계획(C1/C2/C3) 범위 밖. `AUTH_MODE=demo`이면 `DATA_MODE=postgres`여도 WS가 열려 데모 데이터를 계속 스트리밍한다 — REST의 fail-closed가 WS에는 확장 안 됨 | WS upgrade 핸들러에 `DATA_MODE` 체크 추가. C2b(프로덕션 WS 인증)와 같은 지점을 고치므로 함께 처리 권장 |
+| WS upgrade의 `DATA_MODE` 인지 (C2 갭, 2026-08-25 신규 발견) | 이번 계획 범위 밖. `AUTH_MODE=demo`이면 `DATA_MODE=postgres`여도 WS가 열리며, 연결 후에는 선택된 provider를 사용한다 | WS upgrade 핸들러의 provider 준비 상태·production 인증 정책을 C2b와 함께 정리 |
 | 카카오톡 발송 (C5) | Phase 6 보류 결정 | 토글은 이미 있으니 발송 경로만 추가 |
 | AWS 배포 | 로컬 단일 PC 구성 | 해당 없음 |
 | `POST /api/account/email-availability`·`email-lookup`의 Origin 검증·rate-limit·감사 이벤트 부재 (2026-08-25 최종 리뷰 신규 발견) | 이번 계획이 만든 갭이 아니라 두 엔드포인트가 원래부터 갖고 있던 것. 계약이 요구하는 보호를 붙이려면 전용 보안 인프라(요청 Origin 검증 미들웨어, rate-limit 저장소, 감사로그 연결)가 먼저 필요해 이번 수정 라운드 범위를 넘는다 | Origin 검증·rate-limit·감사 이벤트를 두 엔드포인트에 함께 추가(하나만 고치면 다시 벌어진다) |
