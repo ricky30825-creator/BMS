@@ -1,5 +1,7 @@
 import {
   KAFKA_CONTRACT_VERSION,
+  KAFKA_EVENT_ID_HEADER,
+  KAFKA_EVENT_METADATA_RULES,
   KAFKA_PARTITION_KEY_RULES,
   KAFKA_TOPICS,
   batteryAnomalyAlertSchema,
@@ -50,6 +52,10 @@ describe("Kafka wire contracts", () => {
       events: "battery-events",
     });
     expect(KAFKA_CONTRACT_VERSION).toBe(1);
+    expect(KAFKA_EVENT_METADATA_RULES).toEqual({
+      eventIdHeader: KAFKA_EVENT_ID_HEADER,
+      partitionKey: "params.batteryId",
+    });
   });
 
   it("validates the raw sensor schema and preserves signed current/power", () => {

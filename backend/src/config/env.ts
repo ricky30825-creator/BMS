@@ -15,13 +15,21 @@ const envSchema = z.object({
   // accident.
   KAFKA_ENABLED: z.enum(["true", "false"]).default("false"),
   KAFKA_CONSUMER_ENABLED: z.enum(["true", "false"]).default("false"),
-  KAFKA_BROKERS: z.string().trim().min(1).default("127.0.0.1:9092"),
+  KAFKA_BROKERS: z.string().trim().min(1).refine(
+    (value) => value.split(",").some((broker) => broker.trim().length > 0),
+    "KAFKA_BROKERS must contain at least one broker",
+  ).default("127.0.0.1:9092"),
   KAFKA_CLIENT_ID: z.string().trim().min(1).default("cellguard-backend"),
   KAFKA_GROUP_ID: z.string().trim().min(1).default("cellguard-backend"),
   KAFKA_ANOMALY_GROUP_ID: z.string().trim().min(1).default("cellguard-backend-anomaly"),
   KAFKA_RAW_METRICS_TOPIC: z.string().trim().min(1).default(KAFKA_TOPICS.rawMetrics),
   KAFKA_ANOMALY_ALERTS_TOPIC: z.string().trim().min(1).default(KAFKA_TOPICS.anomalyAlerts),
   KAFKA_EVENTS_TOPIC: z.string().trim().min(1).default(KAFKA_TOPICS.events),
+  KAFKA_OUTBOX_BATCH_SIZE: z.coerce.number().int().positive().default(32),
+  KAFKA_OUTBOX_LEASE_MS: z.coerce.number().int().positive().default(30_000),
+  KAFKA_OUTBOX_POLL_INTERVAL_MS: z.coerce.number().int().positive().default(1_000),
+  KAFKA_OUTBOX_RETRY_BASE_MS: z.coerce.number().int().positive().default(500),
+  KAFKA_OUTBOX_RETRY_MAX_MS: z.coerce.number().int().positive().default(60_000),
   CORS_ORIGINS: z.string().default("http://localhost:5173,http://localhost:3000"),
   BETTER_AUTH_URL: z.string().url(),
   BETTER_AUTH_SECRET: z.string().min(32),
@@ -85,6 +93,13 @@ export const kafkaConfig = Object.freeze({
     rawMetrics: env.KAFKA_RAW_METRICS_TOPIC,
     anomalyAlerts: env.KAFKA_ANOMALY_ALERTS_TOPIC,
     events: env.KAFKA_EVENTS_TOPIC,
+  }),
+  outbox: Object.freeze({
+    batchSize: env.KAFKA_OUTBOX_BATCH_SIZE,
+    leaseMs: env.KAFKA_OUTBOX_LEASE_MS,
+    pollIntervalMs: env.KAFKA_OUTBOX_POLL_INTERVAL_MS,
+    retryBaseMs: env.KAFKA_OUTBOX_RETRY_BASE_MS,
+    retryMaxMs: env.KAFKA_OUTBOX_RETRY_MAX_MS,
   }),
 });
 

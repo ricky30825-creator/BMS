@@ -36,6 +36,10 @@ export async function initializeStore(): Promise<void> {
     raw_payload: string | null;
     outbox_event_id: string | null;
     outbox_dedupe_key: string | null;
+    outbox_next_attempt_at: string | null;
+    outbox_claim_token: string | null;
+    outbox_lease_until: string | null;
+    outbox_dead_at: string | null;
   }>(`
     select
       count(*)::int as table_count,
@@ -54,13 +58,29 @@ export async function initializeStore(): Promise<void> {
       (select column_name
        from information_schema.columns
        where table_schema = 'public' and table_name = 'outbox'
-         and column_name = 'dedupe_key') as outbox_dedupe_key
+         and column_name = 'dedupe_key') as outbox_dedupe_key,
+      (select column_name
+       from information_schema.columns
+       where table_schema = 'public' and table_name = 'outbox'
+         and column_name = 'next_attempt_at') as outbox_next_attempt_at,
+      (select column_name
+       from information_schema.columns
+       where table_schema = 'public' and table_name = 'outbox'
+         and column_name = 'claim_token') as outbox_claim_token,
+      (select column_name
+       from information_schema.columns
+       where table_schema = 'public' and table_name = 'outbox'
+         and column_name = 'lease_until') as outbox_lease_until,
+      (select column_name
+       from information_schema.columns
+       where table_schema = 'public' and table_name = 'outbox'
+         and column_name = 'dead_at') as outbox_dead_at
     from information_schema.tables
     where table_schema = 'public' and table_name = any($1::text[])
   `, [REQUIRED_POSTGRES_TABLES]);
   const schema = result.rows[0];
-  if (!schema || Number(schema.table_count) !== REQUIRED_POSTGRES_TABLES.length || !schema.progress_snapshot || !schema.raw_payload || !schema.outbox_event_id || !schema.outbox_dedupe_key) {
-    throw new Error("PostgreSQL schema is not ready; run npm run db:migrate (including 008_outbox_identity.sql)");
+  if (!schema || Number(schema.table_count) !== REQUIRED_POSTGRES_TABLES.length || !schema.progress_snapshot || !schema.raw_payload || !schema.outbox_event_id || !schema.outbox_dedupe_key || !schema.outbox_next_attempt_at || !schema.outbox_claim_token || !schema.outbox_lease_until || !schema.outbox_dead_at) {
+    throw new Error("PostgreSQL schema is not ready; run npm run db:migrate (including 009_outbox_delivery.sql)");
   }
 }
 

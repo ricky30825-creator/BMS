@@ -14,7 +14,7 @@ Node.js + TypeScript + Express backend for the CellGuard dashboard.
 ```bash
 npm install
 cp .env.example .env
-npm run db:migrate   # applies migrations/000..008, records them in schema_migrations
+npm run db:migrate   # applies migrations/000..009, records them in schema_migrations
 npm run build
 npm run dev
 ```
@@ -57,7 +57,7 @@ stays small — `001_app_auth.sql` has four foreign keys pointing at it. Only
 database, outside `schema_migrations`, so `npm run db:migrate` loses track of
 what is applied and the two disagree from then on. Instead run `auth:generate`,
 read the SQL it emits, and add it as a **new numbered migration** (e.g.
-`009_better_auth.sql`). `001_app_auth.sql` is a baseline file and is never
+`010_better_auth.sql`). `001_app_auth.sql` is a baseline file and is never
 edited — changes are stacked in later-numbered files.
 
 For the repository-backed localhost demo, use `AUTH_MODE=demo DATA_MODE=memory`
@@ -70,7 +70,7 @@ Better Auth cookie transport remains unchanged for production paths.
 The demo provider is intentionally not a production substitute. With
 `DATA_MODE=postgres`, startup verifies the required domain schema and the
 REST APIs use the PostgreSQL-backed `CellGuardStore`; there is no memory-data
-fallback. Apply migrations through `008_outbox_identity.sql`
+fallback. Apply migrations through `009_outbox_delivery.sql`
 before starting the server. The PostgreSQL integration contract suite runs
 only when `TEST_DATABASE_URL` is set; without it, the suite reports a clear
 skip and does not attempt a connection.
@@ -79,7 +79,7 @@ WebSocket production authentication is a separate deferred path: the current
 upgrade handler still accepts the demo token only when `AUTH_MODE=demo`, while
 Better Auth cookie-based streaming remains disabled.
 
-Migrations are applied by `npm run db:migrate` in filename order (`000`..`008`), not by running individual `.sql` files by hand. The earlier instruction to run `001_app_auth.sql` after creating the Better Auth core tables is obsolete: `000_identity.sql` now creates `"user"` itself, and `001` depends on it.
+Migrations are applied by `npm run db:migrate` in filename order (`000`..`009`), not by running individual `.sql` files by hand. The earlier instruction to run `001_app_auth.sql` after creating the Better Auth core tables is obsolete: `000_identity.sql` now creates `"user"` itself, and `001` depends on it.
 
 ## Raw telemetry Consumer
 
@@ -155,7 +155,7 @@ attribution and do not emit another grade transition or alert. The server's
 are derived from the committed row. Invalid JSON/contract messages are
 explicitly skipped; database or post-commit notification failures leave the
 offset uncommitted for retry. The Task 2 alert list is process-local and is
-fed only by committed anomaly transitions; durable alert/outbox delivery is a
+fed only by committed anomaly transitions; durable anomaly-alert delivery is a
 later task.
 
 ## Transactional command outbox
@@ -177,3 +177,22 @@ before the HTTP idempotency response was recorded. `sent_at` is left untouched
 here; a later producer owns publication and acknowledgement. PostgreSQL does
 not call `DeviceCommandPort` after commit. The memory demo keeps its existing
 logging port calls.
+
+### Command outbox delivery worker
+
+When `DATA_MODE=postgres` and `KAFKA_ENABLED=true` (and `NODE_ENV` is not
+`test`), the server starts `OutboxWorker` before opening the HTTP listener.
+`DATA_MODE=memory` and tests do not construct or connect a Kafka producer. The
+worker claims rows with PostgreSQL `FOR UPDATE SKIP LOCKED`, one unsent head
+row per `partition_key`, so an earlier row in backoff or an active lease blocks
+later commands for that battery while other batteries continue. Claims carry a
+lease and a unique token; expired claims are recovered on restart.
+
+The worker validates the version-1 `battery-events` payload and exact
+`partition_key`/`params.batteryId` match before publishing. Kafka receives the
+battery ID as the record key and the durable outbox `event_id` in the
+`x-cellguard-event-id` header. Only a successful Kafka `send` is followed by a
+`sent_at` update. Publish failures clear the lease, retain `sent_at = null`,
+record `attempts`/`last_error`, and schedule capped exponential backoff.
+Malformed rows are retained with `dead_at` and a `POISON:` error (never marked
+sent), allowing later commands in that battery partition to proceed.

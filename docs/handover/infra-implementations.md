@@ -8,9 +8,12 @@
 > **2026-09-14 Raw Consumer 갱신:** `backend/src/telemetryConsumer.ts`가 raw
 > 적재·session tagging·수동 offset commit·프레임별 Fail-Safe callback을 구현했다.
 > **2026-09-14 Task 3 갱신:** PostgreSQL outbox 원자성과 durable identity/dedupe가
-> `store/postgres.ts` 및 `008_outbox_identity.sql`에 구현됐다. 남은 인계 대상은
-> outbox를 실제 `battery-events`로 발행하는 DeviceCommandPort producer와 실
-> Kafka·DB 인수 검증이다.
+> `store/postgres.ts` 및 `008_outbox_identity.sql`에 구현됐다. 이후 Task 4에서
+> outbox delivery worker와 DeviceCommandPort producer도 추가됐고, 이제 남은 것은
+> 실 Kafka·DB 인수 검증이다.
+> **2026-09-14 Task 4 갱신:** `OutboxWorker`와 Kafka DeviceCommand producer가
+> `009_outbox_delivery.sql`의 lease·retry·poison 상태를 사용한다. 실제 Kafka
+> broker/Timescale 인수 검증만 남았다.
 
 ---
 
@@ -69,7 +72,7 @@ runStoreContractTests("postgres", async () => createPostgresStore(testPool));
 | 5 | `DATA_MODE` 게이트 열기 (§9) | ✅ 구현 완료(2026-09-14) |
 | 6 | `TEST_DATABASE_URL`로 계약·동시성·재시작 검증 | 실 DB 인수 환경에서 수행 |
 
-**마이그레이션 9개 파일** — 순서가 곧 의존성이다.
+**마이그레이션 10개 파일** — 순서가 곧 의존성이다.
 
 | 파일 | 내용 |
 |---|---|
@@ -82,6 +85,7 @@ runStoreContractTests("postgres", async () => createPostgresStore(testPool));
 | `006_diagnosis_progress_snapshot.sql` | 진단 phase 경계 복구용 `progress_snapshot jsonb` |
 | `007_telemetry_raw_payload.sql` | version-1 edge raw payload 보존용 `raw_payload jsonb` |
 | `008_outbox_identity.sql` | outbox durable `event_id`, replay `dedupe_key`와 유일성 제약 |
+| `009_outbox_delivery.sql` | outbox lease·retry 시각·claim token·poison `dead_at` |
 
 > **`005`가 실패하면 004까지는 유효하다** — TimescaleDB 확장이 없으면
 > `telemetry_metric`이 평범한 PostgreSQL 테이블로 남지만, 현재 실행기는 순서상
@@ -222,9 +226,12 @@ advanceDiagnosis(id: string, phase: string, progress: DiagnosisProgress): Promis
 
 ## 2부 — `DeviceCommandPort` (Kafka)
 
-### 11. 무엇을 만드나
+### 11. 무엇을 만들었나
 
-`backend/src/device/kafka.ts`에 아래 팩토리 함수를 구현하고, `backend/src/server.ts`가 현재 쓰고 있는 `createLoggingDeviceCommandPort()`(`backend/src/device/logging.ts`) 스텁을 이걸로 교체한다.
+`backend/src/device/kafka.ts`에 KafkaJS producer를 구현하고,
+`backend/src/outboxWorker.ts`에 PostgreSQL transactional outbox delivery worker를
+구현했다. `backend/src/server.ts`는 PostgreSQL + `KAFKA_ENABLED=true`일 때만
+worker를 시작하고, memory 경로에서는 기존 logging stub을 유지한다.
 
 ```ts
 import type { DeviceCommandPort } from "./port.js";
@@ -234,7 +241,7 @@ export function createKafkaDeviceCommandPort(/* producer, topic 등 */): DeviceC
 
 인터페이스는 `backend/src/device/port.ts`가 정본이며 메서드 4개다 — `relayCut(batteryId, reasonCode)`, `relayRestore(batteryId)`, `sessionStarted(sessionId, batteryId, targetMode)`, `sessionEnded(sessionId, batteryId, endReason)`. 전부 `battery-events` 토픽으로 발행한다. 이 단계에서 타입이 고정하는 것은 백엔드→에지 outbound 4종이며, 공유 토픽의 에지 센서 오류·`DIAG_*` 이벤트 전체를 이 인터페이스가 대표하지 않는다. `sessionEnded`의 `batteryId`는 세션 행에서 가져와 outbox payload와 Kafka 파티션 키에 함께 넣는다. 이 인터페이스는 전송 수단을 모르는 채로 설계돼 있으므로 파일 안에 Kafka 클라이언트 세부사항(브로커 주소, 파티션 키, 직렬화 포맷)을 감춰도 된다 — 도메인 코드(`server.ts`, `failsafeRunner.ts`)는 이 4개 메서드 시그니처만 안다.
 
-> **Kafka wire contract와 실행 설정 골격은 1단계에서 마련됐다.** `backend/src/kafka.ts`가 `version: 1`·세 토픽·Zod payload·파티션 키 규칙을 고정하고, `backend/package.json`은 `kafkajs`를 의존성으로 둔다. `backend/.env.example`과 `backend/src/config/env.ts`에는 `KAFKA_*` 값이 있으며 `KAFKA_ENABLED`·`KAFKA_CONSUMER_ENABLED`가 모두 true인 PostgreSQL 모드에서만 embedded raw Consumer가 브로커에 연결된다. DeviceCommand producer·outbox worker 연결은 다음 단계다.
+> **Kafka wire contract와 실행 설정 골격은 1단계에서 마련됐다.** `backend/src/kafka.ts`가 `version: 1`·세 토픽·Zod payload·파티션 키 규칙을 고정하고, `backend/package.json`은 `kafkajs`를 의존성으로 둔다. `backend/.env.example`과 `backend/src/config/env.ts`에는 `KAFKA_*` 값이 있으며, Consumer는 `KAFKA_CONSUMER_ENABLED`, DeviceCommand outbox worker는 `KAFKA_ENABLED`를 별도 gate로 사용한다.
 >
 > **즉 §9의 "건드리지 말 것" 두 지점과 달리 `backend/src/config/env.ts`는 고쳐야 한다.** 브로커 주소와 배포별 topic alias는 이 스키마에 두고(`DATABASE_URL`과 같은 방식), canonical topic 이름·payload 검증·파티션 키 규칙은 `backend/src/kafka.ts`에서 유지한다. 백엔드 파일이므로 변경 사실을 백엔드 담당자에게 알린다.
 
@@ -278,7 +285,7 @@ export async function runFailsafe(
 ): Promise<FailsafeVerdict>
 ```
 
-판정(`judgeFailsafe`)·인터락(`engageFailsafe`)·에지 통보(`devicePort.relayCut`)·WS 푸시(`broadcastAutoCut` → `relay.autoCut`)가 이미 그 안에 배선돼 있다(`backend/src/failsafeRunner.ts`의 `evaluateFailsafe`가 실체). Consumer는 callback을 battery별로 직렬화하며, callback과 DB transaction이 끝난 뒤에만 Kafka offset을 commit한다.
+판정(`judgeFailsafe`)·인터락(`engageFailsafe`)·에지 통보·WS 푸시(`broadcastAutoCut` → `relay.autoCut`)가 이미 그 안에 배선돼 있다(`backend/src/failsafeRunner.ts`의 `evaluateFailsafe`가 실체). PostgreSQL의 `engageFailsafe`는 상태·감사·`RELAY_CUT` outbox를 원자적으로 기록하고, 별도 `OutboxWorker`가 이를 edge에 발행한다. memory demo만 logging `DeviceCommandPort`를 직접 호출한다. Consumer는 callback을 battery별로 직렬화하며, callback과 DB transaction이 끝난 뒤에만 Kafka offset을 commit한다.
 
 #### 14a. Consumer 프로세스 경계 — **결정: backend 프로세스에 embedded (2026-09-14)**
 
@@ -350,17 +357,42 @@ onAutoCut: (relay, verdict) => {
 
 **13번(dual-write 원자성)을 outbox로 정하면 15번도 자동으로 풀린다.** 두 미결정을 따로 풀지 말고 하나의 설계 결정(outbox 채택 여부)으로 묶어서 백엔드 담당자와 합의하는 것을 권장한다.
 
+### 16. Outbox delivery worker — **구현 완료 (2026-09-14)**
+
+`backend/src/outboxWorker.ts`의 `OutboxWorker`는 PostgreSQL outbox를
+`FOR UPDATE SKIP LOCKED`로 claim한다. claim query의 `NOT EXISTS` 조건은
+같은 `partition_key`의 더 오래된 미전송·비-poison row를 선행 blocker로
+취급하므로, 앞 row가 retry backoff 또는 다른 worker lease 중일 때 뒤
+명령을 건너뛰지 않는다. 다른 배터리 파티션은 같은 batch에서 진행한다.
+
+claim에는 worker별 `claim_token`과 만료 `lease_until`이 붙고, worker 시작 시
+만료 claim을 해제해 재시작 복구를 수행한다. publish 실패는 `sent_at`을
+건드리지 않고 `attempts`, `last_error`, `next_attempt_at`을 갱신한다.
+publish 성공 뒤에만 `sent_at`을 기록하며, 그 사이 프로세스가 죽으면
+at-least-once 재발행이 가능하다.
+
+Kafka record는 payload를 version-1 `code + params` 그대로 JSON 직렬화하고,
+`params.batteryId`를 key로 사용한다. 008의 durable `event_id`는
+`x-cellguard-event-id` header로 전달돼 edge가 replay를 멱등 처리할 수 있다.
+payload·topic·partition key가 계약과 맞지 않는 row는 `dead_at`과 `POISON:`
+오류로 보존하고 `sent_at`은 null로 남겨 해당 배터리의 후속 명령을 막지
+않는다. 서버는 PostgreSQL + `KAFKA_ENABLED=true`이고 test가 아닐 때만
+worker를 시작하며, memory/test 경로는 Kafka client를 만들거나 연결하지
+않는다.
+
 ---
 
 ## 인계 후 남는 것 (요약)
 
-> **2026-09-14 갱신** — Raw Consumer wiring과 PostgreSQL transactional outbox까지 추가됐다. 남은 것은 별도 DeviceCommandPort producer와 실제 Kafka·PostgreSQL/Timescale 인수 검증이다.
+> **2026-09-14 갱신** — Raw Consumer wiring, PostgreSQL transactional outbox,
+> Kafka DeviceCommand producer와 leased outbox worker까지 추가됐다. 남은 것은
+> 실제 Kafka·PostgreSQL/Timescale 인수 검증이다.
 
-- ✅ **스키마** — `migrations/000`~`008`, `npm run db:migrate`로 적용. 결정 근거는 `schema-open-questions.md`와 §13.
+- ✅ **스키마** — `migrations/000`~`009`, `npm run db:migrate`로 적용. 결정 근거는 `schema-open-questions.md`와 §13·§16.
 - ✅ **PostgreSQL 구현체** — 본 문서 1부. `backend/src/store/postgres.ts`, 계약 테스트 wiring, 전역 active-session unique 경합 테스트를 추가했다. `TEST_DATABASE_URL`이 없으면 실제 DB 테스트는 명시적으로 skip한다.
 - ✅ **`advanceDiagnosis`의 `progress` 영속화 방침** — 본 문서 §8-1. 런타임 메모리 + phase 경계 `progress_snapshot` 저장으로 결정했고 `006`에 반영했다.
 - ✅ **`store/types.ts`·`contract.ts` 델타** — CSV의 선택적 날짜 범위를 계약에 추가하고, 최신값·건강·텔레메트리 매핑을 기존 반환 타입에 연결했다.
-- **Kafka 구현체** — 본 문서 2부. `backend/src/device/kafka.ts` 신규 작성 + outbox polling/발행 후 `sent_at` 갱신(도메인 outbox 배선은 완료, producer는 별도 범위).
+- ✅ **Kafka 구현체** — `backend/src/device/kafka.ts`의 version-1 producer와 `backend/src/outboxWorker.ts`의 polling/claim/retry/lease 복구. 발행 성공 뒤에만 `sent_at`을 갱신하고 durable `event_id`를 Kafka header로 전달한다. 실 broker 인수 검증은 남았다.
 - ✅ **Raw Consumer의 `battery_id` 태깅** — `backend/src/telemetryConsumer.ts`와 `docs/handover/b2-session-tagging.md`; 실 Kafka·DB 인수 검증은 남았다.
 - **모드 1 SOH/RUL 산출 주체** — `battery_health` 테이블은 만들었지만 **누가 계산해 넣는지는 아직 미정**이다(`backend_contract.md` §9 Q6은 모드 2만 확정). DB는 저장만 맡는다.
 - **Fail-Safe 문턱값** — 하드웨어 실측 후 결정. `mode1_backend_spec.md` §13 H8(압력 baseline·상승률), `mode2_powerbank_diagnosis_spec.md` §8 H2(모드 2 표면온도 상승률). `runFailsafe` 호출은 배선됐지만 `UNSET_THRESHOLDS`가 전부 0이라 현재 자동 차단은 휴면 상태다.

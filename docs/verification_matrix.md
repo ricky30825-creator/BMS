@@ -28,13 +28,14 @@
 | 빌드 | `npm --prefix backend run build` | 종료 코드 0, 소스 오류 없음 |
 | Raw Kafka Consumer unit | `npm --prefix backend test -- src/telemetryConsumer.test.ts` | fake Kafka/PG로 valid·registered-device server-clock liveness·out-of-order 신규 frame·OFFLINE duplicate no-revive·rollback·unknown device·no session/transition audit·audit `created_at` event time·mode mismatch·malformed poison explicit commit·replay·out-of-order safety·DB/safety failure no commit·serialization·shutdown 통과 |
 | Anomaly Kafka Consumer unit | `npm --prefix backend test -- src/anomalyConsumer.test.ts` | fake Kafka/PG로 v1 계약·device/ACTIVE-session attribution·null attribution·모든 AI 필드 보존·`(device_id,evaluated_at)` replay·세션 변경 replay 보존·`battery_latest` 단조성·poison explicit commit·DB/콜백 실패 no commit·중복 이벤트 방지·manual commit/shutdown 통과 |
-| PostgreSQL 저장소 계약 | `TEST_DATABASE_URL=... npm --prefix backend test` (migrations `000`~`008` 적용 DB) | memory 계약 스위트·전역 active-session 경합·outbox 순서/rollback/replay unit 테스트 통과. URL이 없으면 실제 연결 없이 명시적 skip |
+| DeviceCommand outbox worker unit | `npm --prefix backend test -- src/outboxWorker.test.ts src/device/kafka.test.ts` | fake PostgreSQL/Kafka로 `FOR UPDATE SKIP LOCKED` claim 경쟁·배터리별 선행 row ordering·성공 ACK 후 `sent_at`·publish 실패 retry/backoff·만료 lease/restart recovery·invalid payload poison quarantine·producer header/key·lifecycle 통과 |
+| PostgreSQL 저장소 계약 | `TEST_DATABASE_URL=... npm --prefix backend test` (migrations `000`~`009` 적용 DB) | memory 계약 스위트·전역 active-session 경합·outbox 순서/rollback/replay unit 테스트 통과. URL이 없으면 실제 연결 없이 명시적 skip |
 | Consumer runtime gate | `DATA_MODE=memory KAFKA_CONSUMER_ENABLED=true ...` 및 `DATA_MODE=postgres KAFKA_CONSUMER_ENABLED=true KAFKA_ENABLED=false ...` | memory/test에서는 Kafka 연결 없음, PostgreSQL enabled 상태에서 invalid config는 HTTP listen 전에 fail-closed |
 | 런타임 기본 상태 | 환경변수·DB 준비 후 `npm --prefix backend run dev`, `curl http://localhost:3005/health` | `{"status":"ok"}` 응답 |
 | 인증·권한 | Better Auth 마이그레이션/세션으로 `/api/auth/*`, `/api/me`, `/api/admin/*` 확인 | 세션 검증과 `ADMIN` 재검증이 서버에서 동작 |
 | API 계약 변경 | [`docs/backend_contract.md`](backend_contract.md) 해당 절과 요청/응답·에러 코드 비교 | 계약서의 도메인 불변식·소유권·감사 로그를 만족 |
 
-현재 데모 런타임에는 발급 토큰 인증, 자산/세션/계약형 대시보드, 핵심 사용자·관리자 REST, 관리자 상태·메모·계정 사유 게이트, F21 fail-closed, 릴레이 승인·멱등성, Raw CSV, 세션 스코프 WS가 있다. `DATA_MODE=postgres`는 기동 전에 migrations `000`~`008` 핵심 스키마를 확인한 뒤 실제 PostgreSQL domain provider를 사용하며, 초기화 실패 시 memory 데이터로 대체하지 않는다. Raw/Anomaly Consumer unit 경로와 수동 offset/재처리 규칙은 구현됐지만 실제 Kafka·Timescale 부하 인수는 별도다. 프론트는 `npm --prefix frontend run dev:real`로 실제 REST/WS를 확인할 수 있고, 기본 `npm run e2e`는 MSW fixture 검증이다. PDF aggregate export는 아직 범위 밖이다.
+현재 데모 런타임에는 발급 토큰 인증, 자산/세션/계약형 대시보드, 핵심 사용자·관리자 REST, 관리자 상태·메모·계정 사유 게이트, F21 fail-closed, 릴레이 승인·멱등성, Raw CSV, 세션 스코프 WS가 있다. `DATA_MODE=postgres`는 기동 전에 migrations `000`~`009` 핵심 스키마를 확인한 뒤 실제 PostgreSQL domain provider를 사용하며, 초기화 실패 시 memory 데이터로 대체하지 않는다. Raw/Anomaly Consumer와 Outbox Worker unit 경로 및 수동 offset/재처리/lease 규칙은 구현됐지만 실제 Kafka·Timescale 부하 인수는 별도다. 프론트는 `npm --prefix frontend run dev:real`로 실제 REST/WS를 확인할 수 있고, 기본 `npm run e2e`는 MSW fixture 검증이다. PDF aggregate export는 아직 범위 밖이다.
 
 ## Python 도구
 

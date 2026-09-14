@@ -380,7 +380,7 @@ ADS1115          LAN          battery-anomaly-alerts ◀─ alerts 발행 ─┤
 
 > `battery_asset`, `measurement_session` 관계 테이블은 PostgreSQL(비시계열)에 두고, 시계열 하이퍼테이블은 `battery_id` FK로 참조한다.
 >
-> **⚠️ 위 두 스펙은 "설계"가 아니라 "이미 있는 스키마 위의 남은 작업"이다.** 실제 컬럼·제약의 정본은 `backend/migrations/000_identity.sql`~`007_telemetry_raw_payload.sql`이며, 기존 8개 테이블에 더해 `002`~`005`가 추론 결과·Raw 보조 필드·하이퍼테이블·진단기·중복 방지·`battery_asset.memo`를, `006`이 진단 phase 경계 스냅샷을, `007`이 raw wire payload 보존을 반영했다. **이 문서가 "시계열 하이퍼테이블"이라 부르는 테이블의 실제 이름은 `telemetry_metric`이다.** 과거 결정 기록은 `docs/handover/schema-open-questions.md`에서 확인한다.
+> **⚠️ 위 두 스펙은 "설계"가 아니라 "이미 있는 스키마 위의 남은 작업"이다.** 실제 컬럼·제약의 정본은 `backend/migrations/000_identity.sql`~`009_outbox_delivery.sql`이며, 기존 8개 테이블에 더해 `002`~`005`가 추론 결과·Raw 보조 필드·하이퍼테이블·진단기·중복 방지·`battery_asset.memo`를, `006`이 진단 phase 경계 스냅샷을, `007`이 raw wire payload 보존을, `008`~`009`가 outbox identity·delivery 상태를 반영했다. **이 문서가 "시계열 하이퍼테이블"이라 부르는 테이블의 실제 이름은 `telemetry_metric`이다.** 과거 결정 기록은 `docs/handover/schema-open-questions.md`에서 확인한다.
 
 ### AI 모델 (4개)
 | ID | 스펙 |
@@ -615,12 +615,12 @@ ADS1115          LAN          battery-anomaly-alerts ◀─ alerts 발행 ─┤
 > |---|---|---|
 > | 1 | `docs/implementation_status.md` §2 A-1 | 담당 경계와 완료 판정. **A1~A5가 곧 작업표다.** §3 B군은 백엔드가 어디까지 해뒀고 어디부터 넘어오는지 |
 > | 2 | `CLAUDE.md` §Kafka 토픽 규약 · §센서 데이터 JSON 스키마 | 토픽 3개의 발행자·용도, 에지 프레임의 필드와 부호 규약. ⚠️ `advertised.listeners`를 `localhost`로 두면 라즈베리파이가 **조용히** 못 붙는다 |
-> | 3 | `docs/handover/infra-implementations.md` | **구현 명세 정본.** 1부 `CellGuardStore`(PostgreSQL) / 2부 `DeviceCommandPort`(Kafka). 완료 판정은 계약 테스트 20건 통과 |
+> | 3 | `docs/handover/infra-implementations.md` | **구현 명세 정본.** 1부 `CellGuardStore`(PostgreSQL) / 2부 `DeviceCommandPort`(Kafka)와 outbox worker. 완료 판정은 계약 테스트·claim/retry 테스트 통과 |
 > | 4 | `docs/handover/b2-session-tagging.md` | Consumer가 `device_id` → `battery_id`로 귀속하는 규칙 5개 + 완료 판정 SQL 2건 |
 > | 5 | `docs/handover/schema-open-questions.md` | **과거 미결정 6건의 결정 기록.** 해당 DDL은 `backend/migrations/002`~`005`에 반영됐고, Consumer 착수 시 실제 컬럼·제약과 함께 확인한다 |
 > | 6 | `docs/verification_matrix.md` | 무엇을 어떻게 검증하면 끝난 것으로 치는지. 백엔드 typecheck·빌드·`/health`·테스트 명령이 여기 있다 |
 >
-> ✅ **DB는 `npm run db:migrate` 하나로 올라간다(2026-08-28).** `backend/migrations/000`~`007`이 파일명 순서대로 적용된다. 예전에 `psql -f 001_app_auth.sql`이 첫 구문에서 멈추던 문제(`"user"` 테이블 DDL 부재)는 `000_identity.sql`이 해결했다. **`psql -f`로 001만 직접 돌리지 마라** — 순서가 있는 8개 파일이다. `npm run auth:generate`·`auth:migrate`는 CLI 패키지가 없어 실패하니 부르지 않는다(Better Auth는 지금 미사용).
+> ✅ **DB는 `npm run db:migrate` 하나로 올라간다(2026-08-28).** `backend/migrations/000`~`009`가 파일명 순서대로 적용된다. 예전에 `psql -f 001_app_auth.sql`이 첫 구문에서 멈추던 문제(`"user"` 테이블 DDL 부재)는 `000_identity.sql`이 해결했다. **`psql -f`로 001만 직접 돌리지 마라** — 순서가 있는 10개 파일이다. `npm run auth:generate`·`auth:migrate`는 CLI 패키지가 없어 실패하니 부르지 않는다(Better Auth는 지금 미사용).
 >
 > 세부 계약이 필요해지면 — 에러 코드는 `docs/backend_contract.md` §1.10, 원자성 요구는 §3.4, 에지 프레임 정의와 `battery-events`의 code+params는 `docs/hardware/mode1_backend_spec.md` §9·§11이다.
 >
@@ -673,7 +673,7 @@ ADS1115          LAN          battery-anomaly-alerts ◀─ alerts 발행 ─┤
 
 ### Phase 6 — 알림 & 차단
 - [ ] ~~카카오톡 알림 연동 (S-EOCLMX, S-UZDNPT)~~ — **보류(2026-08-25 결정).** 설정 화면의 채널 토글은 **현행 유지**한다: 저장은 되지만 발송은 일어나지 않으며, 화면에 별도 미구현 표시를 추가하지 않는다. ⚠️ 시연에서 "알림이 간다"고 설명하지 않도록 주의
-- [ ] 릴레이/Kill-Switch 제어 API (S-ELAUQJ) — **부분 완료: REST(승인·재인증·사유·멱등성)와 감사 기록은 이미 있다.** 남은 건 그 결정을 실제 에지로 보내는 `DeviceCommandPort`의 Kafka 구현체(`battery-events` 발행) — `docs/handover/infra-implementations.md` 2부
+- [ ] 릴레이/Kill-Switch 제어 API (S-ELAUQJ) — **부분 완료: REST(승인·재인증·사유·멱등성)와 감사 기록, PostgreSQL transactional outbox, Kafka producer/worker(`battery-events` 발행·재시도·배터리별 순서)는 구현됐다.** 남은 건 실제 Kafka/edge relay 인수 검증 — `docs/handover/infra-implementations.md` 2부
 - [ ] 긴급 차단 자동화 Fail-Safe (S-VMNNAM) — **부분 완료: 판정 엔진(`judgeFailsafe`)과 인터락·에지통보·WS 배선(`runFailsafe`), Consumer의 프레임별 callback·배터리별 직렬화가 구현됐다.** 남은 것은 하드웨어 실측 문턱값(지금 전부 `0`이라 어떤 계층도 차단하지 않는 휴면 상태)과 실 Kafka/DB 인수 검증이다 — `docs/handover/infra-implementations.md` §14·§14b
 - [ ] 디바이스 음성 안내 웹 설정 및 백엔드 API (S-VOCALR)
 - [ ] 알림 설정 및 이력 페이지

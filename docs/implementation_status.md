@@ -19,7 +19,7 @@
 
 `backend/src/store/postgres.ts`가 `CellGuardStore` 전체를 구현했고, `store.ts`는
 `DATA_MODE=postgres`에서 이 구현체를 선택한다. `initializeStore()`는 서버가
-listen하기 전에 migrations `000`~`008`의 핵심 스키마와
+listen하기 전에 migrations `000`~`009`의 핵심 스키마와
 `diagnosis.progress_snapshot`을 확인하며, 실패 시 memory 데이터로 대체하지
 않고 기동을 중단한다. `telemetry_metric.raw_payload`도 확인한다.
 `advanceDiagnosis`의 진행 상태는 런타임 메모리에 유지하고 phase 경계에서만
@@ -41,7 +41,7 @@ frame을 PostgreSQL transaction으로 적재한다. 활성 세션은 `device_id`
 `battery_latest`가 실제로 전진한 새 결과에만 anomaly/grade/alert WS 이벤트를
 연결한다. 메모리 provider의 기존 정적 demo ticker는 유지하고 PostgreSQL
 provider에서는 정적 anomaly/alert를 만들지 않는다. Task 2의 alert 목록과
-WS 전달은 프로세스 로컬이며, durable alert/outbox 전달은 후속 담당 범위다.
+WS 전달은 프로세스 로컬이며, durable anomaly-alert delivery는 후속 담당 범위다.
 
 PostgreSQL 계약·동시성 테스트는 `TEST_DATABASE_URL`이 설정된 경우에만 실제
 DB를 초기화해 실행한다. 현재 실행 환경에는 이 변수가 없어 명확한 skip 1건을
@@ -63,8 +63,8 @@ DB를 초기화해 실행한다. 현재 실행 환경에는 이 변수가 없어
 | 백엔드 데모 도메인 API | `backend/src/server.ts`: 발급 토큰 인증, 사용자·관리자 REST 라우트(`/health`·`/api/demo/*` 포함), 계약형 대시보드, F21 fail-closed, 릴레이 승인·재인증·멱등성, Raw CSV. 게이트 실동작 확인(`409 BATTERY_BLOCKED`/`NO_ACTIVE_SESSION`, `401 REAUTH_REQUIRED`, `ACK_REQUIRED`, 관리자 `403`) | **데모 런타임 구현·실 REST 브라우저 검증 완료** |
 | 백엔드 도메인 데이터 저장 | `backend/src/store/contract.ts`의 `CellGuardStore`, `memory.ts` 참조 구현, `postgres.ts` PostgreSQL 구현, `store.ts`의 `DATA_MODE` 분기. PostgreSQL은 자산 최신값·릴레이·진단·건강 집계·텔레메트리 CSV를 읽고, 상태+감사 변경을 트랜잭션으로 처리한다 | **구현 완료 / TEST_DATABASE_URL 설정 시 실 DB 계약 검증** |
 | 백엔드 실시간 스트림 (WS 발신) | **C1 완료(2026-08-25).** 프론트가 처리하는 11종 중 `metrics.tick`·`anomaly.score`·`anomaly.gradeChanged`·`relay.changed`·`alert.created`·`event.created`·`session.ended`·`resync.required` 8종이 실제로 발신되고, `subscribe`/`resume`이 1만 건 링버퍼로 실제 재전송을 수행한다. memory 모드의 정적 `metrics.tick`·`anomaly.score`는 기존 데모 동작을 유지하며, PostgreSQL 모드의 anomaly 이벤트는 새로 커밋된 `anomaly_score` 결과에서만 발신한다. `relay.autoCut`은 **구현됨(문턱 미설정이라 휴면)**(B3 완료, §4 C1 참조), `diagnosis.progress`/`.done`/`.aborted`는 여전히 미발신 | **구현됨(부분 휴면)** — 잔여 `diagnosis.*`(→ F21 안전 프로필) |
-| 에지 명령 경로 | `backend/src/device/port.ts`(`DeviceCommandPort` 인터페이스, 메서드 4개) + `backend/src/device/logging.ts`(memory 전용 로깅 스텁) + `backend/src/kafka.ts`(version 1 wire contract·Zod 검증·파티션 키). PostgreSQL 상태·감사·outbox 원자성은 `store/postgres.ts`와 `008_outbox_identity.sql`에 구현됐고, `SESSION_ENDED`도 `batteryId`를 payload·파티션 키에 포함한다. `battery-events`를 실제 발행하는 producer/worker는 후속 담당 범위다 | **outbox 원자성·identity 구현 / Kafka producer 대기** (→ B4) |
-| 백엔드 DB 도메인 provider·Consumer·TimescaleDB | `backend/migrations/000_identity.sql`~`008_outbox_identity.sql`, `postgres.ts`, `telemetryConsumer.ts`, `anomalyConsumer.ts`. Raw Consumer는 session tagging·raw payload·단조 latest·수동 offset commit·프레임별 Fail-Safe hook을, Anomaly Consumer는 device 기준 ACTIVE session tagging·anomaly 이력·단조 score latest·replay-safe 이벤트·수동 offset commit을 구현했다. `TEST_DATABASE_URL`이 없으면 실 DB 계약 테스트는 skip한다. Kafka/Timescale 실측 부하는 별도이며 `AUTH_MODE=betterauth`의 WS 인증은 여전히 보류되고, WS upgrade가 `DATA_MODE`를 별도로 검사하지 않는 갭은 남아 있다 | **Raw/Anomaly Consumer 구현 / 실 Kafka·DB 인수 검증 대기** |
+| 에지 명령 경로 | `backend/src/device/port.ts`(`DeviceCommandPort` 인터페이스, 메서드 4개) + `backend/src/device/logging.ts`(memory 전용 로깅 스텁) + `backend/src/kafka.ts`(version 1 wire contract·Zod 검증·파티션 키) + `backend/src/device/kafka.ts`(실 producer) + `backend/src/outboxWorker.ts`(lease/claim/retry worker). PostgreSQL 상태·감사·outbox 원자성은 `store/postgres.ts`와 `008_outbox_identity.sql`에 구현됐고, `SESSION_ENDED`도 `batteryId`를 payload·파티션 키에 포함한다. `009_outbox_delivery.sql`은 만료 claim 복구·poison quarantine을 제공한다 | **구현 완료 / 실 Kafka·edge relay 인수 검증 대기** (→ B4) |
+| 백엔드 DB 도메인 provider·Consumer·TimescaleDB | `backend/migrations/000_identity.sql`~`009_outbox_delivery.sql`, `postgres.ts`, `telemetryConsumer.ts`, `anomalyConsumer.ts`, `outboxWorker.ts`. Raw Consumer는 session tagging·raw payload·단조 latest·수동 offset commit·프레임별 Fail-Safe hook을, Anomaly Consumer는 device 기준 ACTIVE session tagging·anomaly 이력·단조 score latest·replay-safe 이벤트·수동 offset commit을, Outbox Worker는 durable command의 배터리별 순서·lease·retry를 구현했다. `TEST_DATABASE_URL`이 없으면 실 DB 계약 테스트는 skip한다. Kafka/Timescale 실측 부하는 별도이며 `AUTH_MODE=betterauth`의 WS 인증은 여전히 보류되고, WS upgrade가 `DATA_MODE`를 별도로 검사하지 않는 갭은 남아 있다 | **Raw/Anomaly/Outbox 구현 / 실 Kafka·DB 인수 검증 대기** |
 | 알림 발송 (카카오·SMS·메일) | 채널 ON/OFF 토글과 policy 응답만 있고(`server.ts:405`·`:409`), **실제로 메시지를 보내는 코드는 `backend/src`에 없다** | **보류(의도적)** — 토글 현행 유지, 추가 작업 없음 |
 | AI 로컬 추론 프로세스 | 코드 없음. `ai/` 디렉터리도 없다. 학습(Colab)·체크포인트 반출 절차·추론 프로세스 모두 미착수 | 미착수 — **별도 담당자** |
 | 로컬 실행 패키징 | **C8 완료(2026-08-25)** — 단일 오리진(`:3005`), `start-local.bat`(Windows, 수동 실행), `docs/local_run.md`. memory 모드 한정(Kafka·PostgreSQL·추론은 별도) | 완료 (memory 모드) |
@@ -204,11 +204,11 @@ Timescale 적재, 물리 Fail-Safe는 여전히 별도 범위다.
 
 > ⚠️ **`advertised.listeners`를 `localhost`로 두면 라즈베리파이가 못 붙는다.** 브로커가 클라이언트에게 자기 주소를 되돌려주는 값이라, `localhost`면 에지가 자기 자신에게 접속을 시도하며 조용히 실패한다. 호스트의 LAN IP로 잡는다.
 
-> **✅ Raw A2/A5와 Anomaly A4 구현에 필요한 스키마가 반영됐다** — 추론 결과 적재 테이블, `age_ms`·`temp_points`·`mode`·`soc_basis`, TimescaleDB 하이퍼테이블, 진단기(`device`) 테이블, 중복 방지 키, `battery_asset.memo`, `diagnosis.progress_snapshot`, `telemetry_metric.raw_payload`가 `backend/migrations/002`~`007`에 있고, transactional outbox identity·dedupe 컬럼은 `008`에 있다. 실 Kafka·PostgreSQL/Timescale 인수 검증은 남아 있으며, 결정 기록은 [`docs/handover/schema-open-questions.md`](handover/schema-open-questions.md)다.
+> **✅ Raw A2/A5·Anomaly A4·Outbox A5 구현에 필요한 스키마가 반영됐다** — 추론 결과 적재 테이블, `age_ms`·`temp_points`·`mode`·`soc_basis`, TimescaleDB 하이퍼테이블, 진단기(`device`) 테이블, 중복 방지 키, `battery_asset.memo`, `diagnosis.progress_snapshot`, `telemetry_metric.raw_payload`가 `backend/migrations/002`~`007`에 있고, transactional outbox identity·dedupe 컬럼은 `008`, lease·retry·claim·poison 컬럼은 `009`에 있다. 실 Kafka·PostgreSQL/Timescale 인수 검증은 남아 있으며, 결정 기록은 [`docs/handover/schema-open-questions.md`](handover/schema-open-questions.md)다.
 
-> ✅ **마이그레이션 실행 선행 문제는 해소됐다** — `000_identity.sql`이 `"user"` 테이블과 데모 seed를 먼저 만들고, `001`~`008`이 파일명 순서대로 적용된다. 실행기는 [`docs/handover/infra-implementations.md` §3-1·§4](handover/infra-implementations.md)를 따른다.
+> ✅ **마이그레이션 실행 선행 문제는 해소됐다** — `000_identity.sql`이 `"user"` 테이블과 데모 seed를 먼저 만들고, `001`~`009`가 파일명 순서대로 적용된다. 실행기는 [`docs/handover/infra-implementations.md` §3-1·§4](handover/infra-implementations.md)를 따른다.
 
-> 스키마의 정본은 `backend/migrations/000_identity.sql`~`008_outbox_identity.sql`이다. `001`의 기존 8개 테이블과 `002`~`008`의 추가 테이블·컬럼은 `store.ts` 타입과 완전한 1:1이 아니므로, **스키마를 바꾸면 `store.ts` 타입도 같이 바꾸고 반드시 합의 후 변경한다.**
+> 스키마의 정본은 `backend/migrations/000_identity.sql`~`009_outbox_delivery.sql`이다. `001`의 기존 8개 테이블과 `002`~`009`의 추가 테이블·컬럼은 `store.ts` 타입과 완전한 1:1이 아니므로, **스키마를 바꾸면 `store.ts` 타입도 같이 바꾸고 반드시 합의 후 변경한다.**
 
 ### A-2. AI 담당
 
@@ -252,20 +252,21 @@ Timescale 적재, 물리 Fail-Safe는 여전히 별도 범위다.
 - **현재 상태**: 에지는 `device_id`만 싣고 `battery_id`를 모른다(CLAUDE.md 센서 스키마). 적재 시점에 백엔드 세션 정보로 귀속해야 한다.
 - **완료된 것(백엔드)**: [`docs/handover/b2-session-tagging.md`](handover/b2-session-tagging.md)의 규칙을 `telemetryConsumer.ts`로 구현했다. 각 프레임의 처리 시점에 `device_id` + `status='ACTIVE'`를 DB에서 조회하고, 활성 세션이 없으면 `session_id`·`battery_id`를 `null`로 보존한다. edge payload의 backend ID는 받지 않는다.
 - **멱등성·최신값**: `(device_id, measured_at)` 자연키 충돌은 `on conflict do nothing`으로 처리하고, `battery_latest`는 `excluded.measured_at > battery_latest.measured_at` 조건에서만 갱신한다. DB transaction과 safety hook이 끝난 뒤에만 Kafka offset을 수동 commit한다.
-- **남은 일**: `TEST_DATABASE_URL`을 가진 PostgreSQL/Timescale과 실제 Kafka에서 migration 000~008 적용 후 세션 경계·재시작·부하 인수를 수행한다.
+- **남은 일**: `TEST_DATABASE_URL`을 가진 PostgreSQL/Timescale과 실제 Kafka에서 migration 000~009 적용 후 세션 경계·재시작·부하 인수를 수행한다.
 - **완료 판정**: 세션 시작→종료 사이 프레임의 `battery_id`가 100% 채워지고, 세션 밖 프레임이 잘못 귀속되지 않음(문서 §5의 SQL 검증 2건).
 
 ### B3. Fail-Safe 판정 주체 — **판정 엔진·구독 배선 완료(2026-09-14) / 문턱 실측 대기**
 
-- **완료된 것(백엔드)**: 순수 판정 함수 `judgeFailsafe`(`backend/src/failsafe.ts`) — 절대온도(IR·접촉) → 가스 → 압력 상대상승률 → 온도 상승률 순으로 검사하고, 하드웨어 프로필(`MODE1_EXTERNAL_CELL_V1`/`COMBINED_EXISTING_PARTS_V1`)별로 실재하는 센서만 활성화한다. 이걸 저장소·에지·WS에 잇는 `evaluateFailsafe`(`backend/src/failsafeRunner.ts`) — 인터락 중복 방지(이미 걸려 있으면 재차단 안 함) → `engageFailsafe`(저장소, 릴레이 전이+`RELAY_AUTO_CUT` 감사 원자적) → `devicePort.relayCut`(에지 통보) → `broadcastAutoCut`(WS `relay.autoCut` 푸시) 순서로 실행하며, `backend/src/server.ts`가 `runFailsafe(batteryId, profile, sample, thresholds)`로 이 전체를 노출한다.
+- **완료된 것(백엔드)**: 순수 판정 함수 `judgeFailsafe`(`backend/src/failsafe.ts`) — 절대온도(IR·접촉) → 가스 → 압력 상대상승률 → 온도 상승률 순으로 검사하고, 하드웨어 프로필(`MODE1_EXTERNAL_CELL_V1`/`COMBINED_EXISTING_PARTS_V1`)별로 실재하는 센서만 활성화한다. 이걸 저장소·에지·WS에 잇는 `evaluateFailsafe`(`backend/src/failsafeRunner.ts`) — 인터락 중복 방지(이미 걸려 있으면 재차단 안 함) → `engageFailsafe`(PostgreSQL에서는 릴레이 전이+`RELAY_AUTO_CUT` 감사+outbox 원자적 기록, memory에서는 logging port) → `OutboxWorker`/logging port 에지 통보 → `broadcastAutoCut`(WS `relay.autoCut` 푸시) 순서로 실행하며, `backend/src/server.ts`가 `runFailsafe(batteryId, profile, sample, thresholds)`로 이 전체를 노출한다.
 - **⚠️ 문턱값이 전부 `0`이라 현재 어떤 계층도 차단하지 않는다.** `failsafe.ts`의 `UNSET_THRESHOLDS`가 미설정 sentinel이며, `judgeFailsafe`는 `threshold > 0`일 때만 그 계층을 활성화한다. 하드웨어 실측(`mode1_backend_spec.md` §13 H8, `mode2_powerbank_diagnosis_spec.md` §8 H2) 전까지 의도된 휴면 상태다.
 - **구독 배선**: PostgreSQL + `KAFKA_CONSUMER_ENABLED=true`일 때 Consumer가 frame별 `runFailsafe` hook을 호출한다. 배터리별 Promise queue로 TOCTOU 경합을 직렬화하고, `relay.autoCut` WS broadcast 실패는 로그로 남긴다. memory/test 모드에서는 Kafka 연결을 만들지 않는다.
 - **완료 판정**: 문턱값 설정 후 — 조건 충족 시 모달이 뜨고, 릴레이가 `OPEN`으로 남고, 재인증·사유 없이는 복구되지 않음(자동 복구 없음).
 
-### B4. 릴레이 차단 → 에지 실제 전달 — **outbox 원자성 완료(2026-09-14) / Kafka producer 인계**
+### B4. 릴레이 차단 → 에지 실제 전달 — **outbox·Kafka worker 구현 완료(2026-09-14) / 실 인프라 인수 대기**
 
 - **완료된 것(백엔드)**: `DeviceCommandPort` 인터페이스(`backend/src/device/port.ts`, 메서드 4개 — `relayCut`/`relayRestore`/`sessionStarted`/`sessionEnded`) + memory 전용 로깅 스텁(`backend/src/device/logging.ts`). PostgreSQL `store/postgres.ts`가 상태·감사·`battery-events` outbox를 한 transaction으로 기록하고, `008_outbox_identity.sql`의 durable `event_id`/unique `dedupe_key`로 relay 멱등 재처리를 보호한다. SUPERSEDED·BLOCKED 세션 종료와 모드 전환 전 이전 릴레이 차단도 outbox 순서를 보존한다.
-- **남은 일(인프라)**: `backend/src/device/kafka.ts`에 `createKafkaDeviceCommandPort(...)`를 구현해 outbox row를 `battery-events` 토픽으로 발행하고, 성공 후에만 `sent_at`을 갱신한다. 실제 Kafka producer와 edge relay 인수 검증은 별도다.
+- **완료된 것(인프라)**: `backend/src/device/kafka.ts`의 실제 KafkaJS producer가 outbox payload를 version-1 계약으로 검증해 `params.batteryId` key와 `x-cellguard-event-id` header로 발행한다. `backend/src/outboxWorker.ts`가 `FOR UPDATE SKIP LOCKED` claim, 배터리별 head ordering, lease/restart recovery, capped exponential retry를 수행하며 Kafka publish 성공 후에만 `sent_at`을 갱신한다. malformed outbox는 `dead_at` poison row로 보존하고 후속 배터리 명령을 진행한다.
+- **남은 일(실 인프라)**: 실제 Kafka broker·PostgreSQL/Timescale에서 migration 000~009, 재시작·중복·edge relay 인수를 수행한다.
 - **완료 판정**: DB transaction rollback/replay 및 순서 테스트 통과 → 실제 인프라에서 백엔드 차단 승인 → 라즈베리파이 릴레이가 실제로 열림 → 결과가 `battery-events`로 되돌아와 상태가 일치
 
 ## 4. C군 — 백엔드·프론트 몫 (Kafka·DB 무관)
@@ -304,7 +305,7 @@ Timescale 적재, 물리 Fail-Safe는 여전히 별도 범위다.
 - `GET /health`가 `{ status, auth, data }`를 반환하도록 바뀜 — 지금 어떤 조합으로 떠 있는지 즉시 보인다.
 - `/api/*` 도메인 게이트는 **`DATA_MODE`만 본다**: `memory`면 인메모리
   provider를, `postgres`면 PostgreSQL provider를 사용한다. PostgreSQL은
-  listen 전 migrations `000`~`008` 핵심 스키마 검사를 통과해야 하며, 실패 시
+  listen 전 migrations `000`~`009` 핵심 스키마 검사를 통과해야 하며, 실패 시
   `RUNTIME_NOT_READY`로 요청을 열지 않고 기동을 중단한다.
 
 `DATA_MODE=postgres`는 이제 실제 DB provider를 사용한다. 스키마가 없거나
@@ -406,7 +407,7 @@ Consumer는 구현됐지만, DB/Kafka 실측 인수와 AI 추론 프로세스는
 1. ~~**B군 4건의 담당을 문서로 확정한다**~~ — 코드보다 먼저. 특히 B3(Fail-Safe)는 넘기지 않는다.
 2. ~~**C1 WebSocket 발신**~~ — **완료(2026-08-25).** 8/11종 발신, 링버퍼 재전송 포함. 잔여는 `relay.autoCut`(B3 선행)·`diagnosis.*`(F21 안전 프로필 선행).
 3. ~~**C2 `AUTH_MODE`/`DATA_MODE` 분리**~~ — **완료(2026-08-25), PostgreSQL provider 배선 보강(2026-09-14).** WS upgrade가 `DATA_MODE`를 별도로 보지 않는 갭은 남아 있다.
-4. ~~**B1 리포지토리 교체**~~ — **구현 완료(2026-09-14).** `TEST_DATABASE_URL`을 가진 DB에서 migrations `000`~`008` 적용 후 계약·동시성·재시작 인수 검증을 남겼다.
+4. ~~**B1 리포지토리 교체**~~ — **구현 완료(2026-09-14).** `TEST_DATABASE_URL`을 가진 DB에서 migrations `000`~`009` 적용 후 계약·동시성·재시작 인수 검증을 남겼다.
 5. **B3·B4 안전 경로** — A2/A4가 데이터를 주기 시작한 뒤. B3이 끝나면 C1의 `relay.autoCut`도 같이 닫힌다.
 6. ~~**C3 REST 미구현**~~ — **완료(2026-08-25).** `email-availability`·`exports` 계열 구현·실측 완료. `export.pdf`는 범위 밖 확정으로 남김.
 7. ~~**C8 로컬 실행 패키징**~~ — **완료(2026-08-25).** memory 모드 한정, Windows 배치 스크립트는 실제 Windows PC에서 미검증.

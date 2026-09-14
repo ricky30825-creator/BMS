@@ -9,6 +9,16 @@ export const KAFKA_TOPICS = Object.freeze({
   events: "battery-events",
 } as const);
 
+/**
+ * Durable outbox identity is Kafka record metadata, not part of the version-1
+ * JSON payload.  Edge consumers use this header for replay deduplication.
+ */
+export const KAFKA_EVENT_ID_HEADER = "x-cellguard-event-id" as const;
+export const KAFKA_EVENT_METADATA_RULES = Object.freeze({
+  eventIdHeader: KAFKA_EVENT_ID_HEADER,
+  partitionKey: "params.batteryId",
+} as const);
+
 export type KafkaTopic = (typeof KAFKA_TOPICS)[keyof typeof KAFKA_TOPICS];
 
 const versionSchema = z.literal(KAFKA_CONTRACT_VERSION);

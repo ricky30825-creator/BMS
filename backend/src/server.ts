@@ -19,6 +19,8 @@ import { createExportJob, exportJobById, scheduleExportCompletion, signDownload,
 import { DEFAULT_VOICE_ALERT_SETTINGS, applyVoiceAlertPatch } from "./voiceAlert.js";
 import { asyncRoute } from "./asyncRoute.js";
 import { createLoggingDeviceCommandPort } from "./device/logging.js";
+import { createKafkaDeviceCommandPort, type KafkaDeviceCommandPort } from "./device/kafka.js";
+import { createOutboxWorker, shouldStartOutboxWorker, type OutboxWorker } from "./outboxWorker.js";
 import { diagnosisJson as buildDiagnosisJson } from "./diagnosis/routes.js";
 import { evaluateFailsafe } from "./failsafeRunner.js";
 import { measurementPhaseFor } from "./measurementState.js";
@@ -1545,6 +1547,43 @@ function listen(): Promise<void> {
 let shuttingDown = false;
 let telemetryConsumer: RawMetricsConsumer | null = null;
 let anomalyConsumer: AnomalyAlertsConsumer | null = null;
+let outboxWorker: OutboxWorker | null = null;
+
+async function startOutboxWorker(): Promise<void> {
+  // The memory demo and test process must not even construct a Kafka client.
+  // PostgreSQL + the explicit shared Kafka switch is the only production gate.
+  if (!shouldStartOutboxWorker({
+    dataMode: env.DATA_MODE,
+    nodeEnv: env.NODE_ENV,
+    kafkaEnabled: kafkaConfig.enabled,
+  })) return;
+
+  const commandPort: KafkaDeviceCommandPort = createKafkaDeviceCommandPort({
+    brokers: kafkaConfig.brokers,
+    clientId: kafkaConfig.clientId,
+    topic: kafkaConfig.topics.events,
+  });
+  const worker = createOutboxWorker({
+    db,
+    publisher: commandPort,
+    workerId: `cellguard-outbox-${process.pid}`,
+    ...kafkaConfig.outbox,
+  });
+  outboxWorker = worker;
+  try {
+    await worker.start();
+  } catch (error) {
+    outboxWorker = null;
+    await worker.stop().catch(() => undefined);
+    throw error;
+  }
+}
+
+async function stopOutboxWorker(): Promise<void> {
+  const worker = outboxWorker;
+  outboxWorker = null;
+  if (worker) await worker.stop();
+}
 
 async function startTelemetryConsumer(): Promise<void> {
   // Memory mode and test mode must stay independent of broker availability.
@@ -1633,13 +1672,24 @@ async function shutdown(signal: string): Promise<void> {
   if (shuttingDown) return;
   shuttingDown = true;
   if (runtimeTicker) clearInterval(runtimeTicker);
+  let shutdownError: unknown = null;
   try {
-    await stopTelemetryConsumer();
+    try {
+      await stopOutboxWorker();
+    } catch (error) {
+      shutdownError = error;
+    }
+    try {
+      await stopTelemetryConsumer();
+    } catch (error) {
+      shutdownError ??= error;
+    }
     await new Promise<void>((resolve, reject) => {
       if (!httpServer.listening) { resolve(); return; }
       httpServer.close((error) => error ? reject(error) : resolve());
     });
     await closeStore();
+    if (shutdownError) throw shutdownError;
     console.log(`CellGuard backend stopped (${signal})`);
   } catch (error) {
     console.error("CellGuard backend shutdown failed", error);
@@ -1652,6 +1702,9 @@ process.once("SIGINT", () => { void shutdown("SIGINT"); });
 
 void initializeStore()
   .then(() => {
+    return startOutboxWorker();
+  })
+  .then(() => {
     return startTelemetryConsumer();
   })
   .then(() => {
@@ -1662,6 +1715,7 @@ void initializeStore()
     console.error("CellGuard backend startup failed", error);
     process.exitCode = 1;
     try {
+      await stopOutboxWorker();
       await stopTelemetryConsumer();
       await closeStore();
     } catch (closeError) {
