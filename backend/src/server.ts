@@ -24,7 +24,7 @@ import { evaluateFailsafe } from "./failsafeRunner.js";
 import { measurementPhaseFor } from "./measurementState.js";
 import { UNSET_THRESHOLDS, type FailsafeSample, type FailsafeThresholds, type FailsafeVerdict, type HardwareProfile } from "./failsafe.js";
 import { db } from "./db.js";
-import { createKafkaRawMetricsConsumer, type RawMetricsConsumer } from "./telemetryConsumer.js";
+import { createKafkaRawMetricsConsumer, type RawMetricsConsumer, type UnassignedTelemetryEvent } from "./telemetryConsumer.js";
 import {
   abortDiagnosis,
   abortDiagnosisBySystem,
@@ -1398,6 +1398,33 @@ async function startTelemetryConsumer(): Promise<void> {
       // Thresholds are intentionally the existing fail-closed sentinel until
       // hardware measurements establish production values.
       await runFailsafe(batteryId, hardwareProfile, safetySample, UNSET_THRESHOLDS);
+    },
+    onUnassignedData: async (event: UnassignedTelemetryEvent) => {
+      // The durable audit row is always written. Live WS delivery is scoped to
+      // the active session for this device; with no active session there is no
+      // authorized battery stream to route to, so the audit row remains the
+      // source of truth until the device/session view polls it.
+      const session = await activeSession();
+      if (!session || session.deviceId !== event.deviceId) return;
+      await broadcast("event.created", {
+        id: event.auditId,
+        occurredAt: event.measuredAt.toISOString(),
+        type: "UNASSIGNED_DATA",
+        batteryId: null,
+        batteryLabel: null,
+        subjectType: "DEVICE",
+        deviceId: event.deviceId,
+        severity: "CAUTION",
+        source: "SYSTEM",
+        causeCode: event.reason,
+        causeParams: {
+          actualMode: event.actualMode,
+          sessionTargetMode: event.sessionTargetMode,
+          batteryTargetMode: event.batteryTargetMode,
+        },
+        actionCode: "RETAIN_UNASSIGNED_TELEMETRY",
+        actionParams: {},
+      }, null, session.batteryId);
     },
   });
   await telemetryConsumer.start();

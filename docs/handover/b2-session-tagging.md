@@ -6,7 +6,7 @@
 
 | 항목 | 값 |
 |---|---|
-| 작성일 | 2026-08-27 |
+| 작성일 | 2026-09-14 |
 | 근거 문서 | CLAUDE.md (센서 스키마 절, 배터리 자산 절), `docs/product_contract.md` (§3.2 사용자당 진단기 1대 규칙), `backend/migrations/000`~`007` (실제 컬럼·제약) |
 | 영역 | `measurement_session` 활성 상태, 세션 생명주기, telemetry_metric 적재 시점 |
 | 대상 구성요소 | `backend/src/telemetryConsumer.ts` — PostgreSQL backend 프로세스에 opt-in embedded |
@@ -45,7 +45,20 @@
 
 ### 2.1 쿼리 조건
 
-Consumer는 각 프레임을 받을 때마다 다음 조건으로 `measurement_session` 테이블을 조회한다:
+Consumer는 먼저 같은 transaction 안에서 다음 UPDATE로 등록 장치의
+heartbeat를 반영한다:
+
+```sql
+update device
+set last_seen_at = greatest(coalesce(last_seen_at, <frame.timestamp>), <frame.timestamp>),
+    status = 'ONLINE'
+where id = <frame.device_id>;
+```
+
+이 UPDATE는 row를 만들지 않으므로 미등록 `device_id`는 device 테이블을
+오염시키지 않는다. `last_seen_at`은 프레임 timestamp의 최댓값만 저장하므로
+재전송·지연 프레임이 시계를 되감지 않는다. UPDATE 결과가 등록 장치임을
+나타낼 때만 다음 조건으로 `measurement_session`을 조회한다:
 
 ```
 device_id = <프레임의 device_id>
@@ -57,6 +70,13 @@ status = 'ACTIVE'
 - **설비 전체의 활성 세션은 1개** — 이걸 보증하는 것은 애플리케이션 코드가 아니라 **DB의 부분 유니크 인덱스**다: `uq_active_session_global on measurement_session (status) where status = 'ACTIVE'`(`backend/migrations/002_domain_gaps.sql:43-44`). `device_id = <frame.device_id>` 조건으로 조회하면 결과는 0건 또는 1건이다.
 
 따라서 결과가 항상 유일하고, "어느 배터리 세션인가"는 그 행의 `battery_id`로 바로 결정된다.
+
+조회한 행은 `measurement_session.target_mode`와 `battery_asset.target_mode`도
+함께 비교한다. 두 값이 모두 프레임의 `mode`와 일치할 때만 `session_id`와
+`battery_id`를 태깅한다. 하나라도 다르면 세션이 존재해도 귀속하지 않고
+`MODE_MISMATCH` 사유의 미배정 경로로 보낸다. `battery_asset.target_mode`는
+자산 생성 뒤 변경하지 않는 고정 모드이므로, 이 검사는 세션·자산·에지
+프레임 사이의 모드 오염을 막는 마지막 서버 경계다.
 
 > **⚠️ "사용자당 진단기 1대"를 근거로 삼지 말 것.** `docs/product_contract.md` §3.2가 그렇게 정하고 있어도 Consumer는 user → device 매핑이 아니라 **처리 시점의 ACTIVE 세션**을 기준으로 태깅한다. `device` 테이블과 세션의 FK는 `backend/migrations/002_domain_gaps.sql`에 있지만, battery 귀속의 권위 있는 행은 여전히 `measurement_session`이다.
 >
@@ -82,8 +102,18 @@ stale cache가 잘못된 `battery_id`를 붙이는 것보다 처리 시점의 DB
 ### 2.3 세션 전환
 
 캐시를 사용하지 않으므로 별도 cache miss 경로는 없다. 매 프레임의 조회
-결과가 세션 전환 직후의 attribution을 결정하며, 조회 결과가 없으면 즉시
-두 backend ID를 `null`로 적재한다.
+결과가 세션 전환 직후의 attribution을 결정하며, 조회 결과가 없거나 모드가
+맞지 않으면 즉시 두 backend ID를 `null`로 적재한다.
+
+### 2.4 장치 liveness의 범위
+
+schema-valid frame 수신 시점의 `ONLINE` 전환과 monotonic
+`last_seen_at` 갱신은 Raw Consumer가 담당한다. `DELAYED`/`OFFLINE`으로
+시간 경과에 따라 되돌리는 scheduler/worker는 이 Consumer 범위 밖이며,
+현재 `device` DDL의 aging 경로도 별도 구현하지 않았다. 따라서 운영 배포는
+장치 상태 aging 작업을 별도로 제공하기 전까지 `ONLINE`을 "마지막 유효
+프레임을 처리한 장치"로 해석해야 한다. 등록 장치가 프레임을 받지 않은
+초기 상태는 기존처럼 `OFFLINE`이다.
 
 ---
 
@@ -125,6 +155,25 @@ create table if not exists telemetry_metric (
 - 비정상 세션 시작/종료 추적
 
 따라서 삭제하지 말고 보존하는 것이 맞다.
+
+### 3.3 `UNASSIGNED_DATA` 이벤트와 dedupe
+
+미배정 row 자체는 `telemetry_metric`에 계속 보존한다. 별도의 이벤트 테이블을
+추가하지 않고 현재 durable audit 모델인 `audit_log`에
+`action='UNASSIGNED_DATA'`, `resource=<device_id>`, `result='SUCCESS'`,
+`reason in ('NO_ACTIVE_SESSION', 'MODE_MISMATCH')`로 기록한다. 같은 장치에서
+같은 미배정 사유가 이어지는 동안에는 첫 audit row만 만든다. 이전 row가
+배정 상태였거나 사유가 바뀌면 다음 전이를 다시 한 건 기록한다. 따라서
+100ms 프레임마다 audit/event를 쓰지 않으면서 세션 종료·모드 불일치 전이를
+재시작 후에도 확인할 수 있다.
+
+커밋 후 Consumer callback은 현재 active session이 같은 `device_id`를 가리킬
+때만 이 audit event를 소유자 stream의 `event.created` WebSocket envelope로
+broadcast한다. active session이 없을 때는 DB audit row가 source of truth다.
+broadcast 실패는 이미 DB에 남은 durable event를 잃게 하지 않으므로 로그만
+남기고 offset 처리를 계속한다. 이벤트 payload의 `batteryId`는 항상 `null`이며
+`deviceId`, 실제 mode, 기대한 세션/자산 mode를 params로 전달한다(WS 내부
+routing metadata는 현재 active battery를 사용해 소유자 범위를 유지한다).
 
 ---
 
@@ -227,6 +276,12 @@ Frame 1은 **measured 시각으로는 Session A 범위** (14:34:59.800 < 14:35:0
 
 이를 자동 테스트로 구성할 수 있다 (예: Consumer 통합 테스트).
 
+현재 단위 테스트는 다음도 고정한다:
+
+- 등록 장치의 valid frame이 `ONLINE`으로 만들고 오래된 frame이 `last_seen_at`을 되돌리지 않는다.
+- 세션 또는 자산의 고정 `target_mode`와 frame mode가 다르면 두 ID 모두 null이며 `battery_latest`를 갱신하지 않는다.
+- 새 미배정 streak는 `UNASSIGNED_DATA` audit를 한 건만 만들고, 배정 전환 뒤의 다음 미배정 streak는 다시 한 건을 만든다.
+
 ---
 
 ## 참고: 시스템 흐름
@@ -255,10 +310,17 @@ Consumer의 책임은 **"device_id 알아서 battery_id로 변환"**하고 raw f
 수동 commit하며, `(device_id, measured_at)` replay는 `on conflict do nothing`으로
 무해하게 처리한다. 이는 DB/Kafka 원자 commit을 의미하지 않는다.
 
+JSON 파싱 실패, raw schema 위반, 지원하지 않는 topic은 영구 poison message로
+분류한다. 이 경우 DB를 시도하지 않고 로그를 남긴 뒤 해당 offset을 명시적으로
+commit해 partition이 영원히 멈추지 않게 한다. DB transaction 실패와
+`onDurableFrame` safety hook 실패는 반대로 offset을 commit하지 않아 재시도한다.
+이미 `audit_log`에 저장된 `UNASSIGNED_DATA`의 live broadcast callback 실패는
+재시도 대상 DB 실패가 아니므로 로그만 남기고 offset은 처리한다.
+
 ---
 
 ## 변경 이력
 
 - 2026-08-27: 초안 작성 (Task 14 — B2 Phase)
 - 2026-08-28: 실제 스키마와 어긋난 3건을 정정 — 세션 종료 상태값(`'COMPLETED'`/`'FAILED'` → `'ENDED'` + `end_reason`), §3.1의 불필요한 `ALTER TABLE ... ADD COLUMN battery_id`(이미 존재) 제거, §5 완료 판정 SQL의 컬럼명(`measurement_session_id` → `session_id`). `session_id`도 함께 적재한다는 규칙을 §3.1에 추가했다.
-- 2026-09-14: `backend/src/telemetryConsumer.ts` 구현에 맞춰 per-frame DB 조회, raw payload 보존, monotonic `battery_latest`, at-least-once manual offset commit, embedded server wiring을 확정했다.
+- 2026-09-14: `backend/src/telemetryConsumer.ts` 구현에 맞춰 per-frame DB 조회, 등록 장치 liveness, raw payload 보존, 고정 `target_mode` 검사, bounded `UNASSIGNED_DATA` audit/broadcast, monotonic `battery_latest`, out-of-order safety state 보호, poison-message offset 정책, embedded server wiring을 확정했다.

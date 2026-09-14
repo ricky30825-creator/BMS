@@ -416,6 +416,16 @@ const locked = gated && r !== 'battery';
 
 **세션이 끊긴 뒤 들어오는 데이터** — 에지는 계속 발행하므로 BLOCKED·타임아웃 종료 직후 반드시 이 상태가 된다. `PLAN.md:157`대로 **버리지 않고 `battery_id=null`로 적재**하고 `UNASSIGNED_DATA` 이벤트를 남긴다 `[PLAN]`.
 
+Raw Consumer는 `UNASSIGNED_DATA`를 별도 테이블이 아닌 기존 `audit_log`에
+`resource=device_id`, `result=SUCCESS`, `reason=NO_ACTIVE_SESSION|MODE_MISMATCH`로
+남긴다. 같은 장치·같은 미배정 사유가 이어지는 동안에는 첫 row만 기록하고,
+배정 상태를 거친 뒤 또는 사유가 바뀐 뒤의 첫 row에서만 다시 기록한다. 따라서
+100ms 프레임마다 감사 로그를 무한히 만들지 않으면서 재시작 후에도 전이를
+확인할 수 있다. 이벤트 broadcast는 `event.created`로 전달하며, 이 이벤트의
+`batteryId`는 null이다. 현재 active session이 같은 device를 가리킬 때만
+그 소유자 stream으로 live broadcast하고, 그 외에는 durable audit row가
+source of truth다.
+
 ## 4. REST API
 
 ### 4.1 세션 · 내 정보

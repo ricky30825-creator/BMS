@@ -93,16 +93,30 @@ KAFKA_BROKERS=192.168.0.10:9092
 KAFKA_GROUP_ID=cellguard-backend
 ```
 
-The Consumer resolves the active session by `device_id`, writes the version-1
-wire payload to `telemetry_metric.raw_payload`, and updates `battery_latest`
-only when the frame timestamp is newer. It uses explicit at-least-once offset
-commits: a Kafka offset is committed only after the DB transaction and the
-per-frame safety hook complete. A replay is harmless because
-`(device_id, measured_at)` is the natural key. This is not a DB/Kafka atomic
-transaction; a process crash between the DB commit and Kafka offset commit can
-replay the frame safely.
+The Consumer marks a registered `device` `ONLINE` and advances
+`last_seen_at` monotonically for every schema-valid frame. It resolves the
+active session by `device_id` only when both the session `target_mode` and the
+`battery_asset.target_mode` match the frame mode. Otherwise the frame is kept
+with null `session_id`/`battery_id` and never updates `battery_latest`.
+Unknown devices are retained the same way without creating a device row.
 
-Malformed messages and DB/safety failures are logged and left uncommitted so a
-later retry cannot silently skip them. The Consumer is never connected in
-`DATA_MODE=memory` or `NODE_ENV=test`; invalid enabled configuration fails
-startup before HTTP listen.
+The version-1 wire payload is written to `telemetry_metric.raw_payload`, and
+`battery_latest` is updated only when the frame timestamp is newer. An
+unassigned streak writes one durable `UNASSIGNED_DATA` row to `audit_log` at
+the first frame (and again only after an assigned frame or an unassigned
+reason transition); when an active session can authorize the device, the
+embedded server callback broadcasts that transition to the owner stream. This
+prevents a 100ms stream from creating an audit row for every frame.
+
+The Consumer uses explicit at-least-once offset commits: a Kafka offset is
+committed only after the DB transaction and the per-frame safety hook complete.
+A replay is harmless because `(device_id, measured_at)` is the natural key.
+This is not a DB/Kafka atomic transaction; a process crash between the DB
+commit and Kafka offset commit can replay the frame safely.
+
+Invalid JSON, schema-invalid payloads, and unsupported topics are permanent
+poison messages: they are logged and explicitly committed so a partition
+cannot wedge forever. DB or safety-hook failures remain uncommitted for
+retry. The Consumer is never connected in `DATA_MODE=memory` or
+`NODE_ENV=test`; invalid enabled configuration fails startup before HTTP
+listen.

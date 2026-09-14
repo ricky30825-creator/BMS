@@ -1,4 +1,5 @@
 import { Kafka, type EachMessagePayload } from "kafkajs";
+import { ZodError } from "zod";
 
 import type { BatteryRawMetrics } from "./kafka.js";
 import { parseBatteryRawMetrics } from "./kafka.js";
@@ -23,6 +24,17 @@ type ActiveSessionRow = {
   battery_id: string;
   started_at: string | Date;
   hardware_profile: string;
+  target_mode: number;
+  battery_target_mode: number;
+};
+
+type PriorTelemetryRow = {
+  session_id: string | null;
+  battery_id: string | null;
+};
+
+type AuditReasonRow = {
+  reason: string | null;
 };
 
 type PersistedTelemetryRow = {
@@ -39,12 +51,25 @@ export type TelemetryAttribution = {
   sessionStartedAt: string | Date | null;
 };
 
+export type UnassignedTelemetryReason = "NO_ACTIVE_SESSION" | "MODE_MISMATCH";
+
+export type UnassignedTelemetryEvent = {
+  auditId: string;
+  deviceId: string;
+  measuredAt: Date;
+  actualMode: 1 | 2;
+  reason: UnassignedTelemetryReason;
+  sessionTargetMode: 1 | 2 | null;
+  batteryTargetMode: 1 | 2 | null;
+};
+
 export type TelemetryIngestResult = {
   kind: "accepted" | "duplicate";
   frame: BatteryRawMetrics;
   measuredAt: Date;
   attribution: TelemetryAttribution;
   latestCandidate: boolean;
+  unassignedEvent: UnassignedTelemetryEvent | null;
 };
 
 export type DurableTelemetryFrame = TelemetryIngestResult & {
@@ -80,6 +105,7 @@ export type KafkaRawConsumerOptions = {
   topic: string;
   consumer: KafkaRawConsumer;
   onDurableFrame?: (frame: DurableTelemetryFrame) => Promise<void>;
+  onUnassignedData?: (event: UnassignedTelemetryEvent) => Promise<void>;
   logger?: TelemetryLogger;
 };
 
@@ -100,6 +126,10 @@ function isHardwareProfile(value: string): value is HardwareProfile {
 
 function hardwareProfileOrNull(value: string | null): HardwareProfile | null {
   return value && isHardwareProfile(value) ? value : null;
+}
+
+function modeOrNull(value: unknown): 1 | 2 | null {
+  return value === 1 || value === "1" ? 1 : value === 2 || value === "2" ? 2 : null;
 }
 
 function utcDate(timestamp: string): Date {
@@ -142,17 +172,44 @@ export async function ingestRawMetricsFrame(
 
   try {
     await client.query("begin");
-    const sessionResult = await client.query<ActiveSessionRow>(`
-      select s.id, s.battery_id, s.started_at, d.hardware_profile
-      from measurement_session s
-      join device d on d.id = s.device_id
-      where s.device_id = $1 and s.status = 'ACTIVE'
-      order by s.started_at desc
-      limit 1
-    `, [frame.device_id]);
-    const session = sessionResult.rows[0];
+    // A valid frame is also the liveness heartbeat. Use the edge timestamp,
+    // but never let a replay move the persisted clock backwards. UPDATE-only
+    // is intentional: an unknown device remains unassigned telemetry and does
+    // not create a device row implicitly.
+    const deviceResult = await client.query<{ id: string }>(`
+      update device
+      set last_seen_at = case
+            when last_seen_at is null or last_seen_at < $2::timestamptz then $2::timestamptz
+            else last_seen_at
+          end,
+          status = 'ONLINE'
+      where id = $1
+      returning id
+    `, [frame.device_id, measuredAt]);
+
+    let session: ActiveSessionRow | undefined;
+    if (deviceResult.rows.length > 0) {
+      const sessionResult = await client.query<ActiveSessionRow>(`
+        select s.id, s.battery_id, s.started_at, d.hardware_profile,
+               s.target_mode, b.target_mode as battery_target_mode
+        from measurement_session s
+        join battery_asset b on b.id = s.battery_id
+        join device d on d.id = s.device_id
+        where s.device_id = $1 and s.status = 'ACTIVE'
+        order by s.started_at desc
+        limit 1
+      `, [frame.device_id]);
+      session = sessionResult.rows[0];
+    }
     const sessionHardwareProfile = session ? String(session.hardware_profile) : null;
-    const attribution: TelemetryAttribution = session
+    const sessionTargetMode = modeOrNull(session?.target_mode);
+    const batteryTargetMode = modeOrNull(session?.battery_target_mode);
+    const sessionMatchesFrame = Boolean(
+      session
+      && sessionTargetMode === frame.mode
+      && batteryTargetMode === frame.mode
+    );
+    const attribution: TelemetryAttribution = sessionMatchesFrame && session
       ? {
           sessionId: String(session.id),
           batteryId: String(session.battery_id),
@@ -160,6 +217,30 @@ export async function ingestRawMetricsFrame(
           sessionStartedAt: session.started_at,
         }
       : { sessionId: null, batteryId: null, hardwareProfile: null, sessionStartedAt: null };
+
+    const unassignedReason: UnassignedTelemetryReason = session ? "MODE_MISMATCH" : "NO_ACTIVE_SESSION";
+    let priorTelemetry: PriorTelemetryRow | null = null;
+    let lastUnassignedReason: string | null = null;
+    if (!attribution.batteryId) {
+      const priorResult = await client.query<PriorTelemetryRow>(`
+        select t.session_id, t.battery_id
+        from telemetry_metric t
+        where t.device_id = $1
+        order by t.measured_at desc
+        limit 1
+      `, [frame.device_id]);
+      priorTelemetry = priorResult.rows[0] ?? null;
+      if (priorTelemetry && !priorTelemetry.session_id && !priorTelemetry.battery_id) {
+        const lastEventResult = await client.query<AuditReasonRow>(`
+          select reason
+          from audit_log
+          where action = 'UNASSIGNED_DATA' and resource = $1
+          order by created_at desc, id desc
+          limit 1
+        `, [frame.device_id]);
+        lastUnassignedReason = lastEventResult.rows[0]?.reason ?? null;
+      }
+    }
 
     const insertResult = await client.query<{ device_id: string; measured_at: Date }>(`
       insert into telemetry_metric (
@@ -200,6 +281,7 @@ export async function ingestRawMetricsFrame(
 
     const inserted = insertResult.rows.length > 0;
     let effectiveAttribution = attribution;
+    let unassignedEvent: UnassignedTelemetryEvent | null = null;
     if (!inserted) {
       const existingResult = await client.query<PersistedTelemetryRow>(`
         select t.session_id, t.battery_id, s.started_at as session_started_at, d.hardware_profile
@@ -216,6 +298,30 @@ export async function ingestRawMetricsFrame(
         batteryId: existing.battery_id ? String(existing.battery_id) : null,
         hardwareProfile: hardwareProfileOrNull(existing.hardware_profile),
         sessionStartedAt: existing.session_started_at,
+      };
+    }
+
+    const shouldRecordUnassignedEvent = inserted
+      && !effectiveAttribution.batteryId
+      && (!priorTelemetry
+        || Boolean(priorTelemetry.session_id || priorTelemetry.battery_id)
+        || lastUnassignedReason !== unassignedReason);
+    if (shouldRecordUnassignedEvent) {
+      const eventResult = await client.query<{ id: string }>(`
+        insert into audit_log (actor_user_id, action, resource, result, reason)
+        values (null, 'UNASSIGNED_DATA', $1, 'SUCCESS', $2)
+        returning id
+      `, [frame.device_id, unassignedReason]);
+      const eventId = eventResult.rows[0]?.id;
+      if (!eventId) throw new Error("unassigned telemetry event could not be recorded");
+      unassignedEvent = {
+        auditId: String(eventId),
+        deviceId: frame.device_id,
+        measuredAt,
+        actualMode: frame.mode,
+        reason: unassignedReason,
+        sessionTargetMode,
+        batteryTargetMode,
       };
     }
 
@@ -258,6 +364,7 @@ export async function ingestRawMetricsFrame(
       measuredAt,
       attribution: effectiveAttribution,
       latestCandidate: inserted && Boolean(effectiveAttribution.batteryId),
+      unassignedEvent,
     };
   } catch (error) {
     if (!committed) {
@@ -279,6 +386,7 @@ type SafetyState = {
   pressureSamples: number[];
   pressureBaseline: number | null;
   previousTemperature: { atMs: number; value: number } | null;
+  latestMeasuredAtMs: number | null;
 };
 
 /** Maintains only the state needed by the existing per-frame Fail-Safe hook. */
@@ -315,11 +423,26 @@ export function createSafetySampleTracker() {
           pressureSamples: [],
           pressureBaseline: null,
           previousTemperature: null,
+          latestMeasuredAtMs: null,
         };
         states.set(attribution.batteryId, state);
       }
 
       const atMs = measuredAt.getTime();
+      // The raw row is retained even when it arrives out of order, but safety
+      // state is a time-ordered view. Do not let a late frame rewind the
+      // temperature predecessor or alter the pressure baseline window.
+      if (state.latestMeasuredAtMs !== null && atMs <= state.latestMeasuredAtMs) {
+        return {
+          tempContact: frame.temp_contact,
+          tempIrSurface: frame.temp_ir_surface,
+          tempRiseRateCPerMin: null,
+          pressureRaw: frame.pressure_raw,
+          pressureBaseline: state.pressureBaseline,
+          gasRaw: frame.gas_raw,
+        };
+      }
+      state.latestMeasuredAtMs = atMs;
       const elapsedMs = state.sessionStartedAtMs === null ? null : atMs - state.sessionStartedAtMs;
       if (frame.pressure_raw !== null && (elapsedMs === null || (elapsedMs >= 0 && elapsedMs <= BASELINE_WINDOW_MS))) {
         state.pressureSamples.push(frame.pressure_raw);
@@ -363,6 +486,13 @@ function serializeByKey(
   return current.finally(() => {
     if (pending.get(key) === current) pending.delete(key);
   });
+}
+
+class PoisonTelemetryMessageError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "PoisonTelemetryMessageError";
+  }
 }
 
 export class RawMetricsConsumer {
@@ -413,10 +543,29 @@ export class RawMetricsConsumer {
   async handleMessage(payload: KafkaRawMessagePayload): Promise<void> {
     try {
       if (payload.topic !== this.options.topic) {
-        throw new Error(`unsupported Kafka topic: ${payload.topic}`);
+        throw new PoisonTelemetryMessageError(`unsupported Kafka topic: ${payload.topic}`);
       }
       const input = parseJsonMessage(payload.message.value);
-      const result = await ingestRawMetricsFrame(this.options.db, input);
+      let result: TelemetryIngestResult;
+      try {
+        result = await ingestRawMetricsFrame(this.options.db, input);
+      } catch (error) {
+        if (error instanceof ZodError) throw new PoisonTelemetryMessageError("Kafka message failed raw telemetry schema validation");
+        throw error;
+      }
+      if (result.unassignedEvent && this.options.onUnassignedData) {
+        try {
+          await this.options.onUnassignedData(result.unassignedEvent);
+        } catch (error) {
+          // The audit row is already durable. A failed live notification must
+          // not turn a bounded transition event into a partition wedge.
+          this.logger("unassigned-data broadcast failed after durable audit", {
+            deviceId: result.unassignedEvent.deviceId,
+            auditId: result.unassignedEvent.auditId,
+            error: errorMessage(error),
+          });
+        }
+      }
       if (result.attribution.batteryId && result.attribution.hardwareProfile && this.options.onDurableFrame) {
         const durableFrame: DurableTelemetryFrame = {
           ...result,
@@ -432,6 +581,30 @@ export class RawMetricsConsumer {
         offset: nextOffset(payload.message.offset),
       }]);
     } catch (error) {
+      if (error instanceof PoisonTelemetryMessageError) {
+        try {
+          await this.options.consumer.commitOffsets([{
+            topic: payload.topic,
+            partition: payload.partition,
+            offset: nextOffset(payload.message.offset),
+          }]);
+        } catch (commitError) {
+          this.logger("poison message could not be skipped", {
+            topic: payload.topic,
+            partition: payload.partition,
+            offset: payload.message.offset,
+            error: errorMessage(commitError),
+          });
+          throw commitError;
+        }
+        this.logger("poison message skipped", {
+          topic: payload.topic,
+          partition: payload.partition,
+          offset: payload.message.offset,
+          error: errorMessage(error),
+        });
+        return;
+      }
       this.logger("message was not acknowledged", {
         topic: payload.topic,
         partition: payload.partition,
@@ -453,11 +626,11 @@ export class RawMetricsConsumer {
 }
 
 function parseJsonMessage(value: Buffer | string | null): unknown {
-  if (value === null) throw new Error("Kafka message has no value");
+  if (value === null) throw new PoisonTelemetryMessageError("Kafka message has no value");
   try {
     return JSON.parse(typeof value === "string" ? value : value.toString("utf8")) as unknown;
   } catch {
-    throw new Error("Kafka message is not valid JSON");
+    throw new PoisonTelemetryMessageError("Kafka message is not valid JSON");
   }
 }
 
