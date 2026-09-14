@@ -48,14 +48,14 @@
 
 ## Task 5 — 로컬 AI 추론 프로세스
 
-- 현재 상태: `REVIEW_REQUIRED`
+- 현재 상태: `IN_PROGRESS`
 - 담당 에이전트: `/root/task5_ai_inference_boundary`
 - 기준 커밋: `599a0e9`
 - 결과 커밋: `badb406`
-- 부모 리뷰 결과: 에이전트 안전 경계 구현 결과 수신, 독립 리뷰 대기
+- 부모 리뷰 결과: 보완 필요 — 동일 프로세스 내 publish/commit 재시도는 직렬화 payload를 재사용하지만, publish 성공 후 offset commit 실패 상태에서 프로세스가 재시작되면 adapter가 새 `evaluated_at`을 만들 수 있어 `(device_id, evaluated_at)` 자연키가 달라지고 DB/알림을 중복 오염시킬 수 있음
 - 실행한 테스트와 결과: 에이전트 실행 — AI unittest 19 passed, Python compile 통과, backend Kafka/anomaly 34 passed, backend typecheck 통과, artifact 미설정 production entrypoint exit 1, `git diff --check` 통과
 - 실환경 검증 여부: 미검증 — 실제 모델 bundle, inference adapter, Kafka/DB 없음
-- 남은 문제 또는 외부 차단 조건: `metadata.json`, `feature_metadata.json`, `scaler.json`, `lstm_autoencoder.pt`, `informer.pt` 및 실제 inference adapter 필요
+- 남은 문제 또는 외부 차단 조건: 재시작을 포함한 결정적 replay identity 보완 필요. 이후에도 `metadata.json`, `feature_metadata.json`, `scaler.json`, `lstm_autoencoder.pt`, `informer.pt` 및 실제 inference adapter 필요
 
 ## Task 6 — Raspberry Pi 명령 Consumer와 릴레이 어댑터
 
