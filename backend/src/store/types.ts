@@ -33,14 +33,17 @@ export type DemoBattery = {
   adminMemo: string;
   version: number;
   latest: {
-    voltageV: number;
-    currentA: number;
-    powerW: number;
+    // No battery_latest row means the asset has not produced a sensor frame.
+    // Keep every measurement field nullable so callers cannot mistake a
+    // missing frame for a synthetic zero-valued reading.
+    voltageV: number | null;
+    currentA: number | null;
+    powerW: number | null;
     tempContact: number | null;
     tempIrSurface: number | null;
     socPct: number | null;
-    score: number;
-    measuredAt: string;
+    score: number | null;
+    measuredAt: string | null;
   };
   mode1Health?: {
     designCapacityMah: number;
@@ -124,7 +127,7 @@ export const CSV_HEADER = "measured_at,device_id,battery_id,session_id,mode,volt
 
 export function csvRow(battery: DemoBattery, sessionId: string | null): string {
   return [
-    battery.latest.measuredAt,
+    battery.latest.measuredAt ?? "",
     "demo-device-01",
     battery.id,
     sessionId ?? "",

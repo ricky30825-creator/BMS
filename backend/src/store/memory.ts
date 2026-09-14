@@ -89,7 +89,7 @@ export function createMemoryStore(): CellGuardStore & { demoUsers: DemoUser[] } 
       interlockCondition: battery.opsStatus === "BLOCKED" ? "TEMP_OVER_CAP" : null,
       reasonCode: battery.opsStatus === "BLOCKED" ? "FAILSAFE_TEMP_IR_OVER_CAP" : null,
       reason: null,
-      changedAt: battery.latest.measuredAt,
+      changedAt: battery.latest.measuredAt ?? isoNow(),
       changedBy: "SYSTEM"
     });
   }
@@ -107,7 +107,10 @@ export function createMemoryStore(): CellGuardStore & { demoUsers: DemoUser[] } 
   const findActiveDiagnosis = (batteryId?: string): DemoDiagnosis | null => [...demoDiagnoses.values()].find((diagnosis) => diagnosis.status === "RUNNING" && (!batteryId || diagnosis.batteryId === batteryId)) ?? null;
   const listDiagnosesForBattery = (batteryId: string): DemoDiagnosis[] => [...demoDiagnoses.values()].filter((diagnosis) => diagnosis.batteryId === batteryId).map((diagnosis) => ({ ...diagnosis }));
   const findDiagnosisById = (id: string): DemoDiagnosis | undefined => { const diagnosis = demoDiagnoses.get(id); return diagnosis ? { ...diagnosis } : undefined; };
-  const readRelay = (id: string): DemoRelay => ({ ...(demoRelays.get(id) ?? { batteryId: id, state: "CLOSED", interlockEngaged: false, interlockCondition: null, reasonCode: null, reason: null, changedAt: isoNow(), changedBy: "SYSTEM" }) });
+  const readRelay = (id: string): DemoRelay => {
+    if (!demoBatteries.some((battery) => battery.id === id)) throw new Error("NOT_FOUND");
+    return { ...(demoRelays.get(id) ?? { batteryId: id, state: "CLOSED", interlockEngaged: false, interlockCondition: null, reasonCode: null, reason: null, changedAt: isoNow(), changedBy: "SYSTEM" }) };
+  };
   const listAudits = (): DemoAudit[] => demoAudits.map((audit) => ({ ...audit }));
 
   const audit = (input: Omit<DemoAudit, "id" | "at">): DemoAudit => {
@@ -135,10 +138,10 @@ export function createMemoryStore(): CellGuardStore & { demoUsers: DemoUser[] } 
       ratedOutputCurrentA: input.ratedOutputCurrentA ?? null,
       opsStatus: "NORMAL",
       memo: "",
-      latest: { voltageV: 0, currentA: 0, powerW: 0, tempContact: null, tempIrSurface: null, socPct: null, score: 0, measuredAt: isoNow() }
+      latest: { voltageV: null, currentA: null, powerW: null, tempContact: null, tempIrSurface: null, socPct: null, score: null, measuredAt: null }
     });
     demoBatteries.push(battery);
-    demoRelays.set(battery.id, { batteryId: battery.id, state: "CLOSED", interlockEngaged: false, interlockCondition: null, reasonCode: null, reason: null, changedAt: battery.latest.measuredAt, changedBy: "SYSTEM" });
+    demoRelays.set(battery.id, { batteryId: battery.id, state: "CLOSED", interlockEngaged: false, interlockCondition: null, reasonCode: null, reason: null, changedAt: isoNow(), changedBy: "SYSTEM" });
     return { ...battery };
   };
 
@@ -174,6 +177,7 @@ export function createMemoryStore(): CellGuardStore & { demoUsers: DemoUser[] } 
   const beginSession = (ownerId: string, batteryId: string): DemoSession => {
     const battery = findBattery(batteryId);
     if (!battery) throw new Error("NOT_FOUND");
+    if (battery.ownerId !== ownerId) throw new Error("NOT_FOUND");
     if (battery.opsStatus === "BLOCKED") throw new Error("BATTERY_BLOCKED");
     // The physical interlock permits one active battery and one active session
     // for the whole installation, not one session per user.
@@ -235,6 +239,7 @@ export function createMemoryStore(): CellGuardStore & { demoUsers: DemoUser[] } 
   const setRelay = (actorId: string, batteryId: string, action: "cut" | "restore", reason: string): DemoRelay => {
     const battery = findBattery(batteryId);
     if (!battery) throw new Error("NOT_FOUND");
+    if (battery.ownerId !== actorId) throw new Error("NOT_FOUND");
     const normalizedReason = normalizeReason(reason);
     const current = readRelay(batteryId);
     if (action === "restore" && current.interlockEngaged) throw new Error("INTERLOCK_LOCKED");
@@ -375,9 +380,11 @@ export function createMemoryStore(): CellGuardStore & { demoUsers: DemoUser[] } 
   const buildCsv = (batteryId: string, sessionId: string | null, from?: string, to?: string): string => {
     const battery = findBattery(batteryId);
     if (!battery) throw new Error("NOT_FOUND");
-    const measuredAt = Date.parse(battery.latest.measuredAt);
     if (from && Number.isNaN(Date.parse(from))) throw new Error("VALIDATION_FAILED");
     if (to && Number.isNaN(Date.parse(to))) throw new Error("VALIDATION_FAILED");
+    if (!battery.latest.measuredAt) return `${CSV_HEADER}\n`;
+    const measuredAt = Date.parse(battery.latest.measuredAt);
+    if (Number.isNaN(measuredAt)) return `${CSV_HEADER}\n`;
     if ((from && measuredAt < Date.parse(from)) || (to && measuredAt > Date.parse(to))) return `${CSV_HEADER}\n`;
     return `${CSV_HEADER}\n${csvRow(battery, sessionId)}\n`;
   };

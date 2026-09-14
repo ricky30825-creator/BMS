@@ -3,6 +3,7 @@ import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import type { CellGuardStore } from "./contract.js";
 import { createMemoryStore } from "./memory.js";
 import { createPostgresStore } from "./postgres.js";
+import { measurementPhaseFor } from "../measurementState.js";
 
 // 저장소 구현체가 지켜야 하는 도메인 계약. 인메모리와 PostgreSQL이 같은
 // 스위트를 통과해야 한다. B1 2단계 담당자는 아래 한 줄을 추가하면 된다:
@@ -30,10 +31,33 @@ export function runStoreContractTests(name: string, makeStore: () => Promise<Cel
       await expect(store.startSession("hong", "no-such-battery")).rejects.toThrow("NOT_FOUND");
     });
 
+    it("다른 소유자의 배터리로 세션을 시작하면 NOT_FOUND", async () => {
+      const otherOwnerBattery = (await store.batteries()).find((battery) => battery.ownerId !== "hong" && battery.opsStatus !== "BLOCKED");
+      expect(otherOwnerBattery).toBeDefined();
+      await expect(store.startSession("hong", otherOwnerBattery!.id)).rejects.toThrow("NOT_FOUND");
+    });
+
+    it("새 배터리는 센서 프레임 전까지 측정값 없이 대기한다", async () => {
+      const battery = await store.createBattery("hong", { label: "신규 측정 대기", targetMode: 1, chemistry: "LI_ION", seriesCount: 3 });
+      expect(battery.latest).toEqual({
+        voltageV: null,
+        currentA: null,
+        powerW: null,
+        tempContact: null,
+        tempIrSurface: null,
+        socPct: null,
+        score: null,
+        measuredAt: null,
+      });
+      expect((await store.csvForBattery(battery.id, null)).trim().split("\n")).toHaveLength(1);
+      const session = await store.startSession("hong", battery.id);
+      expect(measurementPhaseFor(session.startedAt, battery.latest.measuredAt)).toBe("WAITING_FOR_MEASUREMENT");
+    });
+
     it("설비 전체에 활성 세션은 하나뿐이고 이전 것은 SUPERSEDED로 끝난다", async () => {
       const usable = (await store.batteries()).filter((battery) => battery.opsStatus !== "BLOCKED");
-      const first = await store.startSession("hong", usable[0].id);
-      await store.startSession("hong", usable[0].id);
+      const first = await store.startSession(usable[0].ownerId, usable[0].id);
+      await store.startSession(usable[0].ownerId, usable[0].id);
       const ended = await store.sessionById(first.id);
       expect(ended?.status).toBe("ENDED");
       expect(ended?.endReason).toBe("SUPERSEDED");
@@ -78,11 +102,21 @@ export function runStoreContractTests(name: string, makeStore: () => Promise<Cel
       expect((await store.audits()).length).toBe(before + 1);
     });
 
+    it("다른 소유자는 릴레이를 조작할 수 없다", async () => {
+      const otherOwnerBattery = (await store.batteries()).find((battery) => battery.ownerId !== "hong");
+      expect(otherOwnerBattery).toBeDefined();
+      await expect(store.changeRelay("hong", otherOwnerBattery!.id, "cut", "소유권 확인")).rejects.toThrow("NOT_FOUND");
+    });
+
     it("인터락이 걸려 있으면 복구할 수 없다", async () => {
       const blocked = (await store.batteries()).find((battery) => battery.opsStatus === "BLOCKED")!;
       const relay = await store.relayByBattery(blocked.id);
       expect(relay.interlockEngaged).toBe(true);
       await expect(store.changeRelay("hong", blocked.id, "restore", "복구 사유입니다")).rejects.toThrow("INTERLOCK_LOCKED");
+    });
+
+    it("없는 배터리의 릴레이를 조회하면 NOT_FOUND", async () => {
+      await expect(store.relayByBattery("no-such-battery")).rejects.toThrow("NOT_FOUND");
     });
 
     it("engageFailsafe는 인터락을 걸고 릴레이를 연다", async () => {
@@ -100,13 +134,13 @@ export function runStoreContractTests(name: string, makeStore: () => Promise<Cel
     it("Fail-Safe로 걸린 인터락은 사용자가 복구할 수 없다", async () => {
       const battery = (await store.batteries()).find((item) => item.opsStatus === "NORMAL")!;
       await store.engageFailsafe(battery.id, "FAILSAFE_TEMP_IR_OVER_CAP", "TEMP_OVER_CAP");
-      await expect(store.changeRelay("hong", battery.id, "restore", "복구 사유입니다")).rejects.toThrow("INTERLOCK_LOCKED");
+      await expect(store.changeRelay(battery.ownerId, battery.id, "restore", "복구 사유입니다")).rejects.toThrow("INTERLOCK_LOCKED");
     });
 
     it("사유가 비면 REASON_REQUIRED", async () => {
       const battery = (await store.batteries()).find((item) => item.opsStatus === "NORMAL")!;
       await expect(store.changeOpsStatus("leelab", battery.id, "WATCH", "   ")).rejects.toThrow("REASON_REQUIRED");
-      await expect(store.changeRelay("hong", battery.id, "cut", "")).rejects.toThrow("REASON_REQUIRED");
+      await expect(store.changeRelay(battery.ownerId, battery.id, "cut", "")).rejects.toThrow("REASON_REQUIRED");
     });
 
     it("자기 자신을 정지시킬 수 없다", async () => {
@@ -201,7 +235,8 @@ async function resetPostgresContractDatabase(pool: pg.Pool): Promise<void> {
     values
       ('pg-blocked', 'hong', 'PG blocked', 'LI_ION', 1, 3, 'CellGuard', 'External', null, null, 'BLOCKED', '', '', 0),
       ('pg-mode2', 'hong', 'PG mode 2', 'LI_PO', 2, null, 'CellGuard', 'Powerbank', 37, 2, 'NORMAL', '', '', 0),
-      ('pg-mode1', 'hong', 'PG mode 1', 'LI_ION', 1, 3, 'CellGuard', 'External', null, null, 'NORMAL', '', '', 0)
+      ('pg-mode1', 'hong', 'PG mode 1', 'LI_ION', 1, 3, 'CellGuard', 'External', null, null, 'NORMAL', '', '', 0),
+      ('pg-kim', 'kimeng', 'PG Kim battery', 'LI_ION', 1, 3, 'CellGuard', 'External', null, null, 'NORMAL', '', '', 0)
   `);
   await pool.query(`
     insert into battery_latest

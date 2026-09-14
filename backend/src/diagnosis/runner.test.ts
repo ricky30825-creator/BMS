@@ -177,7 +177,7 @@ describe("stepDiagnosis", () => {
     const first = stepDiagnosis({ battery: battery(), diagnosis: running("CAPACITY", "CAPACITY"), elapsedMs: 3000, config });
     if (first.kind !== "RUNNING") throw new Error("expected RUNNING");
     // 첫 tick은 이전 tick이 없어 elapsedMs 그대로(3초)를 크레딧해야 한다.
-    const oneStepAt3s = accumulateWh(0, first.progress.vLightLoadV ?? battery().latest.voltageV, battery().latest.currentA, 3000);
+    const oneStepAt3s = accumulateWh(0, first.progress.vLightLoadV ?? battery().latest.voltageV!, battery().latest.currentA!, 3000);
     expect(first.progress.deliveredWh).toBeCloseTo(oneStepAt3s, 6);
     expect(first.progress.lastElapsedMs).toBe(3000);
 
@@ -187,7 +187,7 @@ describe("stepDiagnosis", () => {
 
     // 델타 3초분만 추가로 크레딧돼야 한다 — tickMs(1초) 두 번치(≈2초분)가 아니다.
     const deltaWh = second.progress.deliveredWh - first.progress.deliveredWh;
-    const expectedDeltaWh = accumulateWh(0, second.progress.vLightLoadV ?? battery().latest.voltageV, battery().latest.currentA, 3000);
+    const expectedDeltaWh = accumulateWh(0, second.progress.vLightLoadV ?? battery().latest.voltageV!, battery().latest.currentA!, 3000);
     expect(deltaWh).toBeCloseTo(expectedDeltaWh, 6);
     expect(second.progress.lastElapsedMs).toBe(6000);
   });

@@ -31,8 +31,9 @@ describe("completeExportJob", () => {
   it("produces a 1-row CSV when the battery's latest reading falls inside the range", async () => {
     const session = await startSession("hong", "DEMO-PACK-001");
     const battery = (await batteryById("DEMO-PACK-001"))!;
-    const from = new Date(Date.parse(battery.latest.measuredAt) - 1000).toISOString();
-    const to = new Date(Date.parse(battery.latest.measuredAt) + 1000).toISOString();
+    const measuredAt = battery.latest.measuredAt!;
+    const from = new Date(Date.parse(measuredAt) - 1000).toISOString();
+    const to = new Date(Date.parse(measuredAt) + 1000).toISOString();
     const job = await createExportJob("hong", session.id, from, to);
     const ready = (await completeExportJob(job.id))!;
     expect(ready.status).toBe("READY");

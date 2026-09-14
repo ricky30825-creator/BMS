@@ -55,11 +55,23 @@ type FakeOptions = {
   failAudit?: boolean;
   failSessionUnique?: boolean;
   failDiagnosisUnique?: boolean;
+  emptyTelemetry?: boolean;
+  missingBattery?: boolean;
+  noLatest?: boolean;
 };
 
 function fakePool(options: FakeOptions = {}) {
   const queries: Array<{ text: string; values: unknown[] }> = [];
-  let batteryRow = { ...battery };
+  let batteryRow = { ...battery, ...(options.noLatest ? {
+    latest_measured_at: null,
+    latest_voltage_v: null,
+    latest_current_a: null,
+    latest_power_w: null,
+    latest_temp_contact: null,
+    latest_temp_ir_surface: null,
+    latest_soc_pct: null,
+    latest_score: null,
+  } : {}) };
   let diagnosisRow = { ...diagnosis };
   const run = vi.fn(async (text: string, values: unknown[] = []) => {
     queries.push({ text, values });
@@ -72,7 +84,7 @@ function fakePool(options: FakeOptions = {}) {
     if (options.failDiagnosisUnique && normalized.startsWith("insert into diagnosis")) {
       throw Object.assign(new Error("duplicate active diagnosis"), { code: "23505", constraint: "uq_active_diagnosis_battery" });
     }
-    if (normalized.includes("from battery_asset")) return { rows: [batteryRow] };
+    if (normalized.includes("from battery_asset")) return { rows: options.missingBattery ? [] : [batteryRow] };
     if (normalized.startsWith("update battery_asset")) {
       if (normalized.includes("ops_status")) batteryRow = { ...batteryRow, ops_status: values[1], version: 1 };
       return { rows: [] };
@@ -93,6 +105,7 @@ function fakePool(options: FakeOptions = {}) {
       return { rows: [diagnosisRow] };
     }
     if (normalized.includes("from telemetry_metric")) {
+      if (options.emptyTelemetry) return { rows: [] };
       return {
         rows: [{
           measured_at: "2026-08-06T01:31:00.000Z", device_id: "demo-device-01", battery_id: "b1", session_id: "ses1", mode: 2,
@@ -144,6 +157,42 @@ describe("PostgreSQL store query mapping", () => {
     expect((await store.batteryById("b1"))?.latest.voltageV).toBe(5.1);
   });
 
+  it("does not fall back to asset updated_at when no sensor frame exists", async () => {
+    const fake = fakePool({ noLatest: true });
+    const store = createPostgresStore(fake.pool);
+    expect((await store.batteryById("b1"))?.latest).toEqual({
+      voltageV: null,
+      currentA: null,
+      powerW: null,
+      tempContact: null,
+      tempIrSurface: null,
+      socPct: null,
+      score: null,
+      measuredAt: null,
+    });
+  });
+
+  it("does not insert a synthetic battery_latest row when creating a battery", async () => {
+    const fake = fakePool({ noLatest: true });
+    const store = createPostgresStore(fake.pool);
+    const created = await store.createBattery("hong", { label: "Fresh battery", targetMode: 1, chemistry: "LI_ION", seriesCount: 3 });
+    expect(created.latest.measuredAt).toBeNull();
+    expect(fake.queries.some(({ text }) => text.toLowerCase().includes("insert into battery_latest"))).toBe(false);
+  });
+
+  it("rejects a session request for another owner's battery before device lookup", async () => {
+    const fake = fakePool();
+    const store = createPostgresStore(fake.pool);
+    await expect(store.startSession("kimeng", "b1")).rejects.toThrow("NOT_FOUND");
+    expect(fake.queries.some(({ text }) => text.toLowerCase().includes("from device"))).toBe(false);
+  });
+
+  it("does not fabricate a relay for a nonexistent battery", async () => {
+    const fake = fakePool({ missingBattery: true });
+    const store = createPostgresStore(fake.pool);
+    await expect(store.relayByBattery("missing")).rejects.toThrow("NOT_FOUND");
+  });
+
   it("rolls back a state change when its audit insert fails", async () => {
     const fake = fakePool({ failAudit: true });
     const store = createPostgresStore(fake.pool);
@@ -186,6 +235,13 @@ describe("PostgreSQL store query mapping", () => {
     expect(csv).toContain("measured_at,device_id,battery_id,session_id,mode");
     expect(csv).toContain("2026-08-06T01:31:00.000Z,demo-device-01,b1,ses1,2,5.1,-1.2,-6.12");
     expect(csv).toContain('"{""voltage_v"":0}"');
+  });
+
+  it("returns header-only CSV when no telemetry row matches", async () => {
+    const fake = fakePool({ emptyTelemetry: true });
+    const store = createPostgresStore(fake.pool);
+    const csv = await store.csvForBattery("b1", "ses1");
+    expect(csv).toBe("measured_at,device_id,battery_id,session_id,mode,voltage_v,current_a,power_w,temp_contact,temp_ir_surface,soc_pct,soc_basis,gas_raw,pressure_raw,acoustic_raw,age_ms\n");
   });
 
   it("maps a diagnosis unique violation to DIAGNOSIS_IN_PROGRESS", async () => {

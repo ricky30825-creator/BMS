@@ -227,6 +227,7 @@ async function quickTrend(battery: NonNullable<Awaited<ReturnType<typeof battery
   const latest = (await batteryJson(battery))!.latest;
   const values: Record<string, number | null> = { volt: latest.voltageV, curr: latest.currentA, temp: latest.representativeTempC, soc: latest.socPct };
   const metricKey = metricName === "volt" || metricName === "curr" || metricName === "temp" || metricName === "soc" ? metricName : "temp";
+  if (!latest.measuredAt || !Number.isFinite(Date.parse(latest.measuredAt))) return { metric: metricKey, points: [] };
   return { metric: metricKey, points: [{ at: latest.measuredAt, value: values[metricKey] ?? null }] };
 }
 
@@ -662,7 +663,14 @@ app.get("/api/events", requireSession, asyncRoute(async (req, res) => {
 function trendForBattery(battery: NonNullable<Awaited<ReturnType<typeof batteryById>>>, period: "24h" | "7d" | "30d") {
   const count = period === "24h" ? 25 : period === "30d" ? 30 : 7;
   const stepMs = period === "24h" ? 60 * 60 * 1000 : 24 * 60 * 60 * 1000;
-  const end = new Date(battery.latest.measuredAt).getTime();
+  const end = battery.latest.measuredAt ? Date.parse(battery.latest.measuredAt) : Number.NaN;
+  const emptySeries = [
+    { batteryId: battery.id, batteryLabel: battery.label, metric: "volt", unit: "V", points: [] as Array<number | null> },
+    { batteryId: battery.id, batteryLabel: battery.label, metric: "curr", unit: "A", points: [] as Array<number | null> },
+    { batteryId: battery.id, batteryLabel: battery.label, metric: "temp", unit: "°C", points: [] as Array<number | null> },
+    { batteryId: battery.id, batteryLabel: battery.label, metric: "soc", unit: "%", points: [] as Array<number | null> },
+  ];
+  if (!Number.isFinite(end)) return { buckets: [], series: emptySeries };
   const buckets = Array.from({ length: count }, (_, index) => new Date(end - (count - index - 1) * stepMs).toISOString());
   const point = (value: number | null) => [...Array<number | null>(count - 1).fill(null), value];
   return { buckets, series: [

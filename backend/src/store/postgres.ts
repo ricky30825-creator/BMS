@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import type pg from "pg";
 
 import type { CellGuardStore, CreateBatteryInput, IdempotencyResult, UpdateBatteryInput } from "./contract.js";
-import { CSV_HEADER, INPUT_LIMITS, csvRow } from "./types.js";
+import { CSV_HEADER, INPUT_LIMITS } from "./types.js";
 import type {
   DemoAudit,
   DemoBattery,
@@ -85,6 +85,12 @@ function iso(value: unknown, fallback = new Date().toISOString()): string {
     return Number.isNaN(date.getTime()) ? value : date.toISOString();
   }
   return fallback;
+}
+
+function nullableIso(value: unknown): string | null {
+  if (value == null) return null;
+  const date = value instanceof Date ? value : new Date(value as string | number);
+  return Number.isNaN(date.getTime()) ? null : date.toISOString();
 }
 
 function jsonValue(value: unknown): unknown {
@@ -180,14 +186,14 @@ function mapBattery(row: BatteryRow): DemoBattery {
     adminMemo: row.admin_memo == null ? "" : String(row.admin_memo),
     version: integerOrNull(row.version) ?? 0,
     latest: {
-      voltageV: numberOrNull(row.latest_voltage_v) ?? 0,
-      currentA: numberOrNull(row.latest_current_a) ?? 0,
-      powerW: numberOrNull(row.latest_power_w) ?? 0,
+      voltageV: numberOrNull(row.latest_voltage_v),
+      currentA: numberOrNull(row.latest_current_a),
+      powerW: numberOrNull(row.latest_power_w),
       tempContact: numberOrNull(row.latest_temp_contact),
       tempIrSurface: numberOrNull(row.latest_temp_ir_surface),
       socPct: numberOrNull(row.latest_soc_pct),
-      score: numberOrNull(row.latest_score) ?? 0,
-      measuredAt: iso(row.latest_measured_at ?? row.updated_at),
+      score: numberOrNull(row.latest_score),
+      measuredAt: nullableIso(row.latest_measured_at),
     },
   };
   const health = healthFromRow(row);
@@ -557,6 +563,8 @@ export function createPostgresStore(pool: pg.Pool): CellGuardStore {
 
     async relayByBattery(id) {
       return dbCall(async () => {
+        const battery = await batteryRow(pool, id);
+        if (!battery) throw new Error("NOT_FOUND");
         const row = await relayRow(pool, id);
         if (row) return clone(mapRelay(row));
         return {
@@ -610,12 +618,6 @@ export function createPostgresStore(pool: pg.Pool): CellGuardStore {
           input.ratedOutputCurrentA ?? null,
           now,
         ]);
-        await query(client, `
-          insert into battery_latest
-            (battery_id, measured_at, voltage_v, current_a, power_w, temp_contact,
-             temp_ir_surface, soc_pct, soc_basis, score, evaluated_at, updated_at)
-          values ($1, $2, 0, 0, 0, null, null, null, null, 0, null, $2)
-        `, [id, now]);
         await ensureRelay(client, id);
         const row = await batteryRow(client, id);
         if (!row) throw new Error("NOT_FOUND");
@@ -662,6 +664,7 @@ export function createPostgresStore(pool: pg.Pool): CellGuardStore {
         // asset would turn that race into two successful superseding sessions.
         const battery = await batteryRow(client, batteryId);
         if (!battery) throw new Error("NOT_FOUND");
+        if (String(battery.owner_user_id) !== ownerId) throw new Error("NOT_FOUND");
         if (battery.ops_status === "BLOCKED") throw new Error("BATTERY_BLOCKED");
 
         const deviceResult = await query<AnyRow>(client, `
@@ -791,6 +794,7 @@ export function createPostgresStore(pool: pg.Pool): CellGuardStore {
       return dbCall(async () => transaction(async (client) => {
         const battery = await batteryRow(client, batteryId);
         if (!battery) throw new Error("NOT_FOUND");
+        if (String(battery.owner_user_id) !== actorId) throw new Error("NOT_FOUND");
         await ensureRelay(client, batteryId);
         const current = await relayRow(client, batteryId, true);
         if (!current) throw new Error("NOT_FOUND");
@@ -1028,9 +1032,7 @@ export function createPostgresStore(pool: pg.Pool): CellGuardStore {
           order by measured_at asc
         `, [batteryId, sessionId, from ?? null, to ?? null]);
         if (result.rows.length) return `${CSV_HEADER}\n${result.rows.map(metricCsvRow).join("\n")}\n`;
-        const measuredAt = Date.parse(battery.latest.measuredAt);
-        const inRange = (!from || measuredAt >= Date.parse(from)) && (!to || measuredAt <= Date.parse(to));
-        return inRange ? `${CSV_HEADER}\n${csvRow(battery, sessionId)}\n` : `${CSV_HEADER}\n`;
+        return `${CSV_HEADER}\n`;
       });
     },
   };
