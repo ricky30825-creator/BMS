@@ -9,6 +9,6 @@ export function createLoggingDeviceCommandPort(
     async relayCut(batteryId, reasonCode) { log({ command: "relayCut", batteryId, reasonCode }); },
     async relayRestore(batteryId) { log({ command: "relayRestore", batteryId }); },
     async sessionStarted(sessionId, batteryId, targetMode) { log({ command: "sessionStarted", sessionId, batteryId, targetMode }); },
-    async sessionEnded(sessionId, endReason) { log({ command: "sessionEnded", sessionId, endReason }); },
+    async sessionEnded(sessionId, batteryId, endReason) { log({ command: "sessionEnded", sessionId, batteryId, endReason }); },
   };
 }

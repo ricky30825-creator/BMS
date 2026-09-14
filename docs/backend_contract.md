@@ -1501,7 +1501,7 @@ F21 화면이 실행 전에 잠금 사유를 알 수 있도록 `GET /api/batteri
 ```
 
 - 진행 중인 진단이 없으면 `200`에 `null`을 준다. `404`가 아니다 — "없음"은 정상 상태다
-- `phase`는 `P0`~`P7` \| `CAPACITY`. `battery-raw-metrics`의 `diag_phase`와 **같은 값**이다(스펙 §6-1). `P6`(붕괴 구간 미세 스윕, 미구현)과 `P7`(붕괴점의 0.9배로 40초 거는 발열 탐침 구간, §3-2 ④)은 다른 단계다
+- 이 API의 `phase`는 현재 `QUICK`/`CAPACITY` 표면에 한해 `P0`~`P7` \| `CAPACITY`다. `battery-raw-metrics.diag_phase`는 여기에 더해 모드 2 스크리닝 wire 값 `S0`·`S1A`~`S1F`·`S2`·`S3`를 허용한다(스펙 §6-1); 스크리닝 API 표면은 H18에서 별도로 남아 있다. `P6`(붕괴 구간 미세 스윕, 미구현)과 `P7`(붕괴점의 0.9배로 40초 거는 발열 탐침 구간, §3-2 ④)은 다른 단계다
 - `partialMetrics`는 아직 확정되지 않은 지표를 `null`로 둔다. 중간값을 추정해 채우지 않는다
 - `thermalProbeLoadA`·`thermalPerWattCPerMinPerW`는 **P7이 시작되기 전에는 `null`**이고, `recoverySlopeCPerMin`은 **P5 전에는 `null`**이다. 셋 다 진행 중에도 실리지만 완료 전 값은 그 단계의 부분 집계다 — 완료 결과(`GET /api/diagnoses/{id}`)의 값이 정본이다
 

@@ -15,11 +15,15 @@ const versionSchema = z.literal(KAFKA_CONTRACT_VERSION);
 const nonEmptyStringSchema = z.string().min(1);
 const finiteNumberSchema = z.number().finite();
 const nullableNumberSchema = finiteNumberSchema.nullable();
-const timestampSchema = z.string().datetime({ offset: true });
+const timestampSchema = z.string().datetime({ offset: false }).refine((value) => value.endsWith("Z"), {
+  message: "timestamp must be an ISO8601 UTC timestamp with a Z suffix",
+});
 const scoreSchema = finiteNumberSchema.min(0).max(1);
 
 const temperaturePointsSchema = z.object({
-  contact: z.array(nullableNumberSchema).length(3),
+  // Mode 1 has three fixed contact probes. Mode 2 has no contact probe at all;
+  // its contact field is null rather than a fabricated three-slot array.
+  contact: z.union([z.array(nullableNumberSchema).length(3), z.null()]),
   // The current hardware has two IR zones, but the contract deliberately keeps
   // this array extensible for a future IR array sensor.
   ir: z.array(nullableNumberSchema).min(1),
@@ -35,15 +39,36 @@ const diagnosisPhaseSchema = z.enum([
   "P4",
   "P5",
   "P6",
+  "P7",
   "CAPACITY",
+  "S0",
+  "S1A",
+  "S1B",
+  "S1C",
+  "S1D",
+  "S1E",
+  "S1F",
+  "S2",
+  "S3",
 ]).nullable();
 
 function addPeakInvariantIssue(
   ctx: z.RefinementCtx,
   path: string,
   scalar: number | null,
-  points: Array<number | null>,
+  points: Array<number | null> | null,
 ): void {
+  if (points === null) {
+    if (scalar !== null) {
+      ctx.addIssue({
+        code: "custom",
+        path: [path],
+        message: `${path} must be null when temperature points are unavailable`,
+      });
+    }
+    return;
+  }
+
   const present = points.filter((point): point is number => point !== null);
   const expected = present.length === 0 ? null : Math.max(...present);
   if (scalar !== expected) {
@@ -84,6 +109,12 @@ export const batteryRawMetricsSchema = z.object({
   if (value.mode === 2 && value.pressure_raw !== null) {
     ctx.addIssue({ code: "custom", path: ["pressure_raw"], message: "mode 2 does not have a pressure sensor" });
   }
+  if (value.mode === 1 && value.temp_points.contact === null) {
+    ctx.addIssue({ code: "custom", path: ["temp_points", "contact"], message: "mode 1 requires exactly three contact temperature points" });
+  }
+  if (value.mode === 2 && value.temp_points.contact !== null) {
+    ctx.addIssue({ code: "custom", path: ["temp_points", "contact"], message: "mode 2 has no contact temperature points" });
+  }
   if (value.mode === 2 && value.temp_contact !== null) {
     ctx.addIssue({ code: "custom", path: ["temp_contact"], message: "mode 2 does not have a contact temperature sensor" });
   }
@@ -99,12 +130,14 @@ const contributionSchema = z.object({
   contribution: finiteNumberSchema,
 }).strict();
 
-/** Inference result published by the local AI process to battery-anomaly-alerts. */
+/**
+ * Inference result published by the local AI process to battery-anomaly-alerts.
+ * The AI process only knows the raw frame's device_id. The Consumer owns
+ * battery/session attribution when it persists the result.
+ */
 export const batteryAnomalyAlertSchema = z.object({
   version: versionSchema,
   device_id: nonEmptyStringSchema,
-  battery_id: nonEmptyStringSchema.nullable(),
-  session_id: nonEmptyStringSchema.nullable(),
   evaluated_at: timestampSchema,
   score: scoreSchema,
   ae_score: scoreSchema.nullable(),
@@ -119,7 +152,12 @@ export type BatteryAnomalyAlert = z.infer<typeof batteryAnomalyAlertSchema>;
 
 const batteryIdSchema = nonEmptyStringSchema;
 
-export const relayCutEventSchema = z.object({
+/**
+ * `battery-events` is a shared topic. These are only the currently defined
+ * backend -> edge command/event payloads; edge-originated sensor and DIAG_*
+ * events are intentionally not invented or parsed here.
+ */
+export const backendRelayCutEventSchema = z.object({
   version: versionSchema,
   code: z.literal("RELAY_CUT"),
   params: z.object({
@@ -128,7 +166,7 @@ export const relayCutEventSchema = z.object({
   }).strict(),
 }).strict();
 
-export const relayRestoreEventSchema = z.object({
+export const backendRelayRestoreEventSchema = z.object({
   version: versionSchema,
   code: z.literal("RELAY_RESTORE"),
   params: z.object({
@@ -136,7 +174,7 @@ export const relayRestoreEventSchema = z.object({
   }).strict(),
 }).strict();
 
-export const sessionStartedEventSchema = z.object({
+export const backendSessionStartedEventSchema = z.object({
   version: versionSchema,
   code: z.literal("SESSION_STARTED"),
   params: z.object({
@@ -146,29 +184,31 @@ export const sessionStartedEventSchema = z.object({
   }).strict(),
 }).strict();
 
-export const sessionEndedEventSchema = z.object({
+export const backendSessionEndedEventSchema = z.object({
   version: versionSchema,
   code: z.literal("SESSION_ENDED"),
   params: z.object({
     sessionId: nonEmptyStringSchema,
+    batteryId: batteryIdSchema,
     endReason: nonEmptyStringSchema,
   }).strict(),
 }).strict();
 
-export const batteryEventSchema = z.discriminatedUnion("code", [
-  relayCutEventSchema,
-  relayRestoreEventSchema,
-  sessionStartedEventSchema,
-  sessionEndedEventSchema,
+export const backendOutboundCommandEventSchema = z.discriminatedUnion("code", [
+  backendRelayCutEventSchema,
+  backendRelayRestoreEventSchema,
+  backendSessionStartedEventSchema,
+  backendSessionEndedEventSchema,
 ]);
 
-export type RelayCutEvent = z.infer<typeof relayCutEventSchema>;
-export type RelayRestoreEvent = z.infer<typeof relayRestoreEventSchema>;
-export type SessionStartedEvent = z.infer<typeof sessionStartedEventSchema>;
-export type SessionEndedEvent = z.infer<typeof sessionEndedEventSchema>;
-export type BatteryEvent = z.infer<typeof batteryEventSchema>;
+export type BackendRelayCutEvent = z.infer<typeof backendRelayCutEventSchema>;
+export type BackendRelayRestoreEvent = z.infer<typeof backendRelayRestoreEventSchema>;
+export type BackendSessionStartedEvent = z.infer<typeof backendSessionStartedEventSchema>;
+export type BackendSessionEndedEvent = z.infer<typeof backendSessionEndedEventSchema>;
+export type BackendOutboundCommandEvent = z.infer<typeof backendOutboundCommandEventSchema>;
 
-export type KafkaWireMessage = BatteryRawMetrics | BatteryAnomalyAlert | BatteryEvent;
+export type KafkaDataTopic = typeof KAFKA_TOPICS.rawMetrics | typeof KAFKA_TOPICS.anomalyAlerts;
+export type KafkaDataMessage = BatteryRawMetrics | BatteryAnomalyAlert;
 
 export function parseBatteryRawMetrics(input: unknown): BatteryRawMetrics {
   return batteryRawMetricsSchema.parse(input);
@@ -178,35 +218,38 @@ export function parseBatteryAnomalyAlert(input: unknown): BatteryAnomalyAlert {
   return batteryAnomalyAlertSchema.parse(input);
 }
 
-export function parseBatteryEvent(input: unknown): BatteryEvent {
-  return batteryEventSchema.parse(input);
+export function parseBackendOutboundCommandEvent(input: unknown): BackendOutboundCommandEvent {
+  return backendOutboundCommandEventSchema.parse(input);
 }
 
-/** Parse a payload using the schema assigned to its logical topic. */
-export function parseKafkaMessage(topic: KafkaTopic, input: unknown): KafkaWireMessage {
+export function partitionKeyForBackendOutboundCommandEvent(input: unknown): string {
+  return parseBackendOutboundCommandEvent(input).params.batteryId;
+}
+
+/** Parse only the raw-metrics or anomaly-alerts data topics. */
+export function parseKafkaMessage(topic: KafkaDataTopic, input: unknown): KafkaDataMessage {
   switch (topic) {
     case KAFKA_TOPICS.rawMetrics:
       return parseBatteryRawMetrics(input);
     case KAFKA_TOPICS.anomalyAlerts:
       return parseBatteryAnomalyAlert(input);
-    case KAFKA_TOPICS.events:
-      return parseBatteryEvent(input);
   }
 }
 
 /**
- * Partition-key policy. Raw frames cannot use battery_id because the edge does
- * not know it; sessionEnded cannot use batteryId because DeviceCommandPort only
- * supplies sessionId and endReason for that command.
+ * Partition-key policy. Raw and anomaly messages use device_id because the edge
+ * and AI process do not own battery/session attribution. Backend outbound event
+ * messages use batteryId, including SESSION_ENDED supplied from the session row
+ * when an outbox message is created.
  */
 export const KAFKA_PARTITION_KEY_RULES = Object.freeze({
   rawMetrics: "device_id",
-  anomalyAlerts: "battery_id ?? device_id",
+  anomalyAlerts: "device_id",
   events: Object.freeze({
     relayCut: "params.batteryId",
     relayRestore: "params.batteryId",
     sessionStarted: "params.batteryId",
-    sessionEnded: "params.sessionId",
+    sessionEnded: "params.batteryId",
   }),
 } as const);
 
@@ -216,13 +259,10 @@ export function partitionKeyFor(topic: KafkaTopic, input: unknown): string {
       return parseBatteryRawMetrics(input).device_id;
     case KAFKA_TOPICS.anomalyAlerts: {
       const message = parseBatteryAnomalyAlert(input);
-      return message.battery_id ?? message.device_id;
+      return message.device_id;
     }
     case KAFKA_TOPICS.events: {
-      const message = parseBatteryEvent(input);
-      return message.code === "SESSION_ENDED"
-        ? message.params.sessionId
-        : message.params.batteryId;
+      return partitionKeyForBackendOutboundCommandEvent(input);
     }
   }
 }

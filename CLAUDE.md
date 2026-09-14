@@ -59,12 +59,14 @@ Raspberry Pi              Kafka → Consumer → PostgreSQL + TimescaleDB
 |---|---|---|
 | `battery-raw-metrics` | 에지 (Raspberry Pi) | 센서 Raw 데이터 (100ms 주기) |
 | `battery-anomaly-alerts` | 로컬 추론 프로세스 | 최종 이상점수(Score Fusion) 및 AE/Informer 개별 점수, 파생 온도(칼만 필터, 내부 셀 추정) |
-| `battery-events` | 에지/백엔드 | 센서 오류, 인터락 발생, 릴레이 제어 이벤트, 음성 안내 대상 이벤트 |
+| `battery-events` | 에지/백엔드 | 에지와 백엔드가 함께 쓰는 공유 토픽. 현재 `backend/src/kafka.ts`가 고정하는 것은 백엔드→에지 outbound command/event 4종이며, 에지 센서 오류·`DIAG_*` 이벤트의 전체 스키마는 이 단계에서 임의 정의하지 않는다 |
 
 Kafka JSON payload는 `version: 1`을 최상위에 포함한다. 구현·검증 정본은
-`backend/src/kafka.ts`이며, raw는 `device_id`, anomaly는 `battery_id`(없으면
-`device_id`), 배터리 이벤트는 `batteryId`를 파티션 키로 쓴다. `sessionEnded`는
-현재 `DeviceCommandPort`에 batteryId가 없으므로 `sessionId`를 파티션 키로 쓴다.
+`backend/src/kafka.ts`이며, raw와 anomaly는 `device_id`, 현재 정의된 백엔드
+outbound 이벤트는 `batteryId`를 파티션 키로 쓴다. anomaly wire payload에는
+`battery_id`·`session_id`를 넣지 않는다. AI 프로세스는 raw의 `device_id`만 알고,
+Consumer가 DB 적재 시 활성 세션에서 두 값을 태깅한다. `SESSION_ENDED`의
+`batteryId`도 세션 조회/outbox에서 채워 같은 배터리 파티션 순서를 보장한다.
 
 > **Kafka 브로커는 호스트 PC에서 로컬로 운영하며 LAN 한정 PLAINTEXT다.** 클라이언트는 에지·추론 프로세스·백엔드 셋이며 Colab은 포함되지 않는다. `advertised.listeners`를 `localhost`가 아니라 **호스트의 LAN IP**로 잡아야 라즈베리파이가 붙는다 — `localhost`로 두면 브로커가 클라이언트에게 자기 주소를 `localhost`로 되돌려줘, 에지가 자기 자신에게 접속을 시도하며 조용히 실패한다.
 
@@ -79,7 +81,7 @@ Kafka JSON payload는 `version: 1`을 최상위에 포함한다. 구현·검증 
   "version": 1,
   "device_id": "string",
   "mode": 1,
-  "timestamp": "ISO8601",
+  "timestamp": "ISO8601 UTC (Z suffix)",
   "voltage_v": 3.82,
   "current_a": -1.25,
   "power_w": -4.78,
@@ -106,6 +108,8 @@ Kafka JSON payload는 `version: 1`을 최상위에 포함한다. 구현·검증 
 
 > **모드 1의 온도는 다점 측정이며 `temp_contact`·`temp_ir_surface`는 그 최댓값이다.** 접촉 3점(DS18B20 ×3, 하단/중앙/단자쪽) + IR 2존(MLX90614 ×2, 중앙/단자쪽). 열폭주는 국부에서 시작하므로 평균을 쓰면 초기 신호가 희석된다. `temp_points`에 개별 지점값을 함께 실어(길이 고정 3·2, 위치 순서, 결측은 `null`) AI가 지점 간 온도차를 특징으로 쓸 수 있게 한다. **불변식**: `temp_contact == max(non-null contact)`, `temp_ir_surface == max(non-null ir)`. 상세는 `docs/hardware/mode1_backend_spec.md` §6-5·§7-4·§9.
 
+> **모드 2에는 접촉 프로브가 없다.** 따라서 `temp_contact`와 `temp_points.contact`는 모두 `null`이며, 길이 3 배열을 채우거나 인덱싱하지 않는다. `temp_points.ir`만 배열로 보낸다(정본: `docs/hardware/mode2_powerbank_diagnosis_spec.md` §6-1).
+
 > ⚠️ **`temp_points.ir`의 길이 2를 코드에 상수로 박지 마라(2026-07-30).** MLX90614 2개 구성은 단소자로 공간 피크를 내려는 우회책이고, **픽셀별 값을 주는 IR 어레이(MLX90640 등)로 교체할 여지가 열려 있다.** 그때 `temp_ir_surface`(= 공간 피크)와 §6-5 두 겹 피크 규칙은 그대로지만 **`ir` 배열 길이는 ROI 존 개수로 바뀐다.** 배열을 순회해 최댓값을 쓰면 교체가 설정 변경으로 끝나고, `ir[0]`·`ir[1]`을 직접 인덱싱하면 AI 특징 추출까지 손봐야 한다. **`temp_ir_surface`가 계약의 본체, `temp_points.ir`는 부가 정보다.** 상세는 스펙 §6-4b. 접촉 3점은 교체 대상이 아니다.
 
 > 온도는 IR 표면온도(및 모드 1의 접촉온도)만 측정한다. 주변/외부 온도(`temp_ambient`)는 측정하지 않는다.
@@ -126,7 +130,7 @@ Kafka JSON payload는 `version: 1`을 최상위에 포함한다. 구현·검증 
 
 > **모드 2의 `soc_pct`는 INA226 적산으로 낸 상대값이다(2026-07-28 확정).** 완제품 보조배터리는 셀에 접근할 수 없어 Battery Babysitter(BQ27441)를 못 붙인다. 대신 **측정 시작 시점을 100%로 보고 INA226으로 방전 Wh를 적산해 감산**하며, 정격 용량은 사용자가 배터리 자산 등록 시 입력한 값을 쓴다. 절대 SOC가 아니므로 **모드 1의 `soc_pct`와 같은 값으로 취급하면 안 된다** — AI가 쓰는 건 SOC 변화 추이다.
 
-> **진단 중에는 `diag_phase`·`load_target_a` 두 필드가 추가로 실린다.** `diag_phase`는 `null`(진단 아님) 또는 `P0`~`P6`·`CAPACITY`, `load_target_a`는 그 프레임에서 **지시한** 목표 전류다(실측은 `current_a`이며 둘의 차이가 부하 제어 오차다). 아래 「보조배터리 열화 진단」 참조.
+> **진단 중에는 `diag_phase`·`load_target_a` 두 필드가 추가로 실린다.** `diag_phase`는 `null`(진단 아님), 빠른 진단의 `P0`~`P7`·`CAPACITY`, 또는 스크리닝의 `S0`·`S1A`~`S1F`·`S2`·`S3`다. `load_target_a`는 그 프레임에서 **지시한** 목표 전류다(실측은 `current_a`이며 둘의 차이가 부하 제어 오차다). 아래 「보조배터리 열화 진단」 참조.
 
 ## 보조배터리 열화 진단 (모드 2)
 

@@ -17,8 +17,8 @@ describe("logging device command port", () => {
     const log = vi.fn();
     const port = createLoggingDeviceCommandPort(log);
     await port.sessionStarted("ses_1", "DEMO-PACK-001", 1);
-    await port.sessionEnded("ses_1", "SUPERSEDED");
+    await port.sessionEnded("ses_1", "DEMO-PACK-001", "SUPERSEDED");
     expect(log).toHaveBeenNthCalledWith(1, { command: "sessionStarted", sessionId: "ses_1", batteryId: "DEMO-PACK-001", targetMode: 1 });
-    expect(log).toHaveBeenNthCalledWith(2, { command: "sessionEnded", sessionId: "ses_1", endReason: "SUPERSEDED" });
+    expect(log).toHaveBeenNthCalledWith(2, { command: "sessionEnded", sessionId: "ses_1", batteryId: "DEMO-PACK-001", endReason: "SUPERSEDED" });
   });
 });

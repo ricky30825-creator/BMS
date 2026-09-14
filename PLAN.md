@@ -82,7 +82,7 @@ ADS1115          LAN          battery-anomaly-alerts ◀─ alerts 발행 ─┤
 |---|---|
 | `battery-raw-metrics` | 에지 센서 Raw 데이터 |
 | `battery-anomaly-alerts` | AI 추론 결과 (최종 이상점수·AE/Informer 개별 점수, 파생 온도) |
-| `battery-events` | 센서 오류/인터락/릴레이 제어/음성 안내 대상 이벤트 |
+| `battery-events` | 에지·백엔드 공유 이벤트 토픽. 현재 wire contract가 고정하는 백엔드 outbound command/event 4종 외의 에지 센서 오류·`DIAG_*` payload는 해당 담당 범위에서 정의한다 |
 
 ### 측정 모드
 
@@ -201,7 +201,7 @@ ADS1115          LAN          battery-anomaly-alerts ◀─ alerts 발행 ─┤
 1. 사용자가 웹에서 배터리 선택 후 "측정 시작" → 백엔드가 `measurement_session` 생성.
 2. 에지는 변함없이 `device_id`+Raw만 Kafka 발행(기존 "에지는 Raw만" 철학 유지, 에지 스키마·Kafka 무변경).
 3. Consumer 적재 시 해당 `device_id`의 **active 세션**을 조회해 `battery_id`로 태깅.
-4. AI 추론 결과(`battery-anomaly-alerts`)도 같은 세션으로 `battery_id`에 귀속 → 배터리별 이상 이력 누적.
+4. AI 추론 결과(`battery-anomaly-alerts`) wire payload는 `device_id`만 권위값으로 받고, Consumer가 같은 활성 세션 조회로 `session_id`·`battery_id`를 DB 적재 시 태깅 → 배터리별 이상 이력 누적.
 5. "측정 종료" 시 `ended_at` 기록.
 
 - **active 세션 단일성**: 한 `device_id`에 active 세션은 항상 1개(모드 인터락과 동일한 상호배제, S-LWVJRY에 포함).

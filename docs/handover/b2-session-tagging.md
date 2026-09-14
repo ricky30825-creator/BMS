@@ -35,6 +35,10 @@
 
 참조: CLAUDE.md 「센서 데이터 JSON 스키마」, 「배터리 자산(Battery Asset)과 이력 추적」
 
+### 1.1 AI anomaly 결과도 Consumer가 귀속한다
+
+로컬 AI 프로세스는 `battery-raw-metrics`를 구독하므로 wire 입력에서 권위 있게 아는 값은 `device_id`뿐이다. `battery-anomaly-alerts` payload에 `battery_id`나 `session_id`를 AI가 넣지 않는다. anomaly 결과를 `anomaly_score`에 적재할 때도 raw와 같은 **처리 시점의 활성 `measurement_session`**을 조회해 `session_id`·`battery_id`를 함께 채우며, 활성 세션이 없으면 둘 다 `null`로 둔다. `evaluated_at`을 이용해 AI가 배터리 귀속을 추측하지 않는다.
+
 ---
 
 ## 2. 활성 세션 조회 방법

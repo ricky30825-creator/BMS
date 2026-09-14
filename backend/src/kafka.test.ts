@@ -3,10 +3,12 @@ import {
   KAFKA_PARTITION_KEY_RULES,
   KAFKA_TOPICS,
   batteryAnomalyAlertSchema,
-  batteryEventSchema,
   batteryRawMetricsSchema,
+  backendOutboundCommandEventSchema,
   parseKafkaMessage,
+  parseBackendOutboundCommandEvent,
   partitionKeyFor,
+  partitionKeyForBackendOutboundCommandEvent,
 } from "./kafka.js";
 
 const rawFrame = {
@@ -30,8 +32,6 @@ const rawFrame = {
 const anomalyAlert = {
   version: KAFKA_CONTRACT_VERSION,
   device_id: "rpi5-01",
-  battery_id: "PACK-001",
-  session_id: "ses-001",
   evaluated_at: "2026-09-14T04:00:01.000Z",
   score: 0.82,
   ae_score: 0.79,
@@ -77,44 +77,87 @@ describe("Kafka wire contracts", () => {
       ...rawFrame,
       mode: 2,
       temp_contact: null,
-      temp_points: { contact: [null, null, null], ir: [32.4, null, 33.1] },
+      temp_points: { contact: null, ir: [32.4, null, 33.1] },
       temp_ir_surface: 33.1,
       gas_raw: 420,
       pressure_raw: null,
       soc_pct: 88,
     });
     expect(mode2.mode).toBe(2);
+    expect(batteryRawMetricsSchema.safeParse({
+      ...rawFrame,
+      mode: 1,
+      temp_points: { contact: null, ir: rawFrame.temp_points.ir },
+    }).success).toBe(false);
+    expect(batteryRawMetricsSchema.safeParse({
+      ...rawFrame,
+      mode: 2,
+      temp_contact: null,
+      temp_points: { contact: [null, null, null], ir: [32.4, null, 33.1] },
+      temp_ir_surface: 33.1,
+      gas_raw: 420,
+      pressure_raw: null,
+      soc_pct: 88,
+    }).success).toBe(false);
+  });
+
+  it("requires UTC timestamps and rejects non-UTC offsets", () => {
+    expect(batteryRawMetricsSchema.safeParse({ ...rawFrame, timestamp: "2026-09-14T13:00:00+09:00" }).success).toBe(false);
+    expect(batteryAnomalyAlertSchema.safeParse({ ...anomalyAlert, evaluated_at: "2026-09-14T13:00:01+09:00" }).success).toBe(false);
   });
 
   it("validates anomaly scores against the database range and fields", () => {
     expect(batteryAnomalyAlertSchema.parse(anomalyAlert)).toEqual(anomalyAlert);
     expect(batteryAnomalyAlertSchema.safeParse({ ...anomalyAlert, score: 1.01 }).success).toBe(false);
     expect(batteryAnomalyAlertSchema.safeParse({ ...anomalyAlert, message: "display text" }).success).toBe(false);
+    expect(batteryAnomalyAlertSchema.safeParse({ ...anomalyAlert, battery_id: "PACK-001" }).success).toBe(false);
+    expect(batteryAnomalyAlertSchema.safeParse({ ...anomalyAlert, session_id: "ses-001" }).success).toBe(false);
   });
 
   it.each([
     [{ version: 1, code: "RELAY_CUT", params: { batteryId: "PACK-001", reasonCode: "FAILSAFE_GAS" } }],
     [{ version: 1, code: "RELAY_RESTORE", params: { batteryId: "PACK-001" } }],
     [{ version: 1, code: "SESSION_STARTED", params: { sessionId: "ses-001", batteryId: "PACK-001", targetMode: 2 } }],
-    [{ version: 1, code: "SESSION_ENDED", params: { sessionId: "ses-001", endReason: "SUPERSEDED" } }],
+    [{ version: 1, code: "SESSION_ENDED", params: { sessionId: "ses-001", batteryId: "PACK-001", endReason: "SUPERSEDED" } }],
   ])("validates event %j without a user-facing message", (event) => {
-    expect(batteryEventSchema.parse(event)).toEqual(event);
-    expect(batteryEventSchema.safeParse({ ...event, message: "not allowed" }).success).toBe(false);
+    expect(backendOutboundCommandEventSchema.parse(event)).toEqual(event);
+    expect(backendOutboundCommandEventSchema.safeParse({ ...event, message: "not allowed" }).success).toBe(false);
+  });
+
+  it.each(["P7", "S0", "S1A", "S1B", "S1C", "S1D", "S1E", "S1F", "S2", "S3"])("accepts diag_phase %s", (diagPhase) => {
+    expect(batteryRawMetricsSchema.safeParse({ ...rawFrame, diag_phase: diagPhase }).success).toBe(true);
+  });
+
+  it("requires batteryId on SESSION_ENDED for the battery partition", () => {
+    expect(backendOutboundCommandEventSchema.safeParse({
+      version: 1,
+      code: "SESSION_ENDED",
+      params: { sessionId: "ses-001", endReason: "BLOCKED" },
+    }).success).toBe(false);
   });
 
   it("uses the documented partition-key rules", () => {
     expect(KAFKA_PARTITION_KEY_RULES.rawMetrics).toBe("device_id");
-    expect(KAFKA_PARTITION_KEY_RULES.anomalyAlerts).toBe("battery_id ?? device_id");
+    expect(KAFKA_PARTITION_KEY_RULES.anomalyAlerts).toBe("device_id");
     expect(partitionKeyFor(KAFKA_TOPICS.rawMetrics, rawFrame)).toBe("rpi5-01");
-    expect(partitionKeyFor(KAFKA_TOPICS.anomalyAlerts, anomalyAlert)).toBe("PACK-001");
-    expect(partitionKeyFor(KAFKA_TOPICS.anomalyAlerts, { ...anomalyAlert, battery_id: null })).toBe("rpi5-01");
+    expect(partitionKeyFor(KAFKA_TOPICS.anomalyAlerts, anomalyAlert)).toBe("rpi5-01");
     expect(partitionKeyFor(KAFKA_TOPICS.events, { version: 1, code: "RELAY_CUT", params: { batteryId: "PACK-001", reasonCode: null } })).toBe("PACK-001");
     expect(partitionKeyFor(KAFKA_TOPICS.events, { version: 1, code: "SESSION_STARTED", params: { sessionId: "ses-001", batteryId: "PACK-001", targetMode: 1 } })).toBe("PACK-001");
-    expect(partitionKeyFor(KAFKA_TOPICS.events, { version: 1, code: "SESSION_ENDED", params: { sessionId: "ses-001", endReason: "BLOCKED" } })).toBe("ses-001");
+    expect(partitionKeyFor(KAFKA_TOPICS.events, { version: 1, code: "SESSION_ENDED", params: { sessionId: "ses-001", batteryId: "PACK-001", endReason: "BLOCKED" } })).toBe("PACK-001");
+    expect(partitionKeyForBackendOutboundCommandEvent({ version: 1, code: "SESSION_ENDED", params: { sessionId: "ses-001", batteryId: "PACK-001", endReason: "BLOCKED" } })).toBe("PACK-001");
   });
 
-  it("selects the schema by topic before returning a typed message", () => {
+  it("selects the data schema by topic and parses backend outbound events separately", () => {
     expect(parseKafkaMessage(KAFKA_TOPICS.rawMetrics, rawFrame)).toEqual(rawFrame);
     expect(parseKafkaMessage(KAFKA_TOPICS.anomalyAlerts, anomalyAlert)).toEqual(anomalyAlert);
+    expect(parseBackendOutboundCommandEvent({
+      version: 1,
+      code: "SESSION_ENDED",
+      params: { sessionId: "ses-001", batteryId: "PACK-001", endReason: "BLOCKED" },
+    })).toEqual({
+      version: 1,
+      code: "SESSION_ENDED",
+      params: { sessionId: "ses-001", batteryId: "PACK-001", endReason: "BLOCKED" },
+    });
   });
 });

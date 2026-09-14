@@ -12,5 +12,5 @@ export interface DeviceCommandPort {
   relayCut(batteryId: string, reasonCode: string | null): Promise<void>;
   relayRestore(batteryId: string): Promise<void>;
   sessionStarted(sessionId: string, batteryId: string, targetMode: 1 | 2): Promise<void>;
-  sessionEnded(sessionId: string, endReason: string): Promise<void>;
+  sessionEnded(sessionId: string, batteryId: string, endReason: string): Promise<void>;
 }

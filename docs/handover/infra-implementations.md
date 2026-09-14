@@ -214,7 +214,7 @@ import type { DeviceCommandPort } from "./port.js";
 export function createKafkaDeviceCommandPort(/* producer, topic 등 */): DeviceCommandPort { /* ... */ }
 ```
 
-인터페이스는 `backend/src/device/port.ts`가 정본이며 메서드 4개다 — `relayCut(batteryId, reasonCode)`, `relayRestore(batteryId)`, `sessionStarted(sessionId, batteryId, targetMode)`, `sessionEnded(sessionId, endReason)`. 전부 `battery-events` 토픽으로 발행한다(CLAUDE.md §Kafka 토픽 규약 — `battery-events`는 "에지/백엔드가 발행, 센서 오류·인터락 발생·릴레이 제어 이벤트·음성 안내 대상 이벤트"용). 이 인터페이스는 전송 수단을 모르는 채로 설계돼 있으므로 파일 안에 Kafka 클라이언트 세부사항(브로커 주소, 파티션 키, 직렬화 포맷)을 감춰도 된다 — 도메인 코드(`server.ts`, `failsafeRunner.ts`)는 이 4개 메서드 시그니처만 안다.
+인터페이스는 `backend/src/device/port.ts`가 정본이며 메서드 4개다 — `relayCut(batteryId, reasonCode)`, `relayRestore(batteryId)`, `sessionStarted(sessionId, batteryId, targetMode)`, `sessionEnded(sessionId, batteryId, endReason)`. 전부 `battery-events` 토픽으로 발행한다. 이 단계에서 타입이 고정하는 것은 백엔드→에지 outbound 4종이며, 공유 토픽의 에지 센서 오류·`DIAG_*` 이벤트 전체를 이 인터페이스가 대표하지 않는다. `sessionEnded`의 `batteryId`는 세션 행에서 가져와 outbox payload와 Kafka 파티션 키에 함께 넣는다. 이 인터페이스는 전송 수단을 모르는 채로 설계돼 있으므로 파일 안에 Kafka 클라이언트 세부사항(브로커 주소, 파티션 키, 직렬화 포맷)을 감춰도 된다 — 도메인 코드(`server.ts`, `failsafeRunner.ts`)는 이 4개 메서드 시그니처만 안다.
 
 > **Kafka wire contract와 실행 설정 골격은 1단계에서 마련됐다.** `backend/src/kafka.ts`가 `version: 1`·세 토픽·Zod payload·파티션 키 규칙을 고정하고, `backend/package.json`은 `kafkajs`를 선택 의존성으로 둔다. `backend/.env.example`과 `backend/src/config/env.ts`에는 `KAFKA_*` 값이 있으며 `KAFKA_ENABLED=false`인 memory 모드에서는 브로커에 연결하지 않는다. 실제 producer·consumer·outbox worker 연결은 다음 단계다.
 >
@@ -301,11 +301,11 @@ onAutoCut: (relay, verdict) => { void broadcastAutoCut(battery, relay, verdict.t
 
 ### 15. `sessionEnded` 배선 지점 — **결정: 3번(outbox)으로 함께 해결 (2026-08-28)**
 
-> §13을 outbox로 정했으므로 이 항목도 같이 닫혔다. 저장소 트랜잭션 안에서 세션 종료와 함께 `sessionEnded` 메시지를 `outbox`에 넣으면 되고, 저장소가 전송 계층을 알 필요도 라우트 시그니처가 바뀔 필요도 없다.
+> §13을 outbox로 정했으므로 이 항목도 같이 닫혔다. 저장소 트랜잭션 안에서 세션 종료와 함께 세션 행의 `battery_id`를 포함한 `sessionEnded` 메시지를 `outbox`에 넣으면 되고, 저장소가 전송 계층을 알 필요도 라우트 시그니처가 바뀔 필요도 없다. 워커는 그 `batteryId`를 파티션 키로 사용한다.
 >
 > 아래는 그 결정의 근거가 된 원래 서술이다.
 
-`DeviceCommandPort.sessionEnded(sessionId, endReason)`을 언제 부를지가 아직 정해지지 않았다. 세션 종료는 라우트 레벨의 명시적 액션이 아니라, `startSession`(새 세션이 이전 세션을 `SUPERSEDED`로 끝낼 때)과 `changeOpsStatus`(배터리를 `BLOCKED`로 바꿔 활성 세션이 강제 종료될 때) **안에서 저장소가 부수적으로 일으키는** 사건이다. 그래서 지금 라우트 코드에는 "세션이 방금 끝났다"를 알 수 있는 훅이 없다.
+`DeviceCommandPort.sessionEnded(sessionId, batteryId, endReason)`을 언제 부를지가 아직 정해지지 않았다. 세션 종료는 라우트 레벨의 명시적 액션이 아니라, `startSession`(새 세션이 이전 세션을 `SUPERSEDED`로 끝낼 때)과 `changeOpsStatus`(배터리를 `BLOCKED`로 바꿔 활성 세션이 강제 종료될 때) **안에서 저장소가 부수적으로 일으키는** 사건이다. 그래서 지금 라우트 코드에는 "세션이 방금 끝났다"를 알 수 있는 훅이 없다. 다만 payload의 `batteryId`는 종료되는 세션 행에서 확정한다.
 
 선택지 세 가지:
 
