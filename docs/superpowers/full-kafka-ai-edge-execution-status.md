@@ -49,7 +49,7 @@
 ## Task 5 — 로컬 AI 추론 프로세스
 
 - 현재 상태: `IN_PROGRESS`
-- 담당 에이전트: 미배정
+- 담당 에이전트: `/root/task5_ai_inference_boundary`
 - 기준 커밋: `599a0e9`
 - 결과 커밋: 미정
 - 부모 리뷰 결과: 대기
