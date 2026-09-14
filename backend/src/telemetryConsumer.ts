@@ -28,6 +28,11 @@ type ActiveSessionRow = {
   battery_target_mode: number;
 };
 
+type AuditEventRow = {
+  id: string;
+  created_at: string | Date;
+};
+
 type PriorTelemetryRow = {
   session_id: string | null;
   battery_id: string | null;
@@ -56,7 +61,10 @@ export type UnassignedTelemetryReason = "NO_ACTIVE_SESSION" | "MODE_MISMATCH";
 export type UnassignedTelemetryEvent = {
   auditId: string;
   deviceId: string;
+  /** Edge-reported measurement time; it is not the event occurrence clock. */
   measuredAt: Date;
+  /** Durable audit_log.created_at from the PostgreSQL server clock. */
+  occurredAt: Date;
   actualMode: 1 | 2;
   reason: UnassignedTelemetryReason;
   sessionTargetMode: 1 | 2 | null;
@@ -132,10 +140,14 @@ function modeOrNull(value: unknown): 1 | 2 | null {
   return value === 1 || value === "1" ? 1 : value === 2 || value === "2" ? 2 : null;
 }
 
-function utcDate(timestamp: string): Date {
-  const date = new Date(timestamp);
-  if (Number.isNaN(date.getTime())) throw new Error("invalid telemetry timestamp");
+function dateValue(value: string | Date, errorMessage: string): Date {
+  const date = value instanceof Date ? new Date(value.getTime()) : new Date(value);
+  if (Number.isNaN(date.getTime())) throw new Error(errorMessage);
   return date;
+}
+
+function utcDate(timestamp: string): Date {
+  return dateValue(timestamp, "invalid telemetry timestamp");
 }
 
 function socBasisFor(frame: BatteryRawMetrics): "ABSOLUTE_GAUGE" | "RELATIVE_SESSION_START" | null {
@@ -172,23 +184,18 @@ export async function ingestRawMetricsFrame(
 
   try {
     await client.query("begin");
-    // A valid frame is also the liveness heartbeat. Use the edge timestamp,
-    // but never let a replay move the persisted clock backwards. UPDATE-only
-    // is intentional: an unknown device remains unassigned telemetry and does
-    // not create a device row implicitly.
+    // Resolve registration separately from liveness mutation. An unknown
+    // device is still retained as unassigned telemetry, but never created or
+    // implicitly marked online.
     const deviceResult = await client.query<{ id: string }>(`
-      update device
-      set last_seen_at = case
-            when last_seen_at is null or last_seen_at < $2::timestamptz then $2::timestamptz
-            else last_seen_at
-          end,
-          status = 'ONLINE'
+      select id
+      from device
       where id = $1
-      returning id
-    `, [frame.device_id, measuredAt]);
+    `, [frame.device_id]);
+    const registeredDevice = deviceResult.rows.length > 0;
 
     let session: ActiveSessionRow | undefined;
-    if (deviceResult.rows.length > 0) {
+    if (registeredDevice) {
       const sessionResult = await client.query<ActiveSessionRow>(`
         select s.id, s.battery_id, s.started_at, d.hardware_profile,
                s.target_mode, b.target_mode as battery_target_mode
@@ -280,6 +287,22 @@ export async function ingestRawMetricsFrame(
     ]);
 
     const inserted = insertResult.rows.length > 0;
+
+    // Only a newly accepted natural-key row is a liveness heartbeat. The
+    // database clock is authoritative; edge timestamps are untrusted because
+    // device clocks may be skewed. This stays in the same transaction as the
+    // telemetry/latest/audit writes so any later failure rolls it back.
+    if (inserted && registeredDevice) {
+      await client.query(`
+        with receipt as (select clock_timestamp() as received_at)
+        update device as d
+        set last_seen_at = greatest(coalesce(d.last_seen_at, receipt.received_at), receipt.received_at),
+            status = 'ONLINE'
+        from receipt
+        where d.id = $1
+      `, [frame.device_id]);
+    }
+
     let effectiveAttribution = attribution;
     let unassignedEvent: UnassignedTelemetryEvent | null = null;
     if (!inserted) {
@@ -307,17 +330,18 @@ export async function ingestRawMetricsFrame(
         || Boolean(priorTelemetry.session_id || priorTelemetry.battery_id)
         || lastUnassignedReason !== unassignedReason);
     if (shouldRecordUnassignedEvent) {
-      const eventResult = await client.query<{ id: string }>(`
+      const eventResult = await client.query<AuditEventRow>(`
         insert into audit_log (actor_user_id, action, resource, result, reason)
         values (null, 'UNASSIGNED_DATA', $1, 'SUCCESS', $2)
-        returning id
+        returning id, created_at
       `, [frame.device_id, unassignedReason]);
-      const eventId = eventResult.rows[0]?.id;
-      if (!eventId) throw new Error("unassigned telemetry event could not be recorded");
+      const eventRow = eventResult.rows[0];
+      if (!eventRow?.id || eventRow.created_at == null) throw new Error("unassigned telemetry event could not be recorded");
       unassignedEvent = {
-        auditId: String(eventId),
+        auditId: String(eventRow.id),
         deviceId: frame.device_id,
         measuredAt,
+        occurredAt: dateValue(eventRow.created_at, "invalid unassigned telemetry event timestamp"),
         actualMode: frame.mode,
         reason: unassignedReason,
         sessionTargetMode,

@@ -93,20 +93,34 @@ KAFKA_BROKERS=192.168.0.10:9092
 KAFKA_GROUP_ID=cellguard-backend
 ```
 
-The Consumer marks a registered `device` `ONLINE` and advances
-`last_seen_at` monotonically for every schema-valid frame. It resolves the
-active session by `device_id` only when both the session `target_mode` and the
-`battery_asset.target_mode` match the frame mode. Otherwise the frame is kept
-with null `session_id`/`battery_id` and never updates `battery_latest`.
-Unknown devices are retained the same way without creating a device row.
+The Consumer looks up a registered `device` before resolving the active
+session. Only a newly inserted, schema-valid telemetry row advances a
+registered device to `ONLINE`. Its `last_seen_at` is the PostgreSQL
+`clock_timestamp()` captured by the liveness update, kept monotonic against
+the stored value; the untrusted edge timestamp is never used for liveness.
+A natural-key duplicate `(device_id, measured_at)` is a successful no-op and
+does not revive an `OFFLINE` device or advance `last_seen_at`. Unknown devices
+are retained as unassigned telemetry without creating a device row or
+updating liveness.
+
+The active session is resolved by `device_id` only when both the session
+`target_mode` and the `battery_asset.target_mode` match the frame mode.
+Otherwise the frame is kept with null `session_id`/`battery_id` and never
+updates `battery_latest`.
 
 The version-1 wire payload is written to `telemetry_metric.raw_payload`, and
 `battery_latest` is updated only when the frame timestamp is newer. An
 unassigned streak writes one durable `UNASSIGNED_DATA` row to `audit_log` at
 the first frame (and again only after an assigned frame or an unassigned
-reason transition); when an active session can authorize the device, the
+reason transition). Its event `occurredAt` comes from the audit row's
+PostgreSQL `created_at`; the edge measurement time is retained separately as
+`edgeMeasuredAt`. When an active session can authorize the device, the
 embedded server callback broadcasts that transition to the owner stream. This
 prevents a 100ms stream from creating an audit row for every frame.
+
+Telemetry insertion, attribution, liveness, `battery_latest`, and the durable
+audit row share one PostgreSQL transaction. A failure in any of them rolls
+back the liveness mutation as well.
 
 The Consumer uses explicit at-least-once offset commits: a Kafka offset is
 committed only after the DB transaction and the per-frame safety hook complete.

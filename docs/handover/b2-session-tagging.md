@@ -45,20 +45,15 @@
 
 ### 2.1 쿼리 조건
 
-Consumer는 먼저 같은 transaction 안에서 다음 UPDATE로 등록 장치의
-heartbeat를 반영한다:
+Consumer는 같은 transaction 안에서 먼저 `device` 등록 여부를 조회한다:
 
 ```sql
-update device
-set last_seen_at = greatest(coalesce(last_seen_at, <frame.timestamp>), <frame.timestamp>),
-    status = 'ONLINE'
+select id
+from device
 where id = <frame.device_id>;
 ```
 
-이 UPDATE는 row를 만들지 않으므로 미등록 `device_id`는 device 테이블을
-오염시키지 않는다. `last_seen_at`은 프레임 timestamp의 최댓값만 저장하므로
-재전송·지연 프레임이 시계를 되감지 않는다. UPDATE 결과가 등록 장치임을
-나타낼 때만 다음 조건으로 `measurement_session`을 조회한다:
+조회 결과가 있어야만 다음 조건으로 `measurement_session`을 조회한다:
 
 ```
 device_id = <프레임의 device_id>
@@ -107,13 +102,36 @@ stale cache가 잘못된 `battery_id`를 붙이는 것보다 처리 시점의 DB
 
 ### 2.4 장치 liveness의 범위
 
-schema-valid frame 수신 시점의 `ONLINE` 전환과 monotonic
-`last_seen_at` 갱신은 Raw Consumer가 담당한다. `DELAYED`/`OFFLINE`으로
-시간 경과에 따라 되돌리는 scheduler/worker는 이 Consumer 범위 밖이며,
-현재 `device` DDL의 aging 경로도 별도 구현하지 않았다. 따라서 운영 배포는
-장치 상태 aging 작업을 별도로 제공하기 전까지 `ONLINE`을 "마지막 유효
-프레임을 처리한 장치"로 해석해야 한다. 등록 장치가 프레임을 받지 않은
-초기 상태는 기존처럼 `OFFLINE`이다.
+Raw Consumer는 **등록 장치의 신규 telemetry row가 실제로 INSERT된 경우에만**
+liveness를 갱신한다. 자연키 `(device_id, measured_at)` 충돌로
+`INSERT ... ON CONFLICT DO NOTHING RETURNING`이 0행을 반환하면 duplicate
+replay이므로 `status`와 `last_seen_at`을 전혀 바꾸지 않는다. 따라서 aging
+worker가 `OFFLINE`으로 만든 뒤 오래된 duplicate가 도착해도 장치를 되살리지
+않는다. 반대로 새로 INSERT된 out-of-order frame은 edge 시각이 오래됐더라도
+새로 수신된 frame이므로 liveness 갱신 대상이다.
+
+liveness UPDATE는 telemetry/latest/audit INSERT와 **같은 transaction** 안에서
+수행하며, 등록 장치가 사라진 경합 상황에서는 UPDATE 결과가 0행이어도
+device row를 만들지 않는다. UPDATE의 `last_seen_at`은 edge
+`measured_at`/`timestamp`가 아니라 PostgreSQL 서버가 UPDATE 시 평가한
+`clock_timestamp()`다. 저장값은 다음 형태로 DB에 기록해 항상 monotonic하게
+유지한다:
+
+```sql
+with receipt as (select clock_timestamp() as received_at)
+update device as d
+set last_seen_at = greatest(coalesce(d.last_seen_at, receipt.received_at), receipt.received_at),
+    status = 'ONLINE'
+from receipt
+where d.id = <frame.device_id>;
+```
+
+`DELAYED`/`OFFLINE`으로 시간 경과에 따라 되돌리는 scheduler/worker는 이
+Consumer 범위 밖이며, 현재 `device` DDL의 aging 경로도 별도 구현하지 않았다.
+따라서 운영 배포는 장치 상태 aging 작업을 별도로 제공하기 전까지 `ONLINE`을
+"마지막 신규 telemetry row를 처리한 등록 장치"로 해석해야 한다. 등록 장치가
+프레임을 받지 않은 초기 상태는 기존처럼 `OFFLINE`이다. 미등록 장치는
+telemetry를 미배정으로 보존하지만 `device` row와 liveness를 만들지 않는다.
 
 ---
 
@@ -166,6 +184,11 @@ create table if not exists telemetry_metric (
 배정 상태였거나 사유가 바뀌면 다음 전이를 다시 한 건 기록한다. 따라서
 100ms 프레임마다 audit/event를 쓰지 않으면서 세션 종료·모드 불일치 전이를
 재시작 후에도 확인할 수 있다.
+
+`UNASSIGNED_DATA` INSERT는 `id, created_at`을 반환한다. durable event의
+`occurredAt`은 반드시 그 audit row의 `created_at`(PostgreSQL 서버 event time)을
+사용하며, edge가 보낸 `measuredAt`은 별도 값으로 보존해 원인 파라미터에
+전달할 수 있다. edge 시각은 audit event 발생 시각을 덮어쓰지 않는다.
 
 커밋 후 Consumer callback은 현재 active session이 같은 `device_id`를 가리킬
 때만 이 audit event를 소유자 stream의 `event.created` WebSocket envelope로
@@ -278,7 +301,13 @@ Frame 1은 **measured 시각으로는 Session A 범위** (14:34:59.800 < 14:35:0
 
 현재 단위 테스트는 다음도 고정한다:
 
-- 등록 장치의 valid frame이 `ONLINE`으로 만들고 오래된 frame이 `last_seen_at`을 되돌리지 않는다.
+- 등록 장치의 신규 row가 `ONLINE`으로 만들고 PostgreSQL 서버 시각으로
+  `last_seen_at`을 전진시키며, 오래된 신규 frame도 수신 heartbeat로 센다.
+- 자연키 duplicate replay는 `OFFLINE` 장치를 되살리거나 `last_seen_at`을
+  갱신하지 않으며, 이후 persistence 실패 rollback은 liveness도 되돌린다.
+- 미등록 장치는 존재하지 않은 채 telemetry만 미배정으로 남는다.
+- `UNASSIGNED_DATA.occurredAt`은 audit row의 `created_at`이고 edge
+  `measuredAt`과 다를 수 있다.
 - 세션 또는 자산의 고정 `target_mode`와 frame mode가 다르면 두 ID 모두 null이며 `battery_latest`를 갱신하지 않는다.
 - 새 미배정 streak는 `UNASSIGNED_DATA` audit를 한 건만 만들고, 배정 전환 뒤의 다음 미배정 streak는 다시 한 건을 만든다.
 
@@ -294,10 +323,11 @@ Raspberry Pi (에지)
   battery-raw-metrics topic
   ↓
 backend/src/telemetryConsumer.ts
-  ├─ measurement_session 처리시점 조회
+  ├─ 등록 device 조회 + measurement_session 처리시점 조회
   ├─ battery_id 결정
   ├─ insert into telemetry_metric
   │    (device_id, measured_at, voltage_v, ..., session_id, battery_id, raw_payload)
+  ├─ 신규 row일 때만 등록 device liveness update
   └─ monotonic battery_latest update + safety hook
   ↓
 PostgreSQL + TimescaleDB
@@ -324,3 +354,4 @@ commit해 partition이 영원히 멈추지 않게 한다. DB transaction 실패�
 - 2026-08-27: 초안 작성 (Task 14 — B2 Phase)
 - 2026-08-28: 실제 스키마와 어긋난 3건을 정정 — 세션 종료 상태값(`'COMPLETED'`/`'FAILED'` → `'ENDED'` + `end_reason`), §3.1의 불필요한 `ALTER TABLE ... ADD COLUMN battery_id`(이미 존재) 제거, §5 완료 판정 SQL의 컬럼명(`measurement_session_id` → `session_id`). `session_id`도 함께 적재한다는 규칙을 §3.1에 추가했다.
 - 2026-09-14: `backend/src/telemetryConsumer.ts` 구현에 맞춰 per-frame DB 조회, 등록 장치 liveness, raw payload 보존, 고정 `target_mode` 검사, bounded `UNASSIGNED_DATA` audit/broadcast, monotonic `battery_latest`, out-of-order safety state 보호, poison-message offset 정책, embedded server wiring을 확정했다.
+- 2026-09-14: liveness를 신규 자연키 INSERT 이후의 PostgreSQL `clock_timestamp()`로 고정하고, duplicate replay의 상태/시각 갱신을 금지했다. `UNASSIGNED_DATA.occurredAt`은 audit `created_at`을 사용하며 edge `measuredAt`과 분리한다.

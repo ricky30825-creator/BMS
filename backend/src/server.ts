@@ -1408,7 +1408,7 @@ async function startTelemetryConsumer(): Promise<void> {
       if (!session || session.deviceId !== event.deviceId) return;
       await broadcast("event.created", {
         id: event.auditId,
-        occurredAt: event.measuredAt.toISOString(),
+        occurredAt: event.occurredAt.toISOString(),
         type: "UNASSIGNED_DATA",
         batteryId: null,
         batteryLabel: null,
@@ -1419,6 +1419,7 @@ async function startTelemetryConsumer(): Promise<void> {
         causeCode: event.reason,
         causeParams: {
           actualMode: event.actualMode,
+          edgeMeasuredAt: event.measuredAt.toISOString(),
           sessionTargetMode: event.sessionTargetMode,
           batteryTargetMode: event.batteryTargetMode,
         },

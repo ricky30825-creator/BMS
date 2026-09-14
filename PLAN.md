@@ -311,6 +311,7 @@ ADS1115          LAN          battery-anomaly-alerts ◀─ alerts 발행 ─┤
 **디바이스 상태 모니터링**
 - 디바이스 ID, 온라인 상태, 최근 데이터 수신 시각, 현재 측정 세션, 연결 배터리, 최근 이벤트를 조회한다.
 - 최근 1분 이내 수신은 `ONLINE`, 1~5분 수신 없음은 `DELAYED`, 5분 이상 수신 없음은 `OFFLINE`으로 표시한다.
+- `device.last_seen_at`은 edge `measured_at`이 아닌, 신규 `(device_id, measured_at)` telemetry row를 커밋하는 transaction 안에서 PostgreSQL `clock_timestamp()`로 기록한 서버 수신 시각이다. 자연키 duplicate replay는 `status`를 `ONLINE`으로 되돌리거나 이 값을 갱신하지 않는다.
 - Kafka, Consumer, DB, AI 추론 상태는 정상/비정상/확인불가 수준의 단순 헬스 카드로 제공한다.
 - Kafka lag, 처리량, 모델 드리프트 등 상세 운영 지표는 MVP 제외다.
 

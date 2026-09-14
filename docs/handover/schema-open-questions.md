@@ -212,7 +212,7 @@ Consumer의 **모든 조회가 `device_id`를 키로 한다**(`b2-session-taggin
 
 ### 선택지
 
-- **(a) 권장 — `device` 테이블을 만든다.** `id`(에지 설정 파일의 `device_id`와 같은 값), `owner_user_id`, `label`, `hardware_profile`, `last_seen_at`, `status`. `measurement_session.device_id`에 FK를 건다. Consumer가 프레임마다 `last_seen_at`을 갱신하고, 백엔드가 그걸로 `ONLINE`/`OFFLINE`을 판정한다.
+- **(a) 권장 — `device` 테이블을 만든다.** `id`(에지 설정 파일의 `device_id`와 같은 값), `owner_user_id`, `label`, `hardware_profile`, `last_seen_at`, `status`. `measurement_session.device_id`에 FK를 건다. Consumer가 신규 telemetry row를 transaction 안에서 INSERT한 뒤 PostgreSQL 서버 시각으로 `last_seen_at`을 갱신하고, 백엔드가 그걸로 `ONLINE`/`OFFLINE`을 판정한다. 자연키 duplicate replay는 liveness를 갱신하지 않는다.
 - **(b) `app_user_profile`에 `device_id` 컬럼만 추가.** 사용자당 1대라는 현재 전제에는 맞고 가장 싸다. 다만 `hardware_profile`·`last_seen_at`·`label`을 놓을 곳이 없어 F21 게이트와 `device.status`를 못 만든다.
 - **(c) 지금 하지 않는다.** 그러면 **`device_id`를 어디서 얻을지에 대한 임시 규칙**(예: 설정 파일 상수 1개)을 명시적으로 문서에 적고, `409 DEVICE_OFFLINE`·`device.status`·`hardware_profile` 조회는 구현 대상에서 뺀다. **암묵적으로 미루면 안 된다** — 세션의 `device_id`가 조용히 틀린 값으로 채워지는 게 가장 나쁜 결과다.
 

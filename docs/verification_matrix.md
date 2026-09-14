@@ -26,7 +26,7 @@
 |---|---|---|
 | TypeScript·타입 | `npm --prefix backend run typecheck` | 종료 코드 0 |
 | 빌드 | `npm --prefix backend run build` | 종료 코드 0, 소스 오류 없음 |
-| Raw Kafka Consumer unit | `npm --prefix backend test -- src/telemetryConsumer.test.ts` | fake Kafka/PG로 valid·registered-device liveness/monotonic timestamp·unknown device·no session/transition audit·mode mismatch·malformed poison explicit commit·replay·out-of-order safety·DB/safety failure no commit·serialization·shutdown 통과 |
+| Raw Kafka Consumer unit | `npm --prefix backend test -- src/telemetryConsumer.test.ts` | fake Kafka/PG로 valid·registered-device server-clock liveness·out-of-order 신규 frame·OFFLINE duplicate no-revive·rollback·unknown device·no session/transition audit·audit `created_at` event time·mode mismatch·malformed poison explicit commit·replay·out-of-order safety·DB/safety failure no commit·serialization·shutdown 통과 |
 | PostgreSQL 저장소 계약 | `TEST_DATABASE_URL=... npm --prefix backend test` (migrations `000`~`007` 적용 DB) | memory 계약 스위트·전역 active-session 경합 테스트 통과. URL이 없으면 실제 연결 없이 명시적 skip |
 | Consumer runtime gate | `DATA_MODE=memory KAFKA_CONSUMER_ENABLED=true ...` 및 `DATA_MODE=postgres KAFKA_CONSUMER_ENABLED=true KAFKA_ENABLED=false ...` | memory/test에서는 Kafka 연결 없음, PostgreSQL enabled 상태에서 invalid config는 HTTP listen 전에 fail-closed |
 | 런타임 기본 상태 | 환경변수·DB 준비 후 `npm --prefix backend run dev`, `curl http://localhost:3005/health` | `{"status":"ok"}` 응답 |

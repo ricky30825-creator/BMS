@@ -56,35 +56,87 @@ type FakeOptions = {
   }> | null;
   registeredDevice?: boolean;
   failOn?: "telemetry" | "latest" | "audit" | "commit";
+  auditCreatedAt?: string;
+  serverNow?: string;
 };
 
 function fakeDb(options: FakeOptions = {}) {
   const queries: Array<{ text: string; values: unknown[] }> = [];
   const telemetryKeys = new Set<string>();
-  const telemetryRows = new Map<string, {
+  type TelemetryRow = {
     session_id: string | null;
     battery_id: string | null;
     session_started_at: string | null;
     hardware_profile: string | null;
-  }>();
+  };
+  const telemetryRows = new Map<string, TelemetryRow>();
   const latest = new Map<string, Date>();
   const telemetryHistory: Array<{ device_id: string; session_id: string | null; battery_id: string | null }> = [];
-  const auditEvents: Array<{ resource: string; reason: string | null }> = [];
+  const auditEvents: Array<{ resource: string; reason: string | null; created_at: string }> = [];
+  let deviceExists = options.registeredDevice !== false;
   let deviceStatus = "OFFLINE";
   let deviceLastSeenAt: Date | null = null;
+  let serverClock = new Date(options.serverNow ?? "2026-09-14T04:10:00.000Z");
+  type Snapshot = {
+    telemetryKeys: Set<string>;
+    telemetryRows: Map<string, TelemetryRow>;
+    latest: Map<string, Date>;
+    telemetryHistory: Array<{ device_id: string; session_id: string | null; battery_id: string | null }>;
+    auditEvents: Array<{ resource: string; reason: string | null; created_at: string }>;
+    deviceExists: boolean;
+    deviceStatus: string;
+    deviceLastSeenAt: Date | null;
+  };
+  let transactionSnapshot: Snapshot | null = null;
+  const takeSnapshot = (): Snapshot => ({
+    telemetryKeys: new Set(telemetryKeys),
+    telemetryRows: new Map([...telemetryRows].map(([key, row]) => [key, { ...row }])),
+    latest: new Map([...latest].map(([key, value]) => [key, new Date(value.getTime())])),
+    telemetryHistory: telemetryHistory.map((row) => ({ ...row })),
+    auditEvents: auditEvents.map((event) => ({ ...event })),
+    deviceExists,
+    deviceStatus,
+    deviceLastSeenAt: deviceLastSeenAt ? new Date(deviceLastSeenAt.getTime()) : null,
+  });
+  const restoreSnapshot = (snapshot: Snapshot): void => {
+    telemetryKeys.clear();
+    for (const key of snapshot.telemetryKeys) telemetryKeys.add(key);
+    telemetryRows.clear();
+    for (const [key, row] of snapshot.telemetryRows) telemetryRows.set(key, { ...row });
+    latest.clear();
+    for (const [key, value] of snapshot.latest) latest.set(key, new Date(value.getTime()));
+    telemetryHistory.splice(0, telemetryHistory.length, ...snapshot.telemetryHistory.map((row) => ({ ...row })));
+    auditEvents.splice(0, auditEvents.length, ...snapshot.auditEvents.map((event) => ({ ...event })));
+    deviceExists = snapshot.deviceExists;
+    deviceStatus = snapshot.deviceStatus;
+    deviceLastSeenAt = snapshot.deviceLastSeenAt ? new Date(snapshot.deviceLastSeenAt.getTime()) : null;
+  };
   const client = {
     query: vi.fn(async (text: string, values: unknown[] = []) => {
       queries.push({ text, values });
       const normalized = text.replace(/\s+/g, " ").trim().toLowerCase();
-      if (normalized === "begin" || normalized === "rollback") return { rows: [] };
-      if (normalized === "commit") {
-        if (options.failOn === "commit") throw new Error("commit failed");
+      if (normalized === "begin") {
+        transactionSnapshot = takeSnapshot();
         return { rows: [] };
       }
-      if (normalized.startsWith("update device")) {
-        if (options.registeredDevice === false) return { rows: [] };
-        const measuredAt = values[1] as Date;
-        if (!deviceLastSeenAt || measuredAt > deviceLastSeenAt) deviceLastSeenAt = measuredAt;
+      if (normalized === "rollback") {
+        if (transactionSnapshot) restoreSnapshot(transactionSnapshot);
+        transactionSnapshot = null;
+        return { rows: [] };
+      }
+      if (normalized === "commit") {
+        if (options.failOn === "commit") throw new Error("commit failed");
+        transactionSnapshot = null;
+        return { rows: [] };
+      }
+      if (normalized.startsWith("select id from device")) {
+        return { rows: deviceExists ? [{ id: String(values[0]) }] : [] };
+      }
+      if (normalized.includes("update device as d")) {
+        if (!deviceExists) return { rows: [] };
+        const receivedAt = new Date(serverClock.getTime());
+        serverClock = new Date(serverClock.getTime() + 1);
+        if (!deviceLastSeenAt || receivedAt > deviceLastSeenAt) deviceLastSeenAt = receivedAt;
         deviceStatus = "ONLINE";
         return { rows: [{ id: values[0] }] };
       }
@@ -142,8 +194,9 @@ function fakeDb(options: FakeOptions = {}) {
       }
       if (normalized.startsWith("insert into audit_log")) {
         if (options.failOn === "audit") throw new Error("audit insert failed");
-        auditEvents.push({ resource: String(values[0]), reason: values[1] as string | null });
-        return { rows: [{ id: String(auditEvents.length) }] };
+        const createdAt = options.auditCreatedAt ?? "2026-09-14T04:10:00.500Z";
+        auditEvents.push({ resource: String(values[0]), reason: values[1] as string | null, created_at: createdAt });
+        return { rows: [{ id: String(auditEvents.length), created_at: createdAt }] };
       }
       if (normalized.startsWith("insert into battery_latest")) {
         if (options.failOn === "latest") throw new Error("latest update failed");
@@ -163,6 +216,11 @@ function fakeDb(options: FakeOptions = {}) {
     queries,
     latest,
     auditEvents,
+    setDeviceState(status: string, lastSeenAt: Date | null) {
+      deviceStatus = status;
+      deviceLastSeenAt = lastSeenAt;
+    },
+    get deviceExists() { return deviceExists; },
     get deviceStatus() { return deviceStatus; },
     get deviceLastSeenAt() { return deviceLastSeenAt; },
   };
@@ -201,13 +259,15 @@ describe("raw telemetry ingestion", () => {
   });
 
   it("keeps a frame with null attribution when no session is active", async () => {
-    const fake = fakeDb({ activeSession: null });
+    const fake = fakeDb({ activeSession: null, auditCreatedAt: "2026-09-14T05:00:00.500Z" });
     const result = await ingestRawMetricsFrame(fake.pool, mode1Frame);
 
     expect(result.kind).toBe("accepted");
     expect(result.attribution).toEqual({ sessionId: null, batteryId: null, hardwareProfile: null, sessionStartedAt: null });
     expect(result.unassignedEvent).toMatchObject({ reason: "NO_ACTIVE_SESSION", deviceId: "device-1", actualMode: 1 });
-    expect(fake.auditEvents).toEqual([{ resource: "device-1", reason: "NO_ACTIVE_SESSION" }]);
+    expect(result.unassignedEvent?.occurredAt.toISOString()).toBe("2026-09-14T05:00:00.500Z");
+    expect(result.unassignedEvent?.measuredAt.toISOString()).toBe(mode1Frame.timestamp);
+    expect(fake.auditEvents).toEqual([{ resource: "device-1", reason: "NO_ACTIVE_SESSION", created_at: "2026-09-14T05:00:00.500Z" }]);
     expect(fake.queries.some((query) => query.text.toLowerCase().includes("insert into battery_latest"))).toBe(false);
   });
 
@@ -233,19 +293,63 @@ describe("raw telemetry ingestion", () => {
     await expect(consumer.handleMessage(message(mode1Frame))).rejects.toThrow("latest update failed");
     expect(kafka.commitOffsets).not.toHaveBeenCalled();
     expect(fake.queries.some((query) => query.text.toLowerCase() === "rollback")).toBe(true);
+    expect(fake.deviceStatus).toBe("OFFLINE");
+    expect(fake.deviceLastSeenAt).toBeNull();
+    expect(fake.queries.filter((query) => query.text.toLowerCase().includes("update device as d"))).toHaveLength(1);
+  });
+
+  it("does not advance liveness when the telemetry insert fails", async () => {
+    const fake = fakeDb({ failOn: "telemetry" });
+
+    await expect(ingestRawMetricsFrame(fake.pool, mode1Frame)).rejects.toThrow("telemetry insert failed");
+
+    expect(fake.deviceStatus).toBe("OFFLINE");
+    expect(fake.deviceLastSeenAt).toBeNull();
+    expect(fake.queries.filter((query) => query.text.toLowerCase().includes("update device as d"))).toHaveLength(0);
+  });
+
+  it("rolls back liveness when the durable unassigned audit write fails", async () => {
+    const fake = fakeDb({ activeSession: null, failOn: "audit" });
+
+    await expect(ingestRawMetricsFrame(fake.pool, mode1Frame)).rejects.toThrow("audit insert failed");
+
+    expect(fake.deviceStatus).toBe("OFFLINE");
+    expect(fake.deviceLastSeenAt).toBeNull();
+    expect(fake.queries.some((query) => query.text.toLowerCase() === "rollback")).toBe(true);
+    expect(fake.queries.filter((query) => query.text.toLowerCase().includes("update device as d"))).toHaveLength(1);
   });
 
   it("marks a registered device online and keeps last_seen_at monotonic", async () => {
     const fake = fakeDb({ activeSession: null });
 
     await ingestRawMetricsFrame(fake.pool, mode1Frame);
+    const firstSeenAt = fake.deviceLastSeenAt;
     await ingestRawMetricsFrame(fake.pool, { ...mode1Frame, timestamp: "2026-09-14T03:59:59.900Z" });
 
     expect(fake.deviceStatus).toBe("ONLINE");
-    expect(fake.deviceLastSeenAt?.toISOString()).toBe(mode1Frame.timestamp);
-    const livenessQueries = fake.queries.filter((query) => query.text.replace(/\s+/g, " ").trim().startsWith("update device"));
+    expect(firstSeenAt).not.toBeNull();
+    expect(fake.deviceLastSeenAt).not.toBeNull();
+    expect(fake.deviceLastSeenAt!.getTime()).toBeGreaterThan(firstSeenAt!.getTime());
+    expect(fake.deviceLastSeenAt?.toISOString()).toBe("2026-09-14T04:10:00.001Z");
+    const livenessQueries = fake.queries.filter((query) => query.text.toLowerCase().includes("update device as d"));
     expect(livenessQueries).toHaveLength(2);
-    expect(livenessQueries[0].text).toContain("last_seen_at is null or last_seen_at < $2::timestamptz");
+    expect(livenessQueries[0].text).toContain("clock_timestamp()");
+    expect(livenessQueries[0].text).not.toContain("$2");
+    expect(livenessQueries[0].values).toEqual(["device-1"]);
+  });
+
+  it("does not revive or advance a device when an old duplicate is replayed after OFFLINE", async () => {
+    const fake = fakeDb();
+    await ingestRawMetricsFrame(fake.pool, mode1Frame);
+    const lastSeenAt = fake.deviceLastSeenAt;
+    fake.setDeviceState("OFFLINE", lastSeenAt);
+
+    const replay = await ingestRawMetricsFrame(fake.pool, mode1Frame);
+
+    expect(replay.kind).toBe("duplicate");
+    expect(fake.deviceStatus).toBe("OFFLINE");
+    expect(fake.deviceLastSeenAt?.toISOString()).toBe(lastSeenAt?.toISOString());
+    expect(fake.queries.filter((query) => query.text.toLowerCase().includes("update device as d"))).toHaveLength(1);
   });
 
   it("does not invent a device row for an unknown device", async () => {
@@ -254,6 +358,8 @@ describe("raw telemetry ingestion", () => {
 
     expect(result.attribution).toEqual({ sessionId: null, batteryId: null, hardwareProfile: null, sessionStartedAt: null });
     expect(result.unassignedEvent).toMatchObject({ reason: "NO_ACTIVE_SESSION", deviceId: "unknown-device" });
+    expect(fake.deviceExists).toBe(false);
+    expect(fake.queries.some((query) => query.text.toLowerCase().includes("update device as d"))).toBe(false);
     expect(fake.queries.some((query) => query.text.toLowerCase().includes("insert into device"))).toBe(false);
   });
 

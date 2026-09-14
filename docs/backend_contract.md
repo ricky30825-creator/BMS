@@ -424,7 +424,15 @@ Raw Consumer는 `UNASSIGNED_DATA`를 별도 테이블이 아닌 기존 `audit_lo
 확인할 수 있다. 이벤트 broadcast는 `event.created`로 전달하며, 이 이벤트의
 `batteryId`는 null이다. 현재 active session이 같은 device를 가리킬 때만
 그 소유자 stream으로 live broadcast하고, 그 외에는 durable audit row가
-source of truth다.
+source of truth다. `occurredAt`은 audit row의 PostgreSQL `created_at`이고,
+edge `measuredAt`은 별도 원인 파라미터로만 보존한다.
+
+등록 device liveness는 telemetry natural-key INSERT가 신규 row를 반환한
+경우에만 수행한다. 이 UPDATE는 telemetry/latest/audit INSERT와 같은
+transaction에서 PostgreSQL `clock_timestamp()`를 사용해 `last_seen_at`을
+monotonic하게 전진시키며, duplicate replay는 `OFFLINE` 장치를 되살리거나
+시각을 갱신하지 않는다. 미등록 device는 row를 만들지 않고 telemetry를
+미배정으로 보존한다.
 
 ## 4. REST API
 
