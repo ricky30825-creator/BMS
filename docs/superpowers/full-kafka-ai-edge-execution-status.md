@@ -59,9 +59,9 @@
 
 ## Task 6 — Raspberry Pi 명령 Consumer와 릴레이 어댑터
 
-- 현재 상태: `PENDING`
-- 담당 에이전트: 미배정
-- 기준 커밋: 미정
+- 현재 상태: `IN_PROGRESS`
+- 담당 에이전트: `/root/task6_edge_command`
+- 기준 커밋: `45bafae`
 - 결과 커밋: 미정
 - 부모 리뷰 결과: 대기
 - 실행한 테스트와 결과: 대기
