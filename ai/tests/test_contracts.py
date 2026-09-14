@@ -109,6 +109,7 @@ class WireContractTests(unittest.TestCase):
         validate_anomaly_alert(payload)
         self.assertEqual(payload["version"], 1)
         self.assertEqual(payload["device_id"], "rpi5-01")
+        self.assertEqual(payload["evaluated_at"], mode1_frame()["timestamp"])
         self.assertNotIn("battery_id", payload)
         self.assertNotIn("session_id", payload)
 
@@ -144,6 +145,23 @@ class WireContractTests(unittest.TestCase):
         invalid["acoustic_raw"] = 3
         with self.assertRaisesRegex(ContractError, "acoustic_raw"):
             parse_raw_metrics(invalid)
+
+        invalid_adapter_timestamp = InferenceOutput(
+            evaluated_at="not-a-timestamp",
+            score=0.82,
+            ae_score=0.79,
+            informer_score=0.86,
+            contributions=None,
+            model_version="ae-1+informer-1",
+            temp_kalman=None,
+            temp_cell_estimated=None,
+        )
+        with self.assertRaisesRegex(ContractError, "AI_INFERENCE_OUTPUT_INVALID"):
+            build_anomaly_alert(
+                parse_raw_metrics(mode1_frame()),
+                invalid_adapter_timestamp,
+                expected_model_version="ae-1+informer-1",
+            )
 
 
 if __name__ == "__main__":

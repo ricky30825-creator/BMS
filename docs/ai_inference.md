@@ -14,7 +14,7 @@ metadata가 없다. 따라서 이 저장소는 모델을 추정하거나 임의 
 - `ai/bundle.py`: 파일 경로·SHA-256·모델 버전·feature order·window·scaler를
   교차 검증하는 fail-closed loader.
 - `ai/runtime.py`: raw 수신 → 명시적 adapter → anomaly publish → 성공 뒤 offset
-  commit 순서와 graceful lifecycle.
+  commit 순서, raw timestamp 기반 replay identity, graceful lifecycle.
 - `ai/kafka.py`: `kafka-python` 선택적 transport. 계약 테스트는 Kafka 없이 돈다.
 - `ai/inference.py`: 외부 모델 구현을 주입하는 adapter 경계. 외부 runner가
   없으면 `AI_INFERENCE_ADAPTER_UNAVAILABLE`로 중단한다.
@@ -153,9 +153,15 @@ Kafka 연결이다. 주요 중단 코드는 다음과 같다.
    않는다.
 3. adapter 결과의 `model_version`이 bundle과 같은지, 두 개별 score와 final
    score가 0–1인지 검증한다. 실패하면 publish하지 않는다.
-4. `battery-anomaly-alerts` v1을 JSON으로 발행한다. partition key는 raw의
+4. `evaluated_at`은 adapter의 처리 시각이 아니라 **검증된 raw frame의
+   `timestamp`를 그대로 사용한다**. adapter가 반환한 `evaluated_at`도 외부
+   결과 계약의 필수 timestamp로 엄격히 검증하지만, wall-clock 값이
+   `(device_id, evaluated_at)` 자연키가 되도록 허용하지 않는다. 따라서 같은
+   raw frame을 프로세스 재시작 후 다시 처리해도 자연키와, 나머지 adapter
+   결과가 동일할 때의 직렬화 payload가 변하지 않는다.
+5. `battery-anomaly-alerts` v1을 JSON으로 발행한다. partition key는 raw의
    `device_id`이며 payload에는 `device_id`만 권위 식별자로 들어간다.
-5. producer 성공 응답 뒤에만 입력 offset + 1을 manual commit한다. publish 또는
+6. producer 성공 응답 뒤에만 입력 offset + 1을 manual commit한다. publish 또는
    commit이 실패하면 offset을 commit하지 않고 같은 partition/offset의 직렬화된
    결과를 재사용한다. 잘못된 raw JSON/계약은 publish·commit 없이 프로세스를
    중단해 운영자가 원인을 격리할 수 있게 한다.

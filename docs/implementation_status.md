@@ -66,7 +66,7 @@ DB를 초기화해 실행한다. 현재 실행 환경에는 이 변수가 없어
 | 에지 명령 경로 | `backend/src/device/port.ts`(`DeviceCommandPort` 인터페이스, 메서드 4개) + `backend/src/device/logging.ts`(memory 전용 로깅 스텁) + `backend/src/kafka.ts`(version 1 wire contract·Zod 검증·파티션 키) + `backend/src/device/kafka.ts`(실 producer) + `backend/src/outboxWorker.ts`(lease/claim/retry worker). PostgreSQL 상태·감사·outbox 원자성은 `store/postgres.ts`와 `008_outbox_identity.sql`에 구현됐고, `SESSION_ENDED`도 `batteryId`를 payload·파티션 키에 포함한다. `009_outbox_delivery.sql`은 만료 claim 복구·poison quarantine을 제공한다 | **구현 완료 / 실 Kafka·edge relay 인수 검증 대기** (→ B4) |
 | 백엔드 DB 도메인 provider·Consumer·TimescaleDB | `backend/migrations/000_identity.sql`~`009_outbox_delivery.sql`, `postgres.ts`, `telemetryConsumer.ts`, `anomalyConsumer.ts`, `outboxWorker.ts`. Raw Consumer는 session tagging·raw payload·단조 latest·수동 offset commit·프레임별 Fail-Safe hook을, Anomaly Consumer는 device 기준 ACTIVE session tagging·anomaly 이력·단조 score latest·replay-safe 이벤트·수동 offset commit을, Outbox Worker는 durable command의 배터리별 순서·lease·retry를 구현했다. `TEST_DATABASE_URL`이 없으면 실 DB 계약 테스트는 skip한다. Kafka/Timescale 실측 부하는 별도이며 `AUTH_MODE=betterauth`의 WS 인증은 여전히 보류되고, WS upgrade가 `DATA_MODE`를 별도로 검사하지 않는 갭은 남아 있다 | **Raw/Anomaly/Outbox 구현 / 실 Kafka·DB 인수 검증 대기** |
 | 알림 발송 (카카오·SMS·메일) | 채널 ON/OFF 토글과 policy 응답만 있고(`server.ts:405`·`:409`), **실제로 메시지를 보내는 코드는 `backend/src`에 없다** | **보류(의도적)** — 토글 현행 유지, 추가 작업 없음 |
-| AI 로컬 추론 프로세스 | `ai/`에 v1 raw/anomaly 계약 validator, fail-closed bundle loader, 외부 adapter/broker 경계, 수동 offset lifecycle과 표준 테스트가 있다. 실제 checkpoint·scaler·권위 feature metadata와 외부 모델 adapter는 없다 | **외부 차단(`EXTERNALLY_BLOCKED`)** — 실제 추론·점수 품질을 주장하지 않음 (`docs/ai_inference.md`) |
+| AI 로컬 추론 프로세스 | `ai/`에 v1 raw/anomaly 계약 validator, fail-closed bundle loader, 외부 adapter/broker 경계, raw timestamp 기반 결정적 replay identity, 수동 offset lifecycle과 표준 테스트가 있다. 실제 checkpoint·scaler·권위 feature metadata와 외부 모델 adapter는 없다 | **외부 차단(`EXTERNALLY_BLOCKED`)** — 실제 추론·점수 품질을 주장하지 않음 (`docs/ai_inference.md`) |
 | 로컬 실행 패키징 | **C8 완료(2026-08-25)** — 단일 오리진(`:3005`), `start-local.bat`(Windows, 수동 실행), `docs/local_run.md`. memory 모드 한정(Kafka·PostgreSQL·추론은 별도) | 완료 (memory 모드) |
 | 에지 소프트웨어 | `edge/bw150/`에 BW150 HID 로거·탐지·BLE 프로브(914줄)만 있고, 센서·릴레이·Kafka 프로듀서 구현은 없음 | 부분 구현 (BW150 한정) |
 | AI 소프트웨어 | `ai/contracts.py`, `ai/bundle.py`, `ai/inference.py`, `ai/runtime.py`, `ai/kafka.py`에 계약·번들 검증·외부 adapter·Kafka lifecycle 골격과 테스트가 있다. 학습 코드·모델 binary·실 adapter는 저장하지 않는다 | **안전 경계 구현 / 외부 artifact·adapter 차단** |
@@ -216,7 +216,7 @@ Timescale 적재, 물리 Fail-Safe는 여전히 별도 범위다.
 |---|---|---|
 | A6 | LSTM-AE·Informer 학습 (Colab) | **외부 차단** — 학습 데이터·두 checkpoint가 저장소에 없음 |
 | A7 | 체크포인트를 Colab → 호스트 PC로 반출하는 절차 확정 | `docs/ai_inference.md`에 예상 경로·manifest/scaler/feature metadata schema를 기록했지만 승인 artifact 반출은 미완료 |
-| A8 | **로컬 추론 프로세스** — 체크포인트 로드, `battery-raw-metrics` 구독, AE·Informer Score → Score Fusion, `battery-anomaly-alerts` 발행 | 계약형 runtime·수동 commit 경계는 구현. 외부 adapter/bundle 없이는 시작 실패하며 실제 측정 반응은 검증하지 않음 |
+| A8 | **로컬 추론 프로세스** — 체크포인트 로드, `battery-raw-metrics` 구독, AE·Informer Score → Score Fusion, `battery-anomaly-alerts` 발행 | 계약형 runtime·raw timestamp 기반 결정적 replay identity·수동 commit 경계는 구현. 외부 adapter/bundle 없이는 시작 실패하며 실제 측정 반응은 검증하지 않음 |
 | A9 | 칼만 필터·내부 셀 온도 추정 (에지가 아니라 여기서 수행) | adapter/model bundle이 명시한 구현이 없으므로 미구현. 임의 파생값을 발행하지 않음 |
 
 > **Colab은 학습 전용이며 실시간 경로에 없다.** 로컬 Kafka가 NAT 뒤라 인바운드 접속이 불가능하기 때문이다. 문서 어딘가에 남은 *"Colab이 raw-metrics를 구독한다"*는 폐기된 설계다.

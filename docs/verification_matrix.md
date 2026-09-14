@@ -52,7 +52,7 @@ python3 -m unittest discover -s tools -p 'test_*.py'
 | v1 raw/anomaly 계약·모드별 필드 | `python3 -m unittest discover -s ai/tests -p 'test_*.py'` | 외부 패키지·Kafka 없이 계약, `device_id` 전용 payload, 0–1 점수, mode 1/2 unavailable 필드 검증 통과 | payload 불변식 위반·가짜 필드/점수는 publish하지 않는다 |
 | model bundle loader | 같은 명령의 bundle tests | 두 checkpoint·scaler·feature metadata가 존재하고 SHA-256·model version·feature order·window이 모두 일치할 때만 load | 누락·경로 탈출·checksum/version/order/window 불일치·fake 구현은 `AI_MODEL_BUNDLE_*`로 기동 실패 |
 | production entrypoint gate | `python3 -m ai.runtime` (artifact 미설정 환경) | 비정상 종료(코드 1), `AI_MODEL_BUNDLE_NOT_CONFIGURED` 또는 외부 adapter 부재 메시지, Kafka 연결 전 실패 | 실제 모델이 없는데 memory/fake/placeholder로 계속 실행하면 안 된다 |
-| raw → inference → anomaly → offset | 위 unittest의 runtime tests; fake는 테스트 코드에서만 명시 주입 | anomaly publish 성공 뒤에만 다음 offset commit. publish/commit 실패·잘못된 입력은 commit하지 않고 재처리 시 직렬화 결과를 재사용 | publish 또는 commit 전 offset commit, `battery_id/session_id` 생성, 파생값 추정은 금지 |
+| raw → inference → anomaly → offset | 위 unittest의 runtime tests; fake는 테스트 코드에서만 명시 주입 | anomaly publish 성공 뒤에만 다음 offset commit. publish/commit 실패·잘못된 입력은 commit하지 않고 재처리 시 직렬화 결과를 재사용하며, 새 서비스/adapter 재시작 replay도 raw timestamp 기반 같은 자연키·payload를 유지 | publish 또는 commit 전 offset commit, `battery_id/session_id` 생성, 파생값 추정은 금지 |
 | Python 문법 | `python3 -m py_compile ai/*.py` | 종료 코드 0 | 외부 모델 코드나 binary를 이 명령의 통과 근거로 세지 않는다 |
 
 실행 시점에 승인된 checkpoint/scaler/feature metadata 및 외부 adapter가 없으면

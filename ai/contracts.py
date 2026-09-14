@@ -299,11 +299,19 @@ class InferenceOutput:
     temp_kalman: float | None
     temp_cell_estimated: float | None
 
-    def to_payload(self, device_id: str) -> dict[str, Any]:
+    def to_payload(self, device_id: str, *, evaluated_at: str | None = None) -> dict[str, Any]:
+        """Serialize the adapter result for the anomaly wire contract.
+
+        ``evaluated_at`` normally remains the adapter value.  The production
+        raw-to-anomaly boundary passes the validated raw frame timestamp here
+        so the wire natural key does not depend on process wall-clock time.
+        All other values remain exclusively adapter supplied.
+        """
+
         return {
             "version": CONTRACT_VERSION,
             "device_id": device_id,
-            "evaluated_at": self.evaluated_at,
+            "evaluated_at": self.evaluated_at if evaluated_at is None else evaluated_at,
             "score": self.score,
             "ae_score": self.ae_score,
             "informer_score": self.informer_score,
@@ -359,6 +367,13 @@ def build_anomaly_alert(
     """Build the exact v1 anomaly payload; never synthesize a score or field."""
 
     parsed = output if isinstance(output, InferenceOutput) else parse_inference_output(output)
+    # Mapping results have already gone through parse_inference_output.  An
+    # adapter may inject the dataclass directly, so validate its timestamp too
+    # before the runtime replaces only the wire identity timestamp below.
+    try:
+        _timestamp(parsed.evaluated_at, "evaluated_at")
+    except ContractError as exc:
+        raise ContractError("AI_INFERENCE_OUTPUT_INVALID", str(exc)) from exc
     if parsed.model_version != expected_model_version:
         raise ContractError(
             "AI_INFERENCE_OUTPUT_INVALID",
@@ -368,7 +383,10 @@ def build_anomaly_alert(
     # therefore an inference failure, not a reason to publish a partial alert.
     if parsed.ae_score is None or parsed.informer_score is None:
         raise ContractError("AI_INFERENCE_OUTPUT_INVALID", "both ae_score and informer_score are required")
-    payload = parsed.to_payload(frame.device_id)
+    # The raw frame timestamp is the authoritative event time.  It is stable
+    # across Kafka replay and process restarts; adapter wall-clock time must not
+    # become the (device_id, evaluated_at) database natural key.
+    payload = parsed.to_payload(frame.device_id, evaluated_at=frame.timestamp)
     validate_anomaly_alert(payload)
     return payload
 

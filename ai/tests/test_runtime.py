@@ -21,14 +21,15 @@ from ai.tests.test_contracts import mode1_frame
 
 
 class FakeAdapter:
-    def __init__(self, model_version: str) -> None:
+    def __init__(self, model_version: str, evaluated_at: str = "2026-09-15T00:00:00.200Z") -> None:
         self.model_version = model_version
+        self.evaluated_at = evaluated_at
         self.calls = 0
 
     async def infer(self, frame):
         self.calls += 1
         return InferenceOutput(
-            evaluated_at="2026-09-15T00:00:00.200Z",
+            evaluated_at=self.evaluated_at,
             score=0.82,
             ae_score=0.79,
             informer_score=0.86,
@@ -147,6 +148,39 @@ class RuntimeTests(unittest.TestCase):
         self.assertEqual(consumer.commits, [("battery-raw-metrics", 2, "8")])
         self.assertEqual(len(producer.publishes), 2)
         self.assertEqual(producer.publishes[0][2], producer.publishes[1][2])
+
+    def test_restart_replay_uses_raw_timestamp_with_a_new_adapter(self) -> None:
+        directory = tempfile.TemporaryDirectory()
+        with directory:
+            root = Path(directory.name)
+            make_bundle(root)
+            bundle = load_model_bundle(root)
+            config = RuntimeConfig.from_env({"AI_ENV": "test"})
+
+            first_adapter = FakeAdapter(bundle.model_version, "2026-09-15T00:00:00.200Z")
+            first_consumer = FakeConsumer(fail_commit_once=True)
+            first_producer = FakeProducer()
+            first_service = InferenceService(config, bundle, first_adapter, first_consumer, first_producer)
+            with self.assertRaisesRegex(RuntimeError, "commit unavailable"):
+                asyncio.run(first_service.process_message(raw_message()))
+
+            # A restart creates a new service and adapter, so no in-memory
+            # pending payload is available.  The adapter's wall-clock result
+            # intentionally differs to model the original replay defect.
+            second_adapter = FakeAdapter(bundle.model_version, "2026-09-15T00:00:00.999Z")
+            second_consumer = FakeConsumer()
+            second_producer = FakeProducer()
+            second_service = InferenceService(config, bundle, second_adapter, second_consumer, second_producer)
+            asyncio.run(second_service.process_message(raw_message()))
+
+        first_topic, first_key, first_payload = first_producer.publishes[0]
+        second_topic, second_key, second_payload = second_producer.publishes[0]
+        self.assertEqual((first_topic, first_key), (second_topic, second_key))
+        self.assertEqual(first_payload, second_payload)
+        anomaly = json.loads(second_payload.decode("utf-8"))
+        self.assertEqual(anomaly["evaluated_at"], mode1_frame()["timestamp"])
+        self.assertEqual(first_adapter.calls, 1)
+        self.assertEqual(second_adapter.calls, 1)
 
     def test_invalid_input_has_no_publish_or_commit(self) -> None:
         directory, service, adapter, consumer, producer = service_fixture()

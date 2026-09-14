@@ -811,6 +811,10 @@ WebSocket 연결 **전에** 화면을 채우기 위한 1회 조회. 이후 갱�
 `battery_latest.evaluated_at`을 전진시킨 경우에만 서버가 해당 행에서
 `anomaly.score`를 발신하고, 등급 전이와 `alert.created`를 한 번 생성한다.
 오래된 결과는 이력에는 보존하지만 최신 score/evaluated_at을 역행시키지 않는다.
+AI 런타임은 이 자연키의 `evaluated_at`을 처리 프로세스의 wall-clock이 아닌
+해당 version-1 raw frame의 검증된 `timestamp`로 결정한다. 따라서 publish 후
+offset commit 전에 재시작되어도 같은 raw frame의 replay는 같은 자연키를
+사용한다.
 
 #### `GET /api/anomaly/evidence` — XAI 기여 요인 `[REQ-WEB-043]`
 
