@@ -15,12 +15,12 @@
 
 ## Task 2 — AI Anomaly Consumer
 
-- 현재 상태: `REVIEW_REQUIRED`
+- 현재 상태: `COMPLETE`
 - 담당 에이전트: `/root/task2_anomaly_consumer`
 - 기준 커밋: `2ac2daf`
 - 결과 커밋: `39b6272`
-- 부모 리뷰 결과: 에이전트 구현 결과 수신, 독립 리뷰 대기
-- 실행한 테스트와 결과: 에이전트 실행 — backend typecheck 통과, 집중 테스트 24 passed, 전체 backend Vitest 275 passed/1 skipped, backend build 통과, `git diff --check` 통과
+- 부모 리뷰 결과: 통과 — 전체 diff와 `ingestAnomalyAlert`, `AnomalyAlertsConsumer`, PostgreSQL 조회, server publication/gate를 직접 검토. device 기반 처리시점 귀속, replay 귀속 보존, latest 단조성, poison/재시도 offset 경계, memory/PostgreSQL 이벤트 분리를 확인함
+- 실행한 테스트와 결과: 부모 독립 실행 — backend typecheck 통과, anomaly+PostgreSQL 집중 테스트 24 passed, 전체 backend Vitest 275 passed/1 skipped, backend build 통과, `git diff --check`와 구현 커밋 check 통과
 - 실환경 검증 여부: 미검증 — `TEST_DATABASE_URL` 및 Kafka broker 없음
 - 남은 문제 또는 외부 차단 조건: durable alert/outbox는 Task 3/4 범위이며 현재 WS publication state와 alert 목록은 프로세스 로컬
 
