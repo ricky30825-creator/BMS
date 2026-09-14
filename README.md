@@ -20,7 +20,7 @@ LSTM-AutoEncoder(현재 진단)와 Informer(미래 예측)가 이상을 탐지�
 | 데이터 | ⚠️ **인메모리 데모 데이터**(`backend/src/store/memory.ts`). 별도 시드 절차가 없다 — 이게 시드다 |
 | PostgreSQL + TimescaleDB | ⚠️ 스키마·마이그레이션은 있으나 **저장소 구현체(`backend/src/store/postgres.ts`)가 없다** → 아래 참조 |
 | Kafka | ❌ 저장소에 없다 |
-| 추론 프로세스(LSTM-AE·Informer) | ❌ 저장소에 없다 |
+| 추론 프로세스(LSTM-AE·Informer) | ⚠️ `ai/`에 계약·번들 검증·offset lifecycle 경계만 있다. 실제 artifact·외부 adapter가 없어 실추론은 `EXTERNALLY_BLOCKED` (`docs/ai_inference.md`) |
 | 라즈베리파이 에지 | ❌ 실물 미연결. 진단 계측값은 시뮬레이터가 만든다(`dataSource: "SIMULATED"`) |
 
 ---
@@ -87,6 +87,7 @@ npm run db:migrate            # migrations/000..005 적용, schema_migrations에
 backend/     Express + TypeScript. REST·WebSocket·진단 러너·인메모리 스토어
 frontend/    React. 화면·동작의 정본
 edge/        라즈베리파이 수집 코드
+ai/          로컬 AI 추론 계약·bundle 검증·Kafka lifecycle 경계
 hardware/    KiCad 회로도 (생성물 — tools/gen_*.py로 만든다, 손으로 고치지 않는다)
 docs/        정본 문서. handover/ 아래가 인계 명세
 design-system/  디자인 토큰·마스터 문서

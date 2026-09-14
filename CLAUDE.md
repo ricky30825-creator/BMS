@@ -181,6 +181,15 @@ LSTM-AutoEncoder(재구성 오차 = 현재 이상)와 Informer(예측 오차 = �
 
 > 등급은 임계값으로 **계산**한다. 어딘가에 미리 적어둔 등급 라벨을 그대로 쓰지 않는다. v3의 `packBase`가 등급을 데이터에 하드코딩해 PACK-003(33점)이 `정상`으로 표시되는 버그가 여기서 나왔다. 원본 데이터를 그대로 보여주는 곳에서는 환산하지 않은 0.0–1.0을 쓴다.
 
+**로컬 추론 경계(2026-09-15):** 실제 LSTM-AE·Informer checkpoint, scaler,
+feature metadata, score fusion·Kalman·내부 셀 온도 구현은 외부 artifact/adapter로
+제공한다. `ai/` runtime은 권위 metadata가 선언한 순서·정규화·window·model
+version을 모두 교차검증하고, 둘 중 하나라도 없거나 다르면 기동하지 않는다.
+adapter 없이 점수·파생온도를 만들거나 `battery_id`·`session_id`를 생성하지
+않으며, raw 입력 처리와 anomaly publish가 성공한 뒤에만 offset을 commit한다.
+현재 artifact와 실 adapter가 없어 실제 추론은 `EXTERNALLY_BLOCKED`다. 상세
+파일 목록·schema·실패 코드는 `docs/ai_inference.md`를 따른다.
+
 ## 측정 모드
 
 | 모드 | 대상 | 인터락 |

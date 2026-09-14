@@ -661,6 +661,13 @@ ADS1115          LAN          battery-anomaly-alerts ◀─ alerts 발행 ─┤
 - [ ] **로컬 추론 프로세스** — 호스트 PC에서 체크포인트를 로드해 `battery-raw-metrics` 구독 → AE Score·Informer Score 계산 → Score Fusion → `battery-anomaly-alerts` 발행 (S-FGKMXE, F-VTQMVE). 칼만 필터·내부 셀 온도 추정도 여기서 수행한다
 - [ ] 상태 등급 판정 및 이벤트 저장 (S-WJYKSS, S-RMXMCJ)
 
+> **2026-09-15 Task 5 경계 구현:** `ai/`에 v1 계약 validator, artifact
+> manifest/scaler/checkpoint fail-closed loader, 외부 inference adapter와 Kafka
+> lifecycle/수동 offset commit 골격을 추가했다. 실제 모델 binary·scaler·권위
+> feature metadata·score fusion/Kalman/내부 셀 추정 adapter가 제공되기 전에는
+> production 기동과 실추론을 `EXTERNALLY_BLOCKED`로 유지한다. 상세 schema와
+> 기동 실패 조건은 [`docs/ai_inference.md`](docs/ai_inference.md)다.
+
 ### Phase 5 — 웹 대시보드 & 관제
 - [ ] React 프로젝트 초기화 및 라우팅
 - [ ] 공통 반응형 레이아웃/내비게이션 설계 (데스크톱 사이드바, 태블릿 접힘 메뉴, 모바일 하단 내비게이션)

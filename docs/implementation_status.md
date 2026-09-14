@@ -1,6 +1,6 @@
 # 구현 상태 및 문서 지도
 
-> 기준일: **2026-09-14** (직전 갱신 2026-08-25). 아래 표는 브라우저·curl·테스트 실제 실행으로 재확인했다.
+> 기준일: **2026-09-15** (직전 갱신 2026-09-14). 아래 표는 브라우저·curl·테스트 실제 실행으로 재확인했다.
 
 이 문서는 설계 문서의 요구사항과 현재 저장소에 실제로 존재하는 구현을 구분하기 위한 실행용 지도다. 요구사항의 정본이 아니며, 상세 계약은 아래 링크의 원본 문서를 따른다.
 
@@ -66,10 +66,10 @@ DB를 초기화해 실행한다. 현재 실행 환경에는 이 변수가 없어
 | 에지 명령 경로 | `backend/src/device/port.ts`(`DeviceCommandPort` 인터페이스, 메서드 4개) + `backend/src/device/logging.ts`(memory 전용 로깅 스텁) + `backend/src/kafka.ts`(version 1 wire contract·Zod 검증·파티션 키) + `backend/src/device/kafka.ts`(실 producer) + `backend/src/outboxWorker.ts`(lease/claim/retry worker). PostgreSQL 상태·감사·outbox 원자성은 `store/postgres.ts`와 `008_outbox_identity.sql`에 구현됐고, `SESSION_ENDED`도 `batteryId`를 payload·파티션 키에 포함한다. `009_outbox_delivery.sql`은 만료 claim 복구·poison quarantine을 제공한다 | **구현 완료 / 실 Kafka·edge relay 인수 검증 대기** (→ B4) |
 | 백엔드 DB 도메인 provider·Consumer·TimescaleDB | `backend/migrations/000_identity.sql`~`009_outbox_delivery.sql`, `postgres.ts`, `telemetryConsumer.ts`, `anomalyConsumer.ts`, `outboxWorker.ts`. Raw Consumer는 session tagging·raw payload·단조 latest·수동 offset commit·프레임별 Fail-Safe hook을, Anomaly Consumer는 device 기준 ACTIVE session tagging·anomaly 이력·단조 score latest·replay-safe 이벤트·수동 offset commit을, Outbox Worker는 durable command의 배터리별 순서·lease·retry를 구현했다. `TEST_DATABASE_URL`이 없으면 실 DB 계약 테스트는 skip한다. Kafka/Timescale 실측 부하는 별도이며 `AUTH_MODE=betterauth`의 WS 인증은 여전히 보류되고, WS upgrade가 `DATA_MODE`를 별도로 검사하지 않는 갭은 남아 있다 | **Raw/Anomaly/Outbox 구현 / 실 Kafka·DB 인수 검증 대기** |
 | 알림 발송 (카카오·SMS·메일) | 채널 ON/OFF 토글과 policy 응답만 있고(`server.ts:405`·`:409`), **실제로 메시지를 보내는 코드는 `backend/src`에 없다** | **보류(의도적)** — 토글 현행 유지, 추가 작업 없음 |
-| AI 로컬 추론 프로세스 | 코드 없음. `ai/` 디렉터리도 없다. 학습(Colab)·체크포인트 반출 절차·추론 프로세스 모두 미착수 | 미착수 — **별도 담당자** |
+| AI 로컬 추론 프로세스 | `ai/`에 v1 raw/anomaly 계약 validator, fail-closed bundle loader, 외부 adapter/broker 경계, 수동 offset lifecycle과 표준 테스트가 있다. 실제 checkpoint·scaler·권위 feature metadata와 외부 모델 adapter는 없다 | **외부 차단(`EXTERNALLY_BLOCKED`)** — 실제 추론·점수 품질을 주장하지 않음 (`docs/ai_inference.md`) |
 | 로컬 실행 패키징 | **C8 완료(2026-08-25)** — 단일 오리진(`:3005`), `start-local.bat`(Windows, 수동 실행), `docs/local_run.md`. memory 모드 한정(Kafka·PostgreSQL·추론은 별도) | 완료 (memory 모드) |
 | 에지 소프트웨어 | `edge/bw150/`에 BW150 HID 로거·탐지·BLE 프로브(914줄)만 있고, 센서·릴레이·Kafka 프로듀서 구현은 없음 | 부분 구현 (BW150 한정) |
-| AI 소프트웨어 | 모델 설계는 있으나 `ai/` 디렉터리, Colab 노트북, 학습·추론·Kafka 연동 구현은 없음 | 미착수 |
+| AI 소프트웨어 | `ai/contracts.py`, `ai/bundle.py`, `ai/inference.py`, `ai/runtime.py`, `ai/kafka.py`에 계약·번들 검증·외부 adapter·Kafka lifecycle 골격과 테스트가 있다. 학습 코드·모델 binary·실 adapter는 저장하지 않는다 | **안전 경계 구현 / 외부 artifact·adapter 차단** |
 | 프론트엔드 | [`frontend/src/`](../frontend/src/)의 Vite + React + TypeScript strict 앱, v3 사용자 15·관리자 6 라우트, 계약형 API/WS 계층, MSW 시나리오, `npm run dev:real` 데모 경로. WS 이벤트 11종 핸들러 중 **9종이 서버 발신을 실제로 수신**(C1 8종 + B3의 `relay.autoCut`), 잔여 `diagnosis.*` 2종은 F21이 fail-closed라 도달 불가 | 부분 구현 / production WS 인증 미착수 |
 | 프론트엔드 실행 기반 | `frontend/package.json`, React Router, Query, RHF/Zod, 토큰 CSS, 공용 UI, Vitest/RTL/Playwright. **Vitest 44건·Playwright 28건·`tsc --noEmit` 통과**(2026-08-25 실행) | 구현됨 |
 | 미구현 REST·화면 | **C3 완료(2026-08-25)**: `POST /api/account/email-availability`, `POST /api/exports`+`GET /api/exports/{id}`+`GET /api/exports/{id}/download`(QUEUED→READY 비동기 잡, 서명·시한부 다운로드 URL, 멱등성·소유권 검증까지 실측 완료). **C4 완료(2026-08-25)**: `GET`/`PATCH /api/settings/voice-alert` + 설정 화면 새 탭. 남은 것은 `GET /api/trends/export.pdf`(503 스텁 — PDF 생성에 새 의존성이 필요해 이번 라운드는 범위 밖으로 확정) | 부분 구현 — 잔여 `export.pdf`(범위 밖 확정) |
@@ -128,7 +128,7 @@ v3 프로토타입과 정본 문서에는 모드 1/2, 대표 온도 최댓값, s
 | Phase 1 인프라·백엔드 기반 | 백엔드 초기화·인증 골격만 완료 | 부분 구현. 로컬 Kafka·PostgreSQL/TimescaleDB 미착수. **EC2 항목은 삭제**(로컬 구성), **Better Auth 실인증은 보류** |
 | Phase 2 에지 수집 | 센서·100ms 폴링·릴레이·음성·프로듀서 | 미착수 (BW150 도구만 존재) |
 | Phase 3 스트리밍 | Consumer·세션 태깅·적재·오프셋 | Raw/Anomaly Consumer·세션 태깅·적재·오프셋 구현 / 실 Kafka·Timescale 인수 대기 |
-| Phase 4 AI | 데이터셋·특징·AE·Informer·추론 | 미착수. **추론이 Colab에서 호스트 PC로 내려왔고 별도 담당자 몫** |
+| Phase 4 AI | 데이터셋·특징·AE·Informer·추론 | 계약·fail-closed 실행 경계만 구현. checkpoint·scaler·feature metadata·외부 adapter가 제공될 때까지 **실 추론은 외부 차단** |
 | Phase 5 웹 | React 초기화·라우팅·화면·관리자 | 부분 구현. v3 화면·계약 계층·mock QA·localhost demo REST 연결 완료. **WS 서버 발신이 1/11종 → 8/11종으로 확장**(C1, 2026-08-25)됐으나 잔여 2종은 각각 B3·F21 안전 프로필 선행. production DB provider 통합(B1)은 구현 완료, 실 DB 인수 검증 대기 |
 | Phase 6 알림·차단 | 카카오·Fail-Safe·음성 설정 | **카카오는 보류(의도적).** Fail-Safe 판정·구독 배선은 구현됐고 실측 문턱이 대기 중이며, 음성 설정은 API·화면 모두 없음 |
 | Phase 7 통합·**로컬 실행 패키징** | E2E·시나리오·실행 묶기 | **로컬 실행 패키징은 C8로 완료(2026-08-25)**. **AWS 배포 항목은 삭제**(클라우드 미사용). 프론트 단독 E2E(Playwright 29건, C8에서 1건 추가)는 동작 |
@@ -151,7 +151,7 @@ v3 프로토타입과 정본 문서에는 모드 1/2, 대표 온도 최댓값, s
 2. 모드 1은 [`docs/hardware/mode1_backend_spec.md` §13](hardware/mode1_backend_spec.md#13-실물로-확인해야-하는-것)의 H1~H9를 실물로 확인하기 전 센서 해석을 확정하지 않는다.
 3. 모드 2의 표면온도·상승률·부스트 효율·컷오프 복귀 등은 [`docs/hardware/mode2_powerbank_diagnosis_spec.md` §8](hardware/mode2_powerbank_diagnosis_spec.md#8-미결정)의 미결정 항목을 임의로 채우지 않는다.
 4. 백엔드 계약의 `[정의 필요]` 항목은 [`docs/backend_contract.md` §9](backend_contract.md#9-미결정-항목)를 확인하고, 값을 추정해 API나 UI에 하드코딩하지 않는다.
-5. AI 구현에는 아직 데이터셋 위치·라벨 규칙·체크포인트 형식·특징 버전·추론 메시지 계약·Colab↔AWS 인증 절차가 없다. 이 정보 없이 모델 학습이나 실시간 추론 코드를 시작하지 않는다.
+5. AI 실추론에는 아직 데이터셋 위치·라벨 규칙·두 checkpoint·scaler·특징 버전·외부 adapter 구현이 없다. `ai/`의 계약형 경계는 준비됐지만, 이 artifact와 구현 없이 모델 학습·실시간 추론을 시작하지 않는다(`docs/ai_inference.md`).
 
 ## 권장 다음 순서
 
@@ -214,10 +214,10 @@ Timescale 적재, 물리 Fail-Safe는 여전히 별도 범위다.
 
 | # | 항목 | 완료 판정 |
 |---|---|---|
-| A6 | LSTM-AE·Informer 학습 (Colab) | 체크포인트 산출 |
-| A7 | 체크포인트를 Colab → 호스트 PC로 반출하는 절차 확정 | 파일 형식·**특징 버전 표기**·저장 위치가 문서화됨 |
-| A8 | **로컬 추론 프로세스** — 체크포인트 로드, `battery-raw-metrics` 구독, AE·Informer Score → Score Fusion, `battery-anomaly-alerts` 발행 | 대시보드 이상점수가 실제 측정에 반응 |
-| A9 | 칼만 필터·내부 셀 온도 추정 (에지가 아니라 여기서 수행) | 파생 온도가 alerts에 실림 |
+| A6 | LSTM-AE·Informer 학습 (Colab) | **외부 차단** — 학습 데이터·두 checkpoint가 저장소에 없음 |
+| A7 | 체크포인트를 Colab → 호스트 PC로 반출하는 절차 확정 | `docs/ai_inference.md`에 예상 경로·manifest/scaler/feature metadata schema를 기록했지만 승인 artifact 반출은 미완료 |
+| A8 | **로컬 추론 프로세스** — 체크포인트 로드, `battery-raw-metrics` 구독, AE·Informer Score → Score Fusion, `battery-anomaly-alerts` 발행 | 계약형 runtime·수동 commit 경계는 구현. 외부 adapter/bundle 없이는 시작 실패하며 실제 측정 반응은 검증하지 않음 |
+| A9 | 칼만 필터·내부 셀 온도 추정 (에지가 아니라 여기서 수행) | adapter/model bundle이 명시한 구현이 없으므로 미구현. 임의 파생값을 발행하지 않음 |
 
 > **Colab은 학습 전용이며 실시간 경로에 없다.** 로컬 Kafka가 NAT 뒤라 인바운드 접속이 불가능하기 때문이다. 문서 어딘가에 남은 *"Colab이 raw-metrics를 구독한다"*는 폐기된 설계다.
 
