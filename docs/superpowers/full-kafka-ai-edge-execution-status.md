@@ -38,7 +38,7 @@
 ## Task 4 — Kafka DeviceCommand Outbox Worker
 
 - 현재 상태: `IN_PROGRESS`
-- 담당 에이전트: 미배정
+- 담당 에이전트: `/root/task4_kafka_outbox_worker`
 - 기준 커밋: `945ba91`
 - 결과 커밋: 미정
 - 부모 리뷰 결과: 대기
