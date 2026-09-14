@@ -7,7 +7,10 @@
 > 기동 스키마 검사, DB 없는 환경에서 명확히 skip하는 계약 테스트가 추가됐다.
 > **2026-09-14 Raw Consumer 갱신:** `backend/src/telemetryConsumer.ts`가 raw
 > 적재·session tagging·수동 offset commit·프레임별 Fail-Safe callback을 구현했다.
-> 남은 인계 대상은 별도 DeviceCommandPort producer/outbox와 실 Kafka·DB 인수 검증이다.
+> **2026-09-14 Task 3 갱신:** PostgreSQL outbox 원자성과 durable identity/dedupe가
+> `store/postgres.ts` 및 `008_outbox_identity.sql`에 구현됐다. 남은 인계 대상은
+> outbox를 실제 `battery-events`로 발행하는 DeviceCommandPort producer와 실
+> Kafka·DB 인수 검증이다.
 
 ---
 
@@ -66,7 +69,7 @@ runStoreContractTests("postgres", async () => createPostgresStore(testPool));
 | 5 | `DATA_MODE` 게이트 열기 (§9) | ✅ 구현 완료(2026-09-14) |
 | 6 | `TEST_DATABASE_URL`로 계약·동시성·재시작 검증 | 실 DB 인수 환경에서 수행 |
 
-**마이그레이션 8개 파일** — 순서가 곧 의존성이다.
+**마이그레이션 9개 파일** — 순서가 곧 의존성이다.
 
 | 파일 | 내용 |
 |---|---|
@@ -78,11 +81,12 @@ runStoreContractTests("postgres", async () => createPostgresStore(testPool));
 | `005_timescale.sql` | PK 교체 + 하이퍼테이블 2개 + 보존 60일 |
 | `006_diagnosis_progress_snapshot.sql` | 진단 phase 경계 복구용 `progress_snapshot jsonb` |
 | `007_telemetry_raw_payload.sql` | version-1 edge raw payload 보존용 `raw_payload jsonb` |
+| `008_outbox_identity.sql` | outbox durable `event_id`, replay `dedupe_key`와 유일성 제약 |
 
 > **`005`가 실패하면 004까지는 유효하다** — TimescaleDB 확장이 없으면
 > `telemetry_metric`이 평범한 PostgreSQL 테이블로 남지만, 현재 실행기는 순서상
 > 이후 migration까지 진행하지 않는다. 따라서 `DATA_MODE=postgres`를 열려면
-> TimescaleDB를 설치한 뒤 `npm run db:migrate`가 `007`까지 완료돼야 한다.
+> TimescaleDB를 설치한 뒤 `npm run db:migrate`가 `008`까지 완료돼야 한다.
 
 **예전에 2단계를 막던 것과, 어떻게 풀었는지:**
 
@@ -242,15 +246,22 @@ export function createKafkaDeviceCommandPort(/* producer, topic 등 */): DeviceC
 
 > **`outbox` 테이블은 이미 만들었다**(`migrations/004_anomaly_and_health.sql`). 도메인 트랜잭션 안에서 상태 변경·`audit_log` INSERT와 **함께** 발행할 메시지를 여기 넣고, 별도 워커가 발행 후 `sent_at`을 채운다.
 >
-> **⚠️ 이 결정은 백엔드 코드에 영향을 준다.** 지금 `changeRelay`·`engageFailsafe` 등이 저장소 커밋 뒤에 `devicePort.*`를 직접 부르는데, outbox로 가면 그 자리가 "저장소 트랜잭션 안에서 outbox에 INSERT"로 바뀐다. `CellGuardStore` 경계를 넘나드는 변경이라 **2부 착수 시점에 백엔드와 함께 손댄다** — 테이블만 먼저 만들어 두고 도메인 코드는 아직 건드리지 않았다.
+>
+> **2026-09-14 구현:** `store/postgres.ts`가 `SESSION_STARTED`, `SESSION_ENDED`,
+> `RELAY_CUT`, `RELAY_RESTORE` payload를 상태·감사 INSERT와 같은 transaction에서
+> 기록한다. Fail-Safe는 `RELAY_AUTO_CUT` 감사와 wire `RELAY_CUT`을 함께 남긴다.
+> `008_outbox_identity.sql`의 `event_id`는 durable command identity이고,
+> `dedupe_key`는 relay Idempotency-Key replay를 포함한 중복 방지 근거다.
+> PostgreSQL server 경로는 commit 뒤 `DeviceCommandPort`를 호출하지 않으며,
+> memory 경로는 기존 logging port를 유지한다.
 >
 > 아래는 그 결정의 근거가 된 원래 서술이다.
 
 지금 도메인 코드는 **저장소 커밋 → 그 다음 포트 호출**(예: `changeRelay`가 트랜잭션을 커밋한 뒤 `devicePort.relayCut(...)`을 부르는 순서) 구조다. Kafka 브로커가 그 순간 죽어 있으면 **DB의 릴레이 상태는 이미 바뀌었는데 에지는 그 사실을 영영 모르는** 상태가 된다. `docs/backend_contract.md` §3.4는 *"승인 후 명령 실행과 감사 기록을 원자적으로 처리하고 실패 시 성공 응답이나 성공 이벤트를 내보내지 않는다"*를 요구하므로, 지금 순서 그대로는 계약 위반이다.
 
-**권장 해법은 outbox 테이블이다.** 저장소 트랜잭션 안에서 도메인 상태 변경·`audit_log` INSERT와 **같이** "발행할 메시지"를 `outbox` 테이블에 INSERT한다. 별도 워커 프로세스가 그 테이블을 폴링(또는 `LISTEN/NOTIFY`)해 Kafka로 실제 발행한 뒤 해당 row를 지우거나 `sent_at`을 채운다. 이러면 원자성은 **DB 트랜잭션 하나**로 확보되고(Kafka 발행 실패는 워커가 재시도하면 그만이다), 도메인 코드는 "메시지가 나갔는가"를 신경 쓰지 않아도 된다.
+**권장 해법은 outbox 테이블이다.** 저장소 트랜잭션 안에서 도메인 상태 변경·`audit_log` INSERT와 **같이** "발행할 메시지"를 `outbox` 테이블에 INSERT한다. 별도 워커 프로세스가 그 테이블을 폴링(또는 `LISTEN/NOTIFY`)해 Kafka로 실제 발행한 뒤 해당 row를 지우거나 `sent_at`을 채운다. 이러면 원자성은 **DB 트랜잭션 하나**로 확보되고(Kafka 발행 실패는 워커가 재시도하면 그만이다), 도메인 코드는 "메시지가 나갔는가"를 신경 쓰지 않아도 된다. 이 저장소 배선과 identity/dedupe는 위 구현으로 닫혔고, 실제 producer/worker는 다음 담당 범위다.
 
-**이 결정은 인프라 담당자가 내리되, 백엔드 담당자와 반드시 합의한다** — outbox를 택하면 도메인 코드의 호출 지점(`changeRelay`, `engageFailsafe` 등이 지금 저장소 커밋 후 직접 `devicePort.*`를 부르는 자리)이 "포트를 직접 부른다"에서 "저장소 트랜잭션 안에서 outbox에 넣는다"로 바뀐다 — 이건 `CellGuardStore` 인터페이스 경계를 넘나드는 변경이라 백엔드 담당자 쪽 코드도 같이 바뀐다.
+**이 결정은 인프라 담당자가 내리되, 백엔드 담당자와 반드시 합의한다** — 완료된 구현은 도메인 저장소가 outbox에만 기록하고, producer/worker가 commit 이후 실제 Kafka 발행을 담당한다.
 
 ### 14. Fail-Safe 구독 진입점
 
@@ -319,7 +330,13 @@ onAutoCut: (relay, verdict) => {
 
 ### 15. `sessionEnded` 배선 지점 — **결정: 3번(outbox)으로 함께 해결 (2026-08-28)**
 
-> §13을 outbox로 정했으므로 이 항목도 같이 닫혔다. 저장소 트랜잭션 안에서 세션 종료와 함께 세션 행의 `battery_id`를 포함한 `sessionEnded` 메시지를 `outbox`에 넣으면 되고, 저장소가 전송 계층을 알 필요도 라우트 시그니처가 바뀔 필요도 없다. 워커는 그 `batteryId`를 파티션 키로 사용한다.
+> §13을 outbox로 정했으므로 이 항목도 같이 닫혔다. `startSession`의
+> SUPERSEDED 종료와 `changeOpsStatus(BLOCKED)`의 세션 종료는 세션 행의
+> `battery_id`를 포함한 `SESSION_ENDED` 메시지를 같은 transaction에 넣는다.
+> 저장소가 전송 계층을 알 필요도 라우트 시그니처가 바뀔 필요도 없다.
+> 워커는 그 `batteryId`를 파티션 키로 사용한다. 세션 종료 outbox는 신규
+> `SESSION_STARTED`보다 먼저 삽입되며, 모드/배터리 전환이면 이전 릴레이
+> `RELAY_CUT`이 그보다 먼저 삽입된다.
 >
 > 아래는 그 결정의 근거가 된 원래 서술이다.
 
@@ -337,13 +354,13 @@ onAutoCut: (relay, verdict) => {
 
 ## 인계 후 남는 것 (요약)
 
-> **2026-09-14 갱신** — Raw Consumer wiring까지 추가됐다. 남은 것은 별도 DeviceCommandPort producer/outbox와 실제 Kafka·PostgreSQL/Timescale 인수 검증이다.
+> **2026-09-14 갱신** — Raw Consumer wiring과 PostgreSQL transactional outbox까지 추가됐다. 남은 것은 별도 DeviceCommandPort producer와 실제 Kafka·PostgreSQL/Timescale 인수 검증이다.
 
-- ✅ **스키마** — `migrations/000`~`007`, `npm run db:migrate`로 적용. 결정 근거는 `schema-open-questions.md`.
+- ✅ **스키마** — `migrations/000`~`008`, `npm run db:migrate`로 적용. 결정 근거는 `schema-open-questions.md`와 §13.
 - ✅ **PostgreSQL 구현체** — 본 문서 1부. `backend/src/store/postgres.ts`, 계약 테스트 wiring, 전역 active-session unique 경합 테스트를 추가했다. `TEST_DATABASE_URL`이 없으면 실제 DB 테스트는 명시적으로 skip한다.
 - ✅ **`advanceDiagnosis`의 `progress` 영속화 방침** — 본 문서 §8-1. 런타임 메모리 + phase 경계 `progress_snapshot` 저장으로 결정했고 `006`에 반영했다.
 - ✅ **`store/types.ts`·`contract.ts` 델타** — CSV의 선택적 날짜 범위를 계약에 추가하고, 최신값·건강·텔레메트리 매핑을 기존 반환 타입에 연결했다.
-- **Kafka 구현체** — 본 문서 2부. `backend/src/device/kafka.ts` 신규 작성 + 도메인 코드를 outbox 방식으로 전환(§13·§15, 별도 범위).
+- **Kafka 구현체** — 본 문서 2부. `backend/src/device/kafka.ts` 신규 작성 + outbox polling/발행 후 `sent_at` 갱신(도메인 outbox 배선은 완료, producer는 별도 범위).
 - ✅ **Raw Consumer의 `battery_id` 태깅** — `backend/src/telemetryConsumer.ts`와 `docs/handover/b2-session-tagging.md`; 실 Kafka·DB 인수 검증은 남았다.
 - **모드 1 SOH/RUL 산출 주체** — `battery_health` 테이블은 만들었지만 **누가 계산해 넣는지는 아직 미정**이다(`backend_contract.md` §9 Q6은 모드 2만 확정). DB는 저장만 맡는다.
 - **Fail-Safe 문턱값** — 하드웨어 실측 후 결정. `mode1_backend_spec.md` §13 H8(압력 baseline·상승률), `mode2_powerbank_diagnosis_spec.md` §8 H2(모드 2 표면온도 상승률). `runFailsafe` 호출은 배선됐지만 `UNSET_THRESHOLDS`가 전부 0이라 현재 자동 차단은 휴면 상태다.

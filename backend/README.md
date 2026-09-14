@@ -14,7 +14,7 @@ Node.js + TypeScript + Express backend for the CellGuard dashboard.
 ```bash
 npm install
 cp .env.example .env
-npm run db:migrate   # applies migrations/000..007, records them in schema_migrations
+npm run db:migrate   # applies migrations/000..008, records them in schema_migrations
 npm run build
 npm run dev
 ```
@@ -57,7 +57,7 @@ stays small — `001_app_auth.sql` has four foreign keys pointing at it. Only
 database, outside `schema_migrations`, so `npm run db:migrate` loses track of
 what is applied and the two disagree from then on. Instead run `auth:generate`,
 read the SQL it emits, and add it as a **new numbered migration** (e.g.
-`008_better_auth.sql`). `001_app_auth.sql` is a baseline file and is never
+`009_better_auth.sql`). `001_app_auth.sql` is a baseline file and is never
 edited — changes are stacked in later-numbered files.
 
 For the repository-backed localhost demo, use `AUTH_MODE=demo DATA_MODE=memory`
@@ -70,7 +70,7 @@ Better Auth cookie transport remains unchanged for production paths.
 The demo provider is intentionally not a production substitute. With
 `DATA_MODE=postgres`, startup verifies the required domain schema and the
 REST APIs use the PostgreSQL-backed `CellGuardStore`; there is no memory-data
-fallback. Apply migrations through `007_telemetry_raw_payload.sql`
+fallback. Apply migrations through `008_outbox_identity.sql`
 before starting the server. The PostgreSQL integration contract suite runs
 only when `TEST_DATABASE_URL` is set; without it, the suite reports a clear
 skip and does not attempt a connection.
@@ -79,7 +79,7 @@ WebSocket production authentication is a separate deferred path: the current
 upgrade handler still accepts the demo token only when `AUTH_MODE=demo`, while
 Better Auth cookie-based streaming remains disabled.
 
-Migrations are applied by `npm run db:migrate` in filename order (`000`..`007`), not by running individual `.sql` files by hand. The earlier instruction to run `001_app_auth.sql` after creating the Better Auth core tables is obsolete: `000_identity.sql` now creates `"user"` itself, and `001` depends on it.
+Migrations are applied by `npm run db:migrate` in filename order (`000`..`008`), not by running individual `.sql` files by hand. The earlier instruction to run `001_app_auth.sql` after creating the Better Auth core tables is obsolete: `000_identity.sql` now creates `"user"` itself, and `001` depends on it.
 
 ## Raw telemetry Consumer
 
@@ -157,3 +157,23 @@ explicitly skipped; database or post-commit notification failures leave the
 offset uncommitted for retry. The Task 2 alert list is process-local and is
 fed only by committed anomaly transitions; durable alert/outbox delivery is a
 later task.
+
+## Transactional command outbox
+
+In `DATA_MODE=postgres`, domain changes that must reach the edge write the
+`battery-events` command to `outbox` in the same PostgreSQL transaction as the
+state row and its audit row. The covered commands are `SESSION_STARTED`,
+`SESSION_ENDED`, `RELAY_CUT`, and `RELAY_RESTORE`; a Fail-Safe is persisted as
+the `RELAY_CUT` wire command with a `RELAY_AUTO_CUT` audit action. Superseded
+and `BLOCKED` session closures enqueue `SESSION_ENDED` with the session row's
+`batteryId`. A mode/battery switch queues the previous relay cut before the
+session-ended and session-started commands.
+
+Migration `008_outbox_identity.sql` adds the non-null durable `event_id` and
+unique `dedupe_key` columns. Relay requests include their idempotency key in
+the deterministic dedupe basis, so a replay cannot append another audit or
+outbox command even if the process ended after the domain transaction but
+before the HTTP idempotency response was recorded. `sent_at` is left untouched
+here; a later producer owns publication and acknowledgement. PostgreSQL does
+not call `DeviceCommandPort` after commit. The memory demo keeps its existing
+logging port calls.

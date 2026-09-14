@@ -64,7 +64,10 @@ import type { DemoBattery, DemoRelay } from "./store.js";
 
 const app = express();
 const httpServer = createServer(app);
-const devicePort = createLoggingDeviceCommandPort();
+// PostgreSQL commands are emitted by the store into its transactional
+// outbox.  The logging port remains available for the memory demo only; a
+// post-commit port call in PostgreSQL would reintroduce the dual-write gap.
+const devicePort = env.DATA_MODE === "memory" ? createLoggingDeviceCommandPort() : null;
 type WsTopic = "metrics" | "anomaly" | "relay" | "alert" | "event" | "session" | "diagnosis";
 type WsClient = { socket: Socket; batteryId: string | null; userId: string; role: "USER" | "ADMIN"; topics: Set<WsTopic>; subscribed: boolean };
 const wsClients = new Set<WsClient>();
@@ -547,7 +550,12 @@ app.post("/api/sessions", requireSession, asyncRoute(async (req, res) => {
     if (!battery) throw new Error("NOT_FOUND");
     const priorSession = await activeSession();
     const session = await startSession(actorId(req), battery.id);
-    await devicePort.sessionStarted(session.id, session.batteryId, session.targetMode);
+    if (env.DATA_MODE === "memory" && devicePort) {
+      if (priorSession && priorSession.id !== session.id) {
+        await devicePort.sessionEnded(priorSession.id, priorSession.batteryId, "SUPERSEDED");
+      }
+      await devicePort.sessionStarted(session.id, session.batteryId, session.targetMode);
+    }
     if (priorSession && priorSession.id !== session.id) {
       await closeDiagnosisFor(priorSession.batteryId, "SESSION_ENDED");
       await broadcast("session.ended", { sessionId: priorSession.id, endReason: "SUPERSEDED" }, null, priorSession.batteryId);
@@ -595,10 +603,16 @@ async function relayMutation(req: Request, res: Response, action: "cut" | "resto
   if (prior.kind === "conflict") { apiError(res, 409, "IDEMPOTENCY_CONFLICT", "The idempotency key was reused with a different request."); return; }
   if (prior.kind === "replay") { res.status(prior.status ?? 200).json(prior.body); return; }
   try {
-    await changeRelay(actorId(req), battery.id, action, reason);
-    const response = { decision: "APPROVED", requestId: `relay_${randomUUID()}`, relay: await relayJson(battery.id) };
-    if (action === "cut") await devicePort.relayCut(battery.id, response.relay.reasonCode);
-    else await devicePort.relayRestore(battery.id);
+    await changeRelay(actorId(req), battery.id, action, reason, key);
+    const requestId = `relay_${createHash("sha256").update(`${actorId(req)}:${key}:${action}:${battery.id}`).digest("hex").slice(0, 24)}`;
+    const response = { decision: "APPROVED", requestId, relay: await relayJson(battery.id) };
+    // Memory mode retains the existing logging behavior.  PostgreSQL has
+    // already committed the corresponding command to outbox, so invoking a
+    // port here would be an unsafe post-commit dual write.
+    if (env.DATA_MODE === "memory" && devicePort) {
+      if (action === "cut") await devicePort.relayCut(battery.id, response.relay.reasonCode);
+      else await devicePort.relayRestore(battery.id);
+    }
     if (action === "cut") await closeDiagnosisFor(battery.id, "RELAY_CUT");
     await rememberIdempotency(actorId(req), key, requestBody, 200, response);
     await broadcast("relay.changed", await relayJson(battery.id), response.requestId, battery.id);
@@ -1497,7 +1511,12 @@ export async function runFailsafe(
   return evaluateFailsafe({
     relayByBattery,
     engageFailsafe,
-    relayCut: (id, code) => devicePort.relayCut(id, code),
+    // `engageFailsafe` writes the RELAY_CUT command to the same PostgreSQL
+    // transaction as relay_state + audit_log.  Only the memory demo uses the
+    // legacy logging port after that state transition.
+    relayCut: (id, code) => env.DATA_MODE === "memory" && devicePort
+      ? devicePort.relayCut(id, code)
+      : Promise.resolve(),
     onAutoCut: (relay, verdict) => {
       void broadcastAutoCut(battery, relay, verdict.triggerCode).catch((error) => {
         console.error("[failsafe] relay.autoCut broadcast failed", error);

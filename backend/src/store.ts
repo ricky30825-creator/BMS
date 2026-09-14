@@ -34,6 +34,8 @@ export async function initializeStore(): Promise<void> {
     table_count: number;
     progress_snapshot: string | null;
     raw_payload: string | null;
+    outbox_event_id: string | null;
+    outbox_dedupe_key: string | null;
   }>(`
     select
       count(*)::int as table_count,
@@ -44,13 +46,21 @@ export async function initializeStore(): Promise<void> {
       (select column_name
        from information_schema.columns
        where table_schema = 'public' and table_name = 'telemetry_metric'
-         and column_name = 'raw_payload') as raw_payload
+         and column_name = 'raw_payload') as raw_payload,
+      (select column_name
+       from information_schema.columns
+       where table_schema = 'public' and table_name = 'outbox'
+         and column_name = 'event_id') as outbox_event_id,
+      (select column_name
+       from information_schema.columns
+       where table_schema = 'public' and table_name = 'outbox'
+         and column_name = 'dedupe_key') as outbox_dedupe_key
     from information_schema.tables
     where table_schema = 'public' and table_name = any($1::text[])
   `, [REQUIRED_POSTGRES_TABLES]);
   const schema = result.rows[0];
-  if (!schema || Number(schema.table_count) !== REQUIRED_POSTGRES_TABLES.length || !schema.progress_snapshot || !schema.raw_payload) {
-    throw new Error("PostgreSQL schema is not ready; run npm run db:migrate (including 007_telemetry_raw_payload.sql)");
+  if (!schema || Number(schema.table_count) !== REQUIRED_POSTGRES_TABLES.length || !schema.progress_snapshot || !schema.raw_payload || !schema.outbox_event_id || !schema.outbox_dedupe_key) {
+    throw new Error("PostgreSQL schema is not ready; run npm run db:migrate (including 008_outbox_identity.sql)");
   }
 }
 

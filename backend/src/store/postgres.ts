@@ -16,6 +16,7 @@ import type {
   OpsStatus,
 } from "./types.js";
 import { quickPhases, totalDurationMs } from "../diagnosis/phases.js";
+import { KAFKA_CONTRACT_VERSION, KAFKA_TOPICS, type BackendOutboundCommandEvent } from "../kafka.js";
 
 type AnyRow = Record<string, any>;
 type QueryExecutor = pg.Pool | pg.PoolClient;
@@ -329,6 +330,38 @@ function metricCsvRow(row: AnyRow): string {
     row.acoustic_raw,
     row.age_ms,
   ].map(csvCell).join(",");
+}
+
+/**
+ * The edge wire payload deliberately stays at the version-1 `code + params`
+ * shape.  Identity lives beside it in the outbox row so a future producer can
+ * publish the same durable id as message metadata without making the edge
+ * payload carry backend-only fields.
+ */
+function outboxEventId(dedupeKey: string): string {
+  return `evt_${createHash("sha256").update(dedupeKey).digest("hex").slice(0, 32)}`;
+}
+
+function transientOutboxDedupe(scope: string): string {
+  return `${scope}:${randomUUID()}`;
+}
+
+async function enqueueOutbox(
+  executor: QueryExecutor,
+  event: BackendOutboundCommandEvent,
+  dedupeKey: string,
+): Promise<void> {
+  await query(executor, `
+    insert into outbox (event_id, dedupe_key, topic, partition_key, payload)
+    values ($1, $2, $3, $4, $5)
+    on conflict (dedupe_key) do nothing
+  `, [
+    outboxEventId(dedupeKey),
+    dedupeKey,
+    KAFKA_TOPICS.events,
+    event.params.batteryId,
+    { version: KAFKA_CONTRACT_VERSION, code: event.code, params: event.params },
+  ]);
 }
 
 export function createPostgresStore(pool: pg.Pool): CellGuardStore {
@@ -737,6 +770,11 @@ export function createPostgresStore(pool: pg.Pool): CellGuardStore {
         const device = deviceResult.rows[0];
         if (!device || (device.status != null && device.status !== "ONLINE")) throw new Error("DEVICE_OFFLINE");
 
+        const currentBattery = mapBattery(battery);
+        const id = `ses_${randomUUID()}`;
+        const startedMs = Date.now();
+        const startedAt = new Date(startedMs);
+
         const currentResult = await query<SessionRow>(client, `
           select id, battery_id, owner_user_id, device_id, target_mode, status, end_reason, started_at, ended_at
           from measurement_session
@@ -747,15 +785,49 @@ export function createPostgresStore(pool: pg.Pool): CellGuardStore {
         `);
         const current = currentResult.rows[0];
         if (current) {
+          // A physical mode/battery switch must cut the previous relay before
+          // the new session's start command is made durable.  This is only an
+          // outbox/state transition; no GPIO or DeviceCommandPort is called
+          // from the PostgreSQL path.
+          const needsPreviousRelayCut = String(current.battery_id) !== batteryId
+            || Number(current.target_mode) !== currentBattery.targetMode;
+          if (needsPreviousRelayCut) {
+            const previousBatteryId = String(current.battery_id);
+            await ensureRelay(client, previousBatteryId);
+            const previousRelay = await relayRow(client, previousBatteryId, true);
+            if (!previousRelay) throw new Error("NOT_FOUND");
+            const reasonCode = Number(current.target_mode) !== currentBattery.targetMode
+              ? "MODE_SWITCH"
+              : "SESSION_SUPERSEDED";
+            await query(client, `
+              update relay_state
+              set state = 'OPEN', reason_code = $2, reason_params = null,
+                  changed_at = now(), changed_by = $3
+              where battery_id = $1
+            `, [previousBatteryId, reasonCode, ownerId]);
+            await insertAudit(client, {
+              actorId: ownerId,
+              action: "RELAY_CUT",
+              resource: previousBatteryId,
+              result: "SUCCESS",
+              reason: reasonCode,
+            });
+            await enqueueOutbox(client, {
+              version: KAFKA_CONTRACT_VERSION,
+              code: "RELAY_CUT",
+              params: { batteryId: previousBatteryId, reasonCode },
+            }, `session-switch-relay-cut:${id}`);
+          }
           await query(client, `update measurement_session set status = 'ENDED', end_reason = 'SUPERSEDED', ended_at = now() where id = $1`, [current.id]);
           await insertAudit(client, { actorId: ownerId, action: "SESSION_AUTO_END", resource: String(current.id), result: "SUCCESS", reason: "SUPERSEDED" });
+          await enqueueOutbox(client, {
+            version: KAFKA_CONTRACT_VERSION,
+            code: "SESSION_ENDED",
+            params: { sessionId: String(current.id), batteryId: String(current.battery_id), endReason: "SUPERSEDED" },
+          }, `session-ended:${String(current.id)}`);
         }
 
         const deviceId = String(device.id);
-        const startedMs = Date.now();
-        const startedAt = new Date(startedMs);
-        const currentBattery = mapBattery(battery);
-        const id = `ses_${randomUUID()}`;
         const result = await query<SessionRow>(client, `
           insert into measurement_session
             (id, battery_id, owner_user_id, device_id, target_mode, status, end_reason, started_at, ended_at)
@@ -763,6 +835,11 @@ export function createPostgresStore(pool: pg.Pool): CellGuardStore {
           returning id, battery_id, owner_user_id, device_id, target_mode, status, end_reason, started_at, ended_at
         `, [id, batteryId, ownerId, deviceId, currentBattery.targetMode, startedAt]);
         await insertAudit(client, { actorId: ownerId, action: "SESSION_START", resource: id, result: "SUCCESS", reason: null });
+        await enqueueOutbox(client, {
+          version: KAFKA_CONTRACT_VERSION,
+          code: "SESSION_STARTED",
+          params: { sessionId: id, batteryId, targetMode: currentBattery.targetMode },
+        }, `session-started:${id}`);
         return clone(mapSession(result.rows[0]));
       }), "NO_ACTIVE_SESSION");
     },
@@ -795,6 +872,11 @@ export function createPostgresStore(pool: pg.Pool): CellGuardStore {
             const session = active.rows[0];
             await query(client, `update measurement_session set status = 'ENDED', end_reason = 'BLOCKED', ended_at = now() where id = $1`, [session.id]);
             await insertAudit(client, { actorId: "SYSTEM", action: "SESSION_AUTO_END", resource: String(session.id), result: "SUCCESS", reason: "BLOCKED" });
+            await enqueueOutbox(client, {
+              version: KAFKA_CONTRACT_VERSION,
+              code: "SESSION_ENDED",
+              params: { sessionId: String(session.id), batteryId: String(session.battery_id), endReason: "BLOCKED" },
+            }, `session-ended:${String(session.id)}`);
           }
         }
         const updated = await batteryRow(client, batteryId);
@@ -849,7 +931,7 @@ export function createPostgresStore(pool: pg.Pool): CellGuardStore {
       }));
     },
 
-    async changeRelay(actorId, batteryId, action, reason) {
+    async changeRelay(actorId, batteryId, action, reason, idempotencyKey) {
       const normalizedReason = normalizeReason(reason);
       return dbCall(async () => transaction(async (client) => {
         const battery = await batteryRow(client, batteryId);
@@ -858,6 +940,25 @@ export function createPostgresStore(pool: pg.Pool): CellGuardStore {
         await ensureRelay(client, batteryId);
         const current = await relayRow(client, batteryId, true);
         if (!current) throw new Error("NOT_FOUND");
+
+        // The REST layer normally records the idempotency result after this
+        // method returns.  If the process crashes in that small window, a
+        // replay must not append a second audit row or command.  The outbox
+        // dedupe key is deterministic for the complete request body, so an
+        // existing row is the durable evidence that this operation committed.
+        const dedupeKey = idempotencyKey
+          ? `relay:${createHash("sha256").update(JSON.stringify({ actorId, batteryId, action, reason: normalizedReason, idempotencyKey })).digest("hex")}`
+          : transientOutboxDedupe(`relay:${action}:${batteryId}`);
+        if (idempotencyKey) {
+          const alreadyQueued = await query<AnyRow>(client, `
+            select event_id
+            from outbox
+            where dedupe_key = $1
+            limit 1
+          `, [dedupeKey]);
+          if (alreadyQueued.rows[0]) return clone(mapRelay(current));
+        }
+
         if (action === "restore" && Boolean(current.interlock_engaged)) throw new Error("INTERLOCK_LOCKED");
         await query(client, `
           update relay_state
@@ -870,6 +971,19 @@ export function createPostgresStore(pool: pg.Pool): CellGuardStore {
           where battery_id = $1
         `, [batteryId, action === "cut" ? "OPEN" : "CLOSED", normalizedReason, actorId]);
         await insertAudit(client, { actorId, action: action === "cut" ? "RELAY_CUT" : "RELAY_RESTORE", resource: batteryId, result: "SUCCESS", reason: normalizedReason });
+        if (action === "cut") {
+          await enqueueOutbox(client, {
+            version: KAFKA_CONTRACT_VERSION,
+            code: "RELAY_CUT",
+            params: { batteryId, reasonCode: current.reason_code == null ? null : String(current.reason_code) },
+          }, dedupeKey);
+        } else {
+          await enqueueOutbox(client, {
+            version: KAFKA_CONTRACT_VERSION,
+            code: "RELAY_RESTORE",
+            params: { batteryId },
+          }, dedupeKey);
+        }
         const updated = await relayRow(client, batteryId);
         if (!updated) throw new Error("NOT_FOUND");
         return clone(mapRelay(updated));
@@ -888,6 +1002,11 @@ export function createPostgresStore(pool: pg.Pool): CellGuardStore {
           where battery_id = $1
         `, [batteryId, condition, triggerCode]);
         await insertAudit(client, { actorId: "SYSTEM", action: "RELAY_AUTO_CUT", resource: batteryId, result: "SUCCESS", reason: triggerCode });
+        await enqueueOutbox(client, {
+          version: KAFKA_CONTRACT_VERSION,
+          code: "RELAY_CUT",
+          params: { batteryId, reasonCode: triggerCode },
+        }, transientOutboxDedupe(`failsafe-relay-cut:${batteryId}`));
         const updated = await relayRow(client, batteryId);
         if (!updated) throw new Error("NOT_FOUND");
         return clone(mapRelay(updated));

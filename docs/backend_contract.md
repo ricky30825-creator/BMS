@@ -372,6 +372,7 @@ const locked = gated && r !== 'battery';
 - 모든 요청은 `Idempotency-Key` 헤더가 필수다. 같은 키·같은 본문은 같은 결과를 반환하고, 같은 키·다른 본문은 `409 IDEMPOTENCY_CONFLICT`다.
 - 성공 응답은 `decision: "APPROVED"`, `requestId`, 갱신 릴레이 객체를 포함한다. 정책 거부 응답은 에러 code와 `decision: "REJECTED"`를 포함한다.
 - 성공 시 감사 로그에 `{ actorId, action, targetId, reason, requestId, ip, userAgent, at }`를 기록한다.
+- `DATA_MODE=postgres`에서는 릴레이·세션·Fail-Safe 명령을 저장소 transaction 안의 `outbox`에 함께 기록한다. `outbox.event_id`는 durable command identity이고 `dedupe_key`는 Idempotency-Key 재처리의 유일성 근거다. PostgreSQL 경로는 commit 뒤 `DeviceCommandPort`를 직접 호출하지 않으며, 별도 producer가 `battery-events` 발행 후 `sent_at`을 갱신한다.
 
 ### 3.5 감사 로그 불변성 `[v3]` `[REQ-WEB-136]`
 

@@ -30,8 +30,9 @@ export type IdempotencyResult = { kind: "new" | "replay" | "conflict"; status?: 
 //     옮긴다.
 //  2. 반환값은 호출부가 마음대로 고쳐도 저장소가 오염되지 않아야 한다(방어 복사).
 //  3. 감사 로그를 함께 남기는 메서드는 원자적이어야 한다 — 계약 §3.4.
-//     changeRelay / changeOpsStatus / saveMemo / changeUserStatus / startSession이
-//     해당한다. PostgreSQL 구현체는 이들을 한 트랜잭션에 넣어야 한다.
+//     changeRelay / engageFailsafe / changeOpsStatus / saveMemo /
+//     changeUserStatus / startSession이 해당한다. PostgreSQL 구현체는 이들을
+//     상태·감사·(해당 시) outbox까지 한 트랜잭션에 넣어야 한다.
 export interface CellGuardStore {
   // 조회
   userById(id: string): Promise<DemoUser | undefined>;
@@ -57,7 +58,10 @@ export interface CellGuardStore {
   changeOpsStatus(actorId: string, batteryId: string, next: OpsStatus, reason: string, expectedVersion?: number): Promise<DemoBattery>;
   saveMemo(actorId: string, batteryId: string, memo: string, expectedVersion?: number): Promise<DemoBattery>;
   changeUserStatus(actorId: string, userId: string, status: DemoStatus, reason: string): Promise<DemoUser>;
-  changeRelay(actorId: string, batteryId: string, action: "cut" | "restore", reason: string): Promise<DemoRelay>;
+  // The optional idempotency key is supplied by the relay REST route.  The
+  // PostgreSQL provider uses it as the durable outbox dedupe basis; memory
+  // keeps its existing logging behavior and may ignore it.
+  changeRelay(actorId: string, batteryId: string, action: "cut" | "restore", reason: string, idempotencyKey?: string): Promise<DemoRelay>;
   // 서버 Fail-Safe 전용. 사용자 조작(changeRelay)과 달리 인터락을 **건다**.
   // 지금 저장소에는 interlockEngaged를 런타임에 true로 만드는 경로가 없어서
   // (store/memory.ts:51-62의 픽스처가 유일) B3가 이 메서드를 필요로 한다.

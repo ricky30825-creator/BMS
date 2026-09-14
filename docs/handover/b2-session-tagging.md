@@ -7,7 +7,7 @@
 | 항목 | 값 |
 |---|---|
 | 작성일 | 2026-09-14 |
-| 근거 문서 | CLAUDE.md (센서 스키마 절, 배터리 자산 절), `docs/product_contract.md` (§3.2 사용자당 진단기 1대 규칙), `backend/migrations/000`~`007` (실제 컬럼·제약) |
+| 근거 문서 | CLAUDE.md (센서 스키마 절, 배터리 자산 절), `docs/product_contract.md` (§3.2 사용자당 진단기 1대 규칙), `backend/migrations/000`~`008` (실제 컬럼·제약) |
 | 영역 | `measurement_session` 활성 상태, 세션 생명주기, telemetry_metric 적재 시점 |
 | 대상 구성요소 | `backend/src/telemetryConsumer.ts` — PostgreSQL backend 프로세스에 opt-in embedded |
 

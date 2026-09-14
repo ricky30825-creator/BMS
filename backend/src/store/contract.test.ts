@@ -205,7 +205,7 @@ const postgresTestPool = postgresTestUrl ? new pg.Pool({ connectionString: postg
 async function resetPostgresContractDatabase(pool: pg.Pool): Promise<void> {
   await pool.query(`
     truncate table audit_log, idempotency_key, diagnosis, telemetry_metric,
-      anomaly_score, battery_health, battery_latest, relay_state, measurement_session,
+      anomaly_score, battery_health, battery_latest, relay_state, measurement_session, outbox,
       battery_asset restart identity cascade
   `);
   await pool.query(`

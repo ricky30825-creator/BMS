@@ -53,11 +53,14 @@ const diagnosis = {
 
 type FakeOptions = {
   failAudit?: boolean;
+  failOutbox?: boolean;
   failSessionUnique?: boolean;
   failDiagnosisUnique?: boolean;
   emptyTelemetry?: boolean;
   missingBattery?: boolean;
   noLatest?: boolean;
+  activeSession?: Record<string, unknown>;
+  relayState?: Record<string, unknown>;
   anomalyRows?: Record<string, unknown>[];
 };
 
@@ -74,11 +77,14 @@ function fakePool(options: FakeOptions = {}) {
     latest_score: null,
   } : {}) };
   let diagnosisRow = { ...diagnosis };
+  let relayState = options.relayState ? { ...options.relayState } : null;
+  const outboxRows: Array<{ event_id: string; dedupe_key: string }> = [];
   const run = vi.fn(async (text: string, values: unknown[] = []) => {
     queries.push({ text, values });
     const normalized = text.replace(/\s+/g, " ").trim().toLowerCase();
     if (normalized === "begin" || normalized === "commit" || normalized === "rollback") return { rows: [] };
     if (options.failAudit && normalized.includes("insert into audit_log")) throw new Error("audit insert failed");
+    if (options.failOutbox && normalized.includes("insert into outbox")) throw new Error("outbox insert failed");
     if (options.failSessionUnique && normalized.includes("insert into measurement_session")) {
       throw Object.assign(new Error("duplicate active session"), { code: "23505", constraint: "uq_active_session_global" });
     }
@@ -91,6 +97,25 @@ function fakePool(options: FakeOptions = {}) {
       if (normalized.includes("ops_status")) batteryRow = { ...batteryRow, ops_status: values[1], version: 1 };
       return { rows: [] };
     }
+    if (normalized.startsWith("insert into outbox")) {
+      outboxRows.push({ event_id: String(values[0]), dedupe_key: String(values[1]) });
+      return { rows: [] };
+    }
+    if (normalized.startsWith("select event_id") && normalized.includes("from outbox")) {
+      return { rows: outboxRows.filter((row) => row.dedupe_key === String(values[0])) };
+    }
+    if (normalized.startsWith("update relay_state")) {
+      if (relayState) {
+        if (normalized.includes("interlock_engaged = true")) {
+          relayState = { ...relayState, state: "OPEN", interlock_engaged: true, interlock_condition: values[1], reason_code: values[2], reason_params: null, changed_by: "SYSTEM" };
+        } else if (normalized.includes("set state = 'open'")) {
+          relayState = { ...relayState, state: "OPEN", reason_code: values[1], reason_params: null, changed_by: values[2] };
+        } else {
+          relayState = { ...relayState, state: values[1], reason_params: { reason: values[2] }, changed_by: values[3] };
+        }
+      }
+      return { rows: [] };
+    }
     if (normalized.startsWith("insert into measurement_session")) {
       return {
         rows: [{ id: "ses2", battery_id: "b1", owner_user_id: "hong", device_id: "demo-device-01", target_mode: 2, status: "ACTIVE", end_reason: null, started_at: "2026-08-06T01:30:00.000Z", ended_at: null }],
@@ -100,6 +125,9 @@ function fakePool(options: FakeOptions = {}) {
       return {
         rows: [{ id: "ses1", battery_id: "b1", owner_user_id: "hong", device_id: "demo-device-01", target_mode: 2, status: "ACTIVE", end_reason: null, started_at: "2026-08-06T01:30:00.000Z", ended_at: null }],
       };
+    }
+    if (normalized.includes("from measurement_session") && options.activeSession && values.length <= 1) {
+      return { rows: [options.activeSession] };
     }
     if (normalized.includes("from diagnosis")) return { rows: options.failDiagnosisUnique ? [] : [diagnosisRow] };
     if (normalized.startsWith("update diagnosis")) {
@@ -117,7 +145,7 @@ function fakePool(options: FakeOptions = {}) {
         }],
       };
     }
-    if (normalized.includes("from relay_state")) return { rows: [] };
+    if (normalized.includes("from relay_state")) return { rows: relayState ? [relayState] : [] };
     if (normalized.includes("from device")) return { rows: [{ id: "demo-device-01", status: "ONLINE" }] };
     if (normalized.includes("insert into audit_log")) {
       return {
@@ -282,5 +310,133 @@ describe("PostgreSQL store query mapping", () => {
     const fake = fakePool({ failDiagnosisUnique: true });
     const store = createPostgresStore(fake.pool);
     await expect(store.startDiagnosis("hong", "QUICK", "b1", { acknowledged: true })).rejects.toThrow("DIAGNOSIS_IN_PROGRESS");
+  });
+
+  it("records SESSION_ENDED before SESSION_STARTED in the same transaction", async () => {
+    const fake = fakePool({
+      activeSession: {
+        id: "ses-old", battery_id: "b1", owner_user_id: "hong", device_id: "demo-device-01",
+        target_mode: 2, status: "ACTIVE", end_reason: null,
+        started_at: "2026-08-06T01:20:00.000Z", ended_at: null,
+      },
+    });
+    const store = createPostgresStore(fake.pool);
+    await store.startSession("hong", "b1");
+    const rows = fake.queries
+      .filter(({ text }) => text.toLowerCase().includes("insert into outbox"))
+      .map(({ values }) => (values[4] as { code: string }).code);
+    expect(rows).toEqual(["SESSION_ENDED", "SESSION_STARTED"]);
+    expect(fake.queries.map(({ text }) => text.trim().toLowerCase())).toContain("commit");
+  });
+
+  it("cuts the previous relay before SUPERSEDED and new session events on a mode switch", async () => {
+    const fake = fakePool({
+      activeSession: {
+        id: "ses-old", battery_id: "old-battery", owner_user_id: "hong", device_id: "demo-device-01",
+        target_mode: 1, status: "ACTIVE", end_reason: null,
+        started_at: "2026-08-06T01:20:00.000Z", ended_at: null,
+      },
+      relayState: {
+        battery_id: "old-battery", state: "CLOSED", interlock_engaged: false,
+        interlock_condition: null, reason_code: null, reason_params: null,
+        changed_at: "2026-08-06T01:20:00.000Z", changed_by: "SYSTEM",
+      },
+    });
+    const store = createPostgresStore(fake.pool);
+    await store.startSession("hong", "b1");
+    const rows = fake.queries
+      .filter(({ text }) => text.toLowerCase().includes("insert into outbox"))
+      .map(({ values }) => (values[4] as { code: string; params: Record<string, unknown> }));
+    expect(rows.map((row) => row.code)).toEqual(["RELAY_CUT", "SESSION_ENDED", "SESSION_STARTED"]);
+    expect(rows[0].params).toMatchObject({ batteryId: "old-battery", reasonCode: "MODE_SWITCH" });
+  });
+
+  it("does not duplicate a relay outbox row or audit on an idempotency replay", async () => {
+    const fake = fakePool({
+      relayState: {
+        battery_id: "b1", state: "CLOSED", interlock_engaged: false,
+        interlock_condition: null, reason_code: null, reason_params: null,
+        changed_at: "2026-08-06T01:20:00.000Z", changed_by: "SYSTEM",
+      },
+    });
+    const store = createPostgresStore(fake.pool);
+    await store.changeRelay("hong", "b1", "cut", "manual cut", "key-1");
+    await store.changeRelay("hong", "b1", "cut", "manual cut", "key-1");
+    expect(fake.queries.filter(({ text }) => text.toLowerCase().includes("insert into outbox"))).toHaveLength(1);
+    expect(fake.queries.filter(({ text }) => text.toLowerCase().includes("insert into audit_log"))).toHaveLength(1);
+  });
+
+  it("records a user relay restore as a version-1 outbox event", async () => {
+    const fake = fakePool({
+      relayState: {
+        battery_id: "b1", state: "OPEN", interlock_engaged: false,
+        interlock_condition: null, reason_code: null, reason_params: { reason: "manual cut" },
+        changed_at: "2026-08-06T01:20:00.000Z", changed_by: "hong",
+      },
+    });
+    const store = createPostgresStore(fake.pool);
+    await store.changeRelay("hong", "b1", "restore", "restore after inspection", "key-restore");
+    const event = fake.queries
+      .filter(({ text }) => text.toLowerCase().includes("insert into outbox"))
+      .map(({ values }) => values[4] as { version: number; code: string; params: Record<string, unknown> });
+    expect(event).toEqual([{
+      version: 1,
+      code: "RELAY_RESTORE",
+      params: { batteryId: "b1" },
+    }]);
+  });
+
+  it("rolls back state when outbox insertion fails", async () => {
+    const fake = fakePool({ failOutbox: true });
+    const store = createPostgresStore(fake.pool);
+    await expect(store.startSession("hong", "b1")).rejects.toThrow("INTERNAL_ERROR");
+    const commands = fake.queries.map(({ text }) => text.trim().toLowerCase());
+    expect(commands).toContain("rollback");
+    expect(commands).not.toContain("commit");
+  });
+
+  it("records a BLOCKED session end in the same transaction", async () => {
+    const fake = fakePool({
+      activeSession: {
+        id: "ses-active", battery_id: "b1", owner_user_id: "hong", device_id: "demo-device-01",
+        target_mode: 2, status: "ACTIVE", end_reason: null,
+        started_at: "2026-08-06T01:20:00.000Z", ended_at: null,
+      },
+    });
+    const store = createPostgresStore(fake.pool);
+    await store.changeOpsStatus("hong", "b1", "BLOCKED", "safety hold", 0);
+    const events = fake.queries
+      .filter(({ text }) => text.toLowerCase().includes("insert into outbox"))
+      .map(({ values }) => values[4] as { code: string; params: Record<string, unknown> });
+    expect(events).toEqual([{
+      version: 1,
+      code: "SESSION_ENDED",
+      params: { sessionId: "ses-active", batteryId: "b1", endReason: "BLOCKED" },
+    }]);
+    expect(fake.queries.map(({ text }) => text.trim().toLowerCase())).toContain("commit");
+  });
+
+  it("persists a Fail-Safe RELAY_CUT beside the auto-cut audit", async () => {
+    const fake = fakePool({
+      relayState: {
+        battery_id: "b1", state: "CLOSED", interlock_engaged: false,
+        interlock_condition: null, reason_code: null, reason_params: null,
+        changed_at: "2026-08-06T01:20:00.000Z", changed_by: "SYSTEM",
+      },
+    });
+    const store = createPostgresStore(fake.pool);
+    await store.engageFailsafe("b1", "TEMP_ABSOLUTE", "IR_SURFACE");
+    const event = fake.queries
+      .filter(({ text }) => text.toLowerCase().includes("insert into outbox"))
+      .map(({ values }) => values[4] as { code: string; params: Record<string, unknown> });
+    expect(event).toEqual([{
+      version: 1,
+      code: "RELAY_CUT",
+      params: { batteryId: "b1", reasonCode: "TEMP_ABSOLUTE" },
+    }]);
+    const audit = fake.queries
+      .filter(({ text }) => text.toLowerCase().includes("insert into audit_log"))
+      .map(({ values }) => values.slice(1, 5));
+    expect(audit).toContainEqual(["RELAY_AUTO_CUT", "b1", "SUCCESS", "TEMP_ABSOLUTE"]);
   });
 });
