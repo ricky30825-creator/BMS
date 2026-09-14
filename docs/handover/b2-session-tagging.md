@@ -7,7 +7,7 @@
 | 항목 | 값 |
 |---|---|
 | 작성일 | 2026-08-27 |
-| 근거 문서 | CLAUDE.md (센서 스키마 절, 배터리 자산 절), `docs/product_contract.md` (§3.2 사용자당 진단기 1대 규칙), `backend/migrations/001_app_auth.sql` (실제 컬럼·제약) |
+| 근거 문서 | CLAUDE.md (센서 스키마 절, 배터리 자산 절), `docs/product_contract.md` (§3.2 사용자당 진단기 1대 규칙), `backend/migrations/000`~`005` (실제 컬럼·제약) |
 | 영역 | `measurement_session` 활성 상태, 세션 생명주기, telemetry_metric 적재 시점 |
 | 대상 구성요소 | Kafka Consumer (인프라 코드) — 이 저장소 밖 |
 
@@ -19,6 +19,7 @@
 
 ```json
 {
+  "version": 1,
   "device_id": "string",
   "mode": 1 | 2,
   "timestamp": "ISO8601",
@@ -49,13 +50,13 @@ status = 'ACTIVE'
 
 결과는 **0건 또는 1건**이다. 이유:
 
-- **`device_id`당 활성 세션은 1개** — 이걸 보증하는 것은 애플리케이션 코드가 아니라 **DB의 부분 유니크 인덱스**다: `uq_active_session_device on measurement_session (device_id) where status = 'ACTIVE'`(`backend/migrations/001_app_auth.sql:74-75`). 즉 경합이 나도 DB가 막아 준다.
+- **설비 전체의 활성 세션은 1개** — 이걸 보증하는 것은 애플리케이션 코드가 아니라 **DB의 부분 유니크 인덱스**다: `uq_active_session_global on measurement_session (status) where status = 'ACTIVE'`(`backend/migrations/002_domain_gaps.sql:43-44`). `device_id = <frame.device_id>` 조건으로 조회하면 결과는 0건 또는 1건이다.
 
 따라서 결과가 항상 유일하고, "어느 배터리 세션인가"는 그 행의 `battery_id`로 바로 결정된다.
 
-> **⚠️ "사용자당 진단기 1대"를 근거로 삼지 말 것.** `docs/product_contract.md` §3.2가 그렇게 정하고 있고 `backend_contract.md:667`이 *"서버가 계정에 묶인 진단기를 자동 선택한다"*고 하지만, **user → device 매핑이 스키마에 아직 없다**(`device` 테이블 부재 — `schema-open-questions.md` Q4). 지금 유효한 보증은 위 유니크 인덱스 하나뿐이다.
+> **⚠️ "사용자당 진단기 1대"를 근거로 삼지 말 것.** `docs/product_contract.md` §3.2가 그렇게 정하고 있어도 Consumer는 user → device 매핑이 아니라 **처리 시점의 ACTIVE 세션**을 기준으로 태깅한다. `device` 테이블과 세션의 FK는 `backend/migrations/002_domain_gaps.sql`에 있지만, battery 귀속의 권위 있는 행은 여전히 `measurement_session`이다.
 >
-> 그리고 **활성 세션의 범위가 "진단기별"인지 "설비 전체"인지 계약과 참조 구현이 갈린다** — `backend_contract.md:342`는 `device_id`당 1개, `backend/src/store/memory.ts:145-146` 주석은 *"for the whole installation, not one session per user"*(전역)다. 진단기가 1대뿐이라 지금은 결과가 같지만 2대가 되는 순간 갈린다. **Consumer 코드를 짜기 전에 백엔드와 확정할 것**(`infra-implementations.md` §2 참조).
+> 활성 세션 범위는 2026-08-28에 **설비 전체 1개**로 확정됐다. `backend/src/store/memory.ts`와 `backend/migrations/002_domain_gaps.sql`의 전역 제약이 정본이다.
 
 ### 2.2 캐싱 전략
 

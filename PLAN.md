@@ -379,7 +379,7 @@ ADS1115          LAN          battery-anomaly-alerts ◀─ alerts 발행 ─┤
 
 > `battery_asset`, `measurement_session` 관계 테이블은 PostgreSQL(비시계열)에 두고, 시계열 하이퍼테이블은 `battery_id` FK로 참조한다.
 >
-> **⚠️ 위 두 스펙은 "설계"가 아니라 "이미 있는 스키마 위의 남은 작업"이다.** 실제 컬럼·제약의 정본은 `backend/migrations/001_app_auth.sql`이며 테이블 8개(`app_user_profile`·`audit_log`·`battery_asset`·`measurement_session`·`relay_state`·`telemetry_metric`·`diagnosis`·`idempotency_key`)가 이미 있다. **이 문서가 "시계열 하이퍼테이블"이라 부르는 테이블의 실제 이름은 `telemetry_metric`이다.** 아직 스키마가 없는 6건(추론 결과 적재 테이블·`age_ms`/`temp_points`/`mode`/`soc_basis` 자리·하이퍼테이블 전환·진단기 테이블·중복 방지 키·`battery_asset.memo`)은 `docs/handover/schema-open-questions.md`.
+> **⚠️ 위 두 스펙은 "설계"가 아니라 "이미 있는 스키마 위의 남은 작업"이다.** 실제 컬럼·제약의 정본은 `backend/migrations/000_identity.sql`~`005_timescale.sql`이며, 기존 8개 테이블에 더해 `002`~`005`가 추론 결과·Raw 보조 필드·하이퍼테이블·진단기·중복 방지·`battery_asset.memo`를 반영했다. **이 문서가 "시계열 하이퍼테이블"이라 부르는 테이블의 실제 이름은 `telemetry_metric`이다.** 과거 6건의 결정 기록은 `docs/handover/schema-open-questions.md`에서 확인하고, 남은 작업은 PostgreSQL/Consumer 구현이다.
 
 ### AI 모델 (4개)
 | ID | 스펙 |
@@ -616,7 +616,7 @@ ADS1115          LAN          battery-anomaly-alerts ◀─ alerts 발행 ─┤
 > | 2 | `CLAUDE.md` §Kafka 토픽 규약 · §센서 데이터 JSON 스키마 | 토픽 3개의 발행자·용도, 에지 프레임의 필드와 부호 규약. ⚠️ `advertised.listeners`를 `localhost`로 두면 라즈베리파이가 **조용히** 못 붙는다 |
 > | 3 | `docs/handover/infra-implementations.md` | **구현 명세 정본.** 1부 `CellGuardStore`(PostgreSQL) / 2부 `DeviceCommandPort`(Kafka). 완료 판정은 계약 테스트 20건 통과 |
 > | 4 | `docs/handover/b2-session-tagging.md` | Consumer가 `device_id` → `battery_id`로 귀속하는 규칙 5개 + 완료 판정 SQL 2건 |
-> | 5 | `docs/handover/schema-open-questions.md` | **아직 스키마가 없는 6건.** 추론 결과 적재 테이블·`age_ms`/`temp_points`/`mode`/`soc_basis` 자리·하이퍼테이블·진단기 테이블·중복 방지 키·`battery_asset.memo`. Consumer 착수 전 백엔드(·AI)와 합의할 것. **Q6만은 1부 작업 중에 바로 막히므로 먼저 본다** |
+> | 5 | `docs/handover/schema-open-questions.md` | **과거 미결정 6건의 결정 기록.** 해당 DDL은 `backend/migrations/002`~`005`에 반영됐고, Consumer 착수 시 실제 컬럼·제약과 함께 확인한다 |
 > | 6 | `docs/verification_matrix.md` | 무엇을 어떻게 검증하면 끝난 것으로 치는지. 백엔드 typecheck·빌드·`/health`·테스트 명령이 여기 있다 |
 >
 > ✅ **DB는 `npm run db:migrate` 하나로 올라간다(2026-08-28).** `backend/migrations/000`~`005`가 파일명 순서대로 적용된다. 예전에 `psql -f 001_app_auth.sql`이 첫 구문에서 멈추던 문제(`"user"` 테이블 DDL 부재)는 `000_identity.sql`이 해결했다. **`psql -f`로 001만 직접 돌리지 마라** — 순서가 있는 6개 파일이다. `npm run auth:generate`·`auth:migrate`는 CLI 패키지가 없어 실패하니 부르지 않는다(Better Auth는 지금 미사용).
@@ -641,7 +641,7 @@ ADS1115          LAN          battery-anomaly-alerts ◀─ alerts 발행 ─┤
 - [ ] 100ms 폴링 스케줄러 구현 (S-YUNAFH)
 - [ ] 모드별 릴레이 채널 매핑 및 인터락 로직 (S-QPLAYR, S-LWVJRY)
 - [ ] 스피커 로컬 음성파일 재생 모듈 및 이벤트-멘트 매핑 구현 (S-VOCALR)
-- [ ] 센서 JSON 스키마 정의 및 Kafka 프로듀서 발행 (S-IBQMVJ, S-TNASAB)
+- [ ] 센서 JSON 스키마 정의 및 Kafka 프로듀서 발행 (S-IBQMVJ, S-TNASAB) — **부분 완료: `backend/src/kafka.ts`에 version 1 Zod wire contract와 파티션 키 규칙을 고정. 실제 에지 producer는 미착수**
 
 ### Phase 3 — 스트리밍 파이프라인
 - [ ] Kafka Consumer 구현 → `telemetry_metric` 적재 (S-JGLAAI)

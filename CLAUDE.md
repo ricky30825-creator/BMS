@@ -61,6 +61,11 @@ Raspberry Pi              Kafka → Consumer → PostgreSQL + TimescaleDB
 | `battery-anomaly-alerts` | 로컬 추론 프로세스 | 최종 이상점수(Score Fusion) 및 AE/Informer 개별 점수, 파생 온도(칼만 필터, 내부 셀 추정) |
 | `battery-events` | 에지/백엔드 | 센서 오류, 인터락 발생, 릴레이 제어 이벤트, 음성 안내 대상 이벤트 |
 
+Kafka JSON payload는 `version: 1`을 최상위에 포함한다. 구현·검증 정본은
+`backend/src/kafka.ts`이며, raw는 `device_id`, anomaly는 `battery_id`(없으면
+`device_id`), 배터리 이벤트는 `batteryId`를 파티션 키로 쓴다. `sessionEnded`는
+현재 `DeviceCommandPort`에 batteryId가 없으므로 `sessionId`를 파티션 키로 쓴다.
+
 > **Kafka 브로커는 호스트 PC에서 로컬로 운영하며 LAN 한정 PLAINTEXT다.** 클라이언트는 에지·추론 프로세스·백엔드 셋이며 Colab은 포함되지 않는다. `advertised.listeners`를 `localhost`가 아니라 **호스트의 LAN IP**로 잡아야 라즈베리파이가 붙는다 — `localhost`로 두면 브로커가 클라이언트에게 자기 주소를 `localhost`로 되돌려줘, 에지가 자기 자신에게 접속을 시도하며 조용히 실패한다.
 
 ## 센서 데이터 JSON 스키마
@@ -71,6 +76,7 @@ Raspberry Pi              Kafka → Consumer → PostgreSQL + TimescaleDB
 
 ```json
 {
+  "version": 1,
   "device_id": "string",
   "mode": 1,
   "timestamp": "ISO8601",

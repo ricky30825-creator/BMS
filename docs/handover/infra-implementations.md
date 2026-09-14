@@ -216,9 +216,9 @@ export function createKafkaDeviceCommandPort(/* producer, topic 등 */): DeviceC
 
 인터페이스는 `backend/src/device/port.ts`가 정본이며 메서드 4개다 — `relayCut(batteryId, reasonCode)`, `relayRestore(batteryId)`, `sessionStarted(sessionId, batteryId, targetMode)`, `sessionEnded(sessionId, endReason)`. 전부 `battery-events` 토픽으로 발행한다(CLAUDE.md §Kafka 토픽 규약 — `battery-events`는 "에지/백엔드가 발행, 센서 오류·인터락 발생·릴레이 제어 이벤트·음성 안내 대상 이벤트"용). 이 인터페이스는 전송 수단을 모르는 채로 설계돼 있으므로 파일 안에 Kafka 클라이언트 세부사항(브로커 주소, 파티션 키, 직렬화 포맷)을 감춰도 된다 — 도메인 코드(`server.ts`, `failsafeRunner.ts`)는 이 4개 메서드 시그니처만 안다.
 
-> **⚠️ Kafka 클라이언트도 브로커 주소를 놓을 자리도 아직 없다.** `backend/package.json`의 의존성은 `better-auth`·`cors`·`dotenv`·`express`·`pg`·`zod`뿐이라 **`kafkajs` 같은 클라이언트를 직접 추가해야 하고**(어느 것을 쓸지도 정해진 바 없다), `backend/.env.example`과 `backend/src/config/env.ts`의 zod 스키마에 `KAFKA_*` 항목이 하나도 없다.
+> **Kafka wire contract와 실행 설정 골격은 1단계에서 마련됐다.** `backend/src/kafka.ts`가 `version: 1`·세 토픽·Zod payload·파티션 키 규칙을 고정하고, `backend/package.json`은 `kafkajs`를 선택 의존성으로 둔다. `backend/.env.example`과 `backend/src/config/env.ts`에는 `KAFKA_*` 값이 있으며 `KAFKA_ENABLED=false`인 memory 모드에서는 브로커에 연결하지 않는다. 실제 producer·consumer·outbox worker 연결은 다음 단계다.
 >
-> **즉 §9의 "건드리지 말 것" 두 지점과 달리 `backend/src/config/env.ts`는 고쳐야 한다.** 브로커 주소·토픽 이름을 코드에 상수로 박지 말고 이 스키마에 추가한다(`DATABASE_URL`이 이미 같은 방식이다). 백엔드 파일이므로 변경 사실을 백엔드 담당자에게 알린다.
+> **즉 §9의 "건드리지 말 것" 두 지점과 달리 `backend/src/config/env.ts`는 고쳐야 한다.** 브로커 주소와 배포별 topic alias는 이 스키마에 두고(`DATABASE_URL`과 같은 방식), canonical topic 이름·payload 검증·파티션 키 규칙은 `backend/src/kafka.ts`에서 유지한다. 백엔드 파일이므로 변경 사실을 백엔드 담당자에게 알린다.
 
 ### 12. 메시지에 문구를 넣지 않는다
 

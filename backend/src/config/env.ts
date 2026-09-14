@@ -1,6 +1,7 @@
 import "dotenv/config";
 import { z } from "zod";
 import type { DiagnosisSafetyThresholds } from "../diagnosis/safety.js";
+import { KAFKA_TOPICS } from "../kafka.js";
 
 const envSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
@@ -9,6 +10,15 @@ const envSchema = z.object({
   DATA_MODE: z.enum(["memory", "postgres"]).default("memory"),
   DATABASE_URL: z.string().min(1),
   DATABASE_SSL: z.enum(["true", "false"]).default("false"),
+  // Kafka is opt-in. These values are configuration only until a producer or
+  // consumer is explicitly created by a later integration step.
+  KAFKA_ENABLED: z.enum(["true", "false"]).default("false"),
+  KAFKA_BROKERS: z.string().trim().min(1).default("127.0.0.1:9092"),
+  KAFKA_CLIENT_ID: z.string().trim().min(1).default("cellguard-backend"),
+  KAFKA_GROUP_ID: z.string().trim().min(1).default("cellguard-backend"),
+  KAFKA_RAW_METRICS_TOPIC: z.string().trim().min(1).default(KAFKA_TOPICS.rawMetrics),
+  KAFKA_ANOMALY_ALERTS_TOPIC: z.string().trim().min(1).default(KAFKA_TOPICS.anomalyAlerts),
+  KAFKA_EVENTS_TOPIC: z.string().trim().min(1).default(KAFKA_TOPICS.events),
   CORS_ORIGINS: z.string().default("http://localhost:5173,http://localhost:3000"),
   BETTER_AUTH_URL: z.string().url(),
   BETTER_AUTH_SECRET: z.string().min(32),
@@ -57,3 +67,19 @@ export const diagnosisAssumedEfficiency = env.DIAG_ASSUMED_EFFICIENCY;
 // 이 둘은 그 문턱이 뭐든 상관없이 판정 창 자체를 정하는 값이라 별도다.
 export const diagnosisTempSlopeWindowMs = env.DIAG_TEMP_SLOPE_WINDOW_MS;
 export const diagnosisTempSlopeMinSamples = env.DIAG_TEMP_SLOPE_MIN_SAMPLES;
+
+// Deliberately no Kafka client is instantiated here. Keeping the connection
+// configuration as a parsed value lets memory-mode startup remain independent
+// of broker availability; the later producer/consumer step owns connection
+// lifecycle and should check `enabled` before connecting.
+export const kafkaConfig = Object.freeze({
+  enabled: env.KAFKA_ENABLED === "true",
+  brokers: env.KAFKA_BROKERS.split(",").map((broker) => broker.trim()).filter(Boolean),
+  clientId: env.KAFKA_CLIENT_ID,
+  groupId: env.KAFKA_GROUP_ID,
+  topics: Object.freeze({
+    rawMetrics: env.KAFKA_RAW_METRICS_TOPIC,
+    anomalyAlerts: env.KAFKA_ANOMALY_ALERTS_TOPIC,
+    events: env.KAFKA_EVENTS_TOPIC,
+  }),
+});
