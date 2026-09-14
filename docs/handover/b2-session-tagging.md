@@ -1,15 +1,15 @@
 # Kafka Consumer: battery_id 세션 태깅 규칙
 
-> **이 문서는 인프라 담당자의 Kafka Consumer가 따를 battery_id 귀속 규칙이다.**
+> **이 문서는 backend 프로세스에 embedded된 RawMetricsConsumer가 따를 battery_id 귀속 규칙이다.**
 > Consumer는 에지 장비에서 받은 raw 텔레메트리에 battery_id를 붙여 데이터베이스에 적재한다.
 > 에지는 `device_id`만 알기 때문에 backend의 measurement_session 정보로 attribution을 결정한다.
 
 | 항목 | 값 |
 |---|---|
 | 작성일 | 2026-08-27 |
-| 근거 문서 | CLAUDE.md (센서 스키마 절, 배터리 자산 절), `docs/product_contract.md` (§3.2 사용자당 진단기 1대 규칙), `backend/migrations/000`~`006` (실제 컬럼·제약) |
+| 근거 문서 | CLAUDE.md (센서 스키마 절, 배터리 자산 절), `docs/product_contract.md` (§3.2 사용자당 진단기 1대 규칙), `backend/migrations/000`~`007` (실제 컬럼·제약) |
 | 영역 | `measurement_session` 활성 상태, 세션 생명주기, telemetry_metric 적재 시점 |
-| 대상 구성요소 | Kafka Consumer (인프라 코드) — 이 저장소 밖 |
+| 대상 구성요소 | `backend/src/telemetryConsumer.ts` — PostgreSQL backend 프로세스에 opt-in embedded |
 
 ---
 
@@ -62,21 +62,13 @@ status = 'ACTIVE'
 >
 > 활성 세션 범위는 2026-08-28에 **설비 전체 1개**로 확정됐다. `backend/src/store/memory.ts`와 `backend/migrations/002_domain_gaps.sql`의 전역 제약이 정본이다.
 
-### 2.2 캐싱 전략
+### 2.2 현재 조회 전략
 
-프레임은 100ms 주기로 도착하므로 **매번 데이터베이스를 조회하면 초당 10회의 쿼리**가 쌓인다. 이는 불필요한 부하다.
-
-대신 **`device_id → measurement_session` 캐시**를 유지하고, **세션 시작·종료 시점에만 무효화**한다:
-
-- **캐시 갱신 trigger (무효화)**:
-  - `measurement_session` 테이블에 새 행 삽입 (세션 시작)
-  - 기존 행의 `status` 컬럼을 `'ACTIVE'`에서 `'ENDED'`로 변경 (세션 종료)
-  
-- **구현 방안**: 
-  - DB 레플리카 갱신 이벤트(예: PostgreSQL WAL, 변경 데이터 캡처) 또는
-  - 세션 시작/종료를 별도 Kafka 토픽(`battery-events` 등)으로 받아 Consumer 메모리 캐시 갱신
-  
-- **초기화 시**: 부팅 직후 Consumer는 데이터베이스에서 모든 device_id의 현재 활성 세션을 읽어 캐시를 채운다.
+초기 구현은 **프레임마다 PostgreSQL transaction 안에서 직접 조회**한다. 세션
+시작·종료를 별도 Consumer가 관측하는 invalidation hook이 아직 없으므로,
+stale cache가 잘못된 `battery_id`를 붙이는 것보다 처리 시점의 DB 상태를
+권위로 삼는 것이 우선이다. 100ms 스트림에서 초당 약 10회의 세션 조회가
+생기며, 실제 부하 인수 뒤에만 cache/WAL/CDC 최적화를 검토한다.
 
 > **⚠️ `status`는 `'ACTIVE'` / `'ENDED'` 두 값뿐이다.** `measurement_session_status_check` 제약이 그렇게 잡혀 있어(`backend/migrations/001_app_auth.sql:68`) `'COMPLETED'`·`'FAILED'`를 쓰면 INSERT/UPDATE가 거부된다. 종료 **사유**는 별도 컬럼 `end_reason`에 들어가며, 현재 백엔드가 쓰는 값은 두 개뿐이다(`backend/src/store/memory.ts:150`·`:172`):
 >
@@ -85,17 +77,13 @@ status = 'ACTIVE'
 > | `SUPERSEDED` | 같은 진단기로 새 세션이 시작돼 이전 세션이 대체됨 |
 > | `BLOCKED` | 관리자가 배터리를 `BLOCKED`로 바꿔 활성 세션이 강제 종료됨 |
 >
-> **사용자가 "측정 종료"를 눌러 세션을 끝내는 경로는 오늘 없다** — 세션은 위 두 경우에만 끝난다. 따라서 캐시 무효화 이벤트도 이 두 가지만 관측하면 된다.
+> **사용자가 "측정 종료"를 눌러 세션을 끝내는 경로는 오늘 없다** — 세션은 위 두 경우에만 끝난다. Consumer는 다음 프레임의 DB 조회에서 이 상태 전환을 반영한다.
 
-### 2.3 캐시 miss 처리
+### 2.3 세션 전환
 
-드물게 캐시가 최신이 아닐 수 있다(예: 세션 시작 이벤트가 지연됨). 이 경우:
-
-1. 캐시에 세션이 없으면 → DB 조회 (동기)
-2. 조회 결과를 캐시에 기록
-3. 프레임 적재 계속
-
-이렇게 하면 최악의 경우 1~2 프레임의 latency가 발생하나, 결국 일관성이 보증된다.
+캐시를 사용하지 않으므로 별도 cache miss 경로는 없다. 매 프레임의 조회
+결과가 세션 전환 직후의 attribution을 결정하며, 조회 결과가 없으면 즉시
+두 backend ID를 `null`로 적재한다.
 
 ---
 
@@ -250,17 +238,22 @@ Raspberry Pi (에지)
   ↓ (Kafka, 100ms 주기)
   battery-raw-metrics topic
   ↓
-Kafka Consumer (인프라 코드)
-  ├─ measurement_session 캐시 조회
+backend/src/telemetryConsumer.ts
+  ├─ measurement_session 처리시점 조회
   ├─ battery_id 결정
-  └─ insert into telemetry_metric
-       (device_id, measured_at, voltage_v, ..., session_id, battery_id)
+  ├─ insert into telemetry_metric
+  │    (device_id, measured_at, voltage_v, ..., session_id, battery_id, raw_payload)
+  └─ monotonic battery_latest update + safety hook
   ↓
 PostgreSQL + TimescaleDB
   └─ telemetry_metric 테이블
 ```
 
-Consumer의 책임은 **"device_id 알아서 battery_id로 변환"** 그것뿐이다. 세션 생명주기 관리(시작/종료)는 백엔드 애플리케이션이 한다.
+Consumer의 책임은 **"device_id 알아서 battery_id로 변환"**하고 raw frame을
+보존하는 것이다. 세션 생명주기 관리(시작/종료)는 백엔드 애플리케이션이
+한다. Kafka offset은 DB transaction과 frame별 safety hook이 성공한 뒤에만
+수동 commit하며, `(device_id, measured_at)` replay는 `on conflict do nothing`으로
+무해하게 처리한다. 이는 DB/Kafka 원자 commit을 의미하지 않는다.
 
 ---
 
@@ -268,3 +261,4 @@ Consumer의 책임은 **"device_id 알아서 battery_id로 변환"** 그것뿐�
 
 - 2026-08-27: 초안 작성 (Task 14 — B2 Phase)
 - 2026-08-28: 실제 스키마와 어긋난 3건을 정정 — 세션 종료 상태값(`'COMPLETED'`/`'FAILED'` → `'ENDED'` + `end_reason`), §3.1의 불필요한 `ALTER TABLE ... ADD COLUMN battery_id`(이미 존재) 제거, §5 완료 판정 SQL의 컬럼명(`measurement_session_id` → `session_id`). `session_id`도 함께 적재한다는 규칙을 §3.1에 추가했다.
+- 2026-09-14: `backend/src/telemetryConsumer.ts` 구현에 맞춰 per-frame DB 조회, raw payload 보존, monotonic `battery_latest`, at-least-once manual offset commit, embedded server wiring을 확정했다.

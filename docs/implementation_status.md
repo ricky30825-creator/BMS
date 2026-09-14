@@ -19,10 +19,19 @@
 
 `backend/src/store/postgres.ts`가 `CellGuardStore` 전체를 구현했고, `store.ts`는
 `DATA_MODE=postgres`에서 이 구현체를 선택한다. `initializeStore()`는 서버가
-listen하기 전에 migrations `000`~`006`의 핵심 스키마와
+listen하기 전에 migrations `000`~`007`의 핵심 스키마와
 `diagnosis.progress_snapshot`을 확인하며, 실패 시 memory 데이터로 대체하지
-않고 기동을 중단한다. `advanceDiagnosis`의 진행 상태는 런타임 메모리에
-유지하고 phase 경계에서만 `progress_snapshot`에 저장한다.
+않고 기동을 중단한다. `telemetry_metric.raw_payload`도 확인한다.
+`advanceDiagnosis`의 진행 상태는 런타임 메모리에 유지하고 phase 경계에서만
+`progress_snapshot`에 저장한다.
+
+`backend/src/telemetryConsumer.ts`는 `battery-raw-metrics` version-1 raw
+frame을 PostgreSQL transaction으로 적재한다. 활성 세션은 `device_id`로
+조회해 DB 소유의 `battery_id`·`session_id`를 붙이고, 세션이 없으면 두 값을
+`null`로 보존한다. `(device_id, measured_at)` 충돌은 replay 성공으로
+처리하며, `battery_latest`는 더 최신 timestamp일 때만 갱신한다. 서버는
+`DATA_MODE=postgres`이고 `KAFKA_CONSUMER_ENABLED=true`이며
+`KAFKA_ENABLED=true`일 때만 Consumer를 시작한다.
 
 PostgreSQL 계약·동시성 테스트는 `TEST_DATABASE_URL`이 설정된 경우에만 실제
 DB를 초기화해 실행한다. 현재 실행 환경에는 이 변수가 없어 명확한 skip 1건을
@@ -45,13 +54,13 @@ DB를 초기화해 실행한다. 현재 실행 환경에는 이 변수가 없어
 | 백엔드 도메인 데이터 저장 | `backend/src/store/contract.ts`의 `CellGuardStore`, `memory.ts` 참조 구현, `postgres.ts` PostgreSQL 구현, `store.ts`의 `DATA_MODE` 분기. PostgreSQL은 자산 최신값·릴레이·진단·건강 집계·텔레메트리 CSV를 읽고, 상태+감사 변경을 트랜잭션으로 처리한다 | **구현 완료 / TEST_DATABASE_URL 설정 시 실 DB 계약 검증** |
 | 백엔드 실시간 스트림 (WS 발신) | **C1 완료(2026-08-25).** 프론트가 처리하는 11종 중 `metrics.tick`·`anomaly.score`·`anomaly.gradeChanged`·`relay.changed`·`alert.created`·`event.created`·`session.ended`·`resync.required` 8종이 실제로 발신되고, `subscribe`/`resume`이 1만 건 링버퍼로 실제 재전송을 수행한다. 단 `metrics.tick`·`anomaly.score`·`anomaly.gradeChanged`·`alert.created`는 이 저장소 안에 `battery.latest.score`를 사후에 바꾸는 코드가 아직 없어 **매초 같은 값을 반복 push하는 휴면 상태**다(AI 추론 연동 후 살아난다) — 이는 버그가 아니라 현재 범위의 자연스러운 결과다. `relay.autoCut`은 **구현됨(문턱 미설정이라 휴면)**(B3 완료, §4 C1 참조), `diagnosis.progress`/`.done`/`.aborted`는 여전히 미발신 | **구현됨(부분 휴면)** — 잔여 `diagnosis.*`(→ F21 안전 프로필) |
 | 에지 명령 경로 | `backend/src/device/port.ts`(`DeviceCommandPort` 인터페이스, 메서드 4개) + `backend/src/device/logging.ts`(로깅 스텁 — 콘솔에만 남기고 실제 전송 없음) + `backend/src/kafka.ts`(version 1 wire contract·Zod 검증·파티션 키). `SESSION_ENDED`도 `batteryId`를 payload·파티션 키에 포함하도록 계약을 고정했다. `battery-events` 발행을 실제로 수행하는 Kafka 구현체는 인프라 인계(`docs/handover/infra-implementations.md` 2부) — dual-write outbox 배선은 미구현 | **wire contract + DeviceCommandPort + 로그 스텁 / Kafka 구현체 대기** (→ B4) |
-| 백엔드 DB 도메인 provider·Consumer·TimescaleDB | `backend/migrations/000_identity.sql`~`006_diagnosis_progress_snapshot.sql`의 도메인 스키마와 `postgres.ts` provider가 있다. Kafka Consumer·시계열 적재·Timescale 실측은 아직 별도 담당 범위이며, `DATA_MODE=postgres`는 스키마 확인 후 실제 DB provider를 연다. `AUTH_MODE=betterauth`의 WS 인증은 여전히 보류되고, WS upgrade가 `DATA_MODE`를 별도로 검사하지 않는 갭은 남아 있다 | **도메인 provider 구현 / Consumer·Timescale·WS 인증 미착수** |
+| 백엔드 DB 도메인 provider·Consumer·TimescaleDB | `backend/migrations/000_identity.sql`~`007_telemetry_raw_payload.sql`, `postgres.ts`, `telemetryConsumer.ts`. Raw Consumer는 session tagging·raw payload·단조 latest·수동 offset commit·프레임별 Fail-Safe hook을 구현했고, `TEST_DATABASE_URL`이 없으면 실 DB 계약 테스트는 skip한다. Timescale 실측과 anomaly Consumer는 별도다. `AUTH_MODE=betterauth`의 WS 인증은 여전히 보류되고, WS upgrade가 `DATA_MODE`를 별도로 검사하지 않는 갭은 남아 있다 | **Raw Consumer 구현 / 실 Kafka·DB 인수 검증 대기** |
 | 알림 발송 (카카오·SMS·메일) | 채널 ON/OFF 토글과 policy 응답만 있고(`server.ts:405`·`:409`), **실제로 메시지를 보내는 코드는 `backend/src`에 없다** | **보류(의도적)** — 토글 현행 유지, 추가 작업 없음 |
 | AI 로컬 추론 프로세스 | 코드 없음. `ai/` 디렉터리도 없다. 학습(Colab)·체크포인트 반출 절차·추론 프로세스 모두 미착수 | 미착수 — **별도 담당자** |
 | 로컬 실행 패키징 | **C8 완료(2026-08-25)** — 단일 오리진(`:3005`), `start-local.bat`(Windows, 수동 실행), `docs/local_run.md`. memory 모드 한정(Kafka·PostgreSQL·추론은 별도) | 완료 (memory 모드) |
 | 에지 소프트웨어 | `edge/bw150/`에 BW150 HID 로거·탐지·BLE 프로브(914줄)만 있고, 센서·릴레이·Kafka 프로듀서 구현은 없음 | 부분 구현 (BW150 한정) |
 | AI 소프트웨어 | 모델 설계는 있으나 `ai/` 디렉터리, Colab 노트북, 학습·추론·Kafka 연동 구현은 없음 | 미착수 |
-| 프론트엔드 | [`frontend/src/`](../frontend/src/)의 Vite + React + TypeScript strict 앱, v3 사용자 15·관리자 6 라우트, 계약형 API/WS 계층, MSW 시나리오, `npm run dev:real` 데모 경로. WS 이벤트 11종 핸들러 중 **9종이 서버 발신을 실제로 수신**(C1 8종 + B3의 `relay.autoCut`), 잔여 `diagnosis.*` 2종은 F21이 fail-closed라 도달 불가 | 부분 구현 / Consumer·production WS 인증 미착수 |
+| 프론트엔드 | [`frontend/src/`](../frontend/src/)의 Vite + React + TypeScript strict 앱, v3 사용자 15·관리자 6 라우트, 계약형 API/WS 계층, MSW 시나리오, `npm run dev:real` 데모 경로. WS 이벤트 11종 핸들러 중 **9종이 서버 발신을 실제로 수신**(C1 8종 + B3의 `relay.autoCut`), 잔여 `diagnosis.*` 2종은 F21이 fail-closed라 도달 불가 | 부분 구현 / production WS 인증 미착수 |
 | 프론트엔드 실행 기반 | `frontend/package.json`, React Router, Query, RHF/Zod, 토큰 CSS, 공용 UI, Vitest/RTL/Playwright. **Vitest 44건·Playwright 28건·`tsc --noEmit` 통과**(2026-08-25 실행) | 구현됨 |
 | 미구현 REST·화면 | **C3 완료(2026-08-25)**: `POST /api/account/email-availability`, `POST /api/exports`+`GET /api/exports/{id}`+`GET /api/exports/{id}/download`(QUEUED→READY 비동기 잡, 서명·시한부 다운로드 URL, 멱등성·소유권 검증까지 실측 완료). **C4 완료(2026-08-25)**: `GET`/`PATCH /api/settings/voice-alert` + 설정 화면 새 탭. 남은 것은 `GET /api/trends/export.pdf`(503 스텁 — PDF 생성에 새 의존성이 필요해 이번 라운드는 범위 밖으로 확정) | 부분 구현 — 잔여 `export.pdf`(범위 밖 확정) |
 | 모드 1 하드웨어 | KiCad 회로 파일, [`docs/hardware/mode1_backend_spec.md`](hardware/mode1_backend_spec.md), 조립 안내서 | 문서·설계 있음, 실물 검증 전 |
@@ -108,10 +117,10 @@ v3 프로토타입과 정본 문서에는 모드 1/2, 대표 온도 최댓값, s
 |---|---|---|
 | Phase 1 인프라·백엔드 기반 | 백엔드 초기화·인증 골격만 완료 | 부분 구현. 로컬 Kafka·PostgreSQL/TimescaleDB 미착수. **EC2 항목은 삭제**(로컬 구성), **Better Auth 실인증은 보류** |
 | Phase 2 에지 수집 | 센서·100ms 폴링·릴레이·음성·프로듀서 | 미착수 (BW150 도구만 존재) |
-| Phase 3 스트리밍 | Consumer·세션 태깅·적재·오프셋 | 미착수 |
+| Phase 3 스트리밍 | Consumer·세션 태깅·적재·오프셋 | Raw Consumer·세션 태깅·적재·오프셋 구현 / 실 Kafka·Timescale 인수 및 anomaly Consumer 대기 |
 | Phase 4 AI | 데이터셋·특징·AE·Informer·추론 | 미착수. **추론이 Colab에서 호스트 PC로 내려왔고 별도 담당자 몫** |
 | Phase 5 웹 | React 초기화·라우팅·화면·관리자 | 부분 구현. v3 화면·계약 계층·mock QA·localhost demo REST 연결 완료. **WS 서버 발신이 1/11종 → 8/11종으로 확장**(C1, 2026-08-25)됐으나 잔여 2종은 각각 B3·F21 안전 프로필 선행. production DB provider 통합(B1)은 구현 완료, 실 DB 인수 검증 대기 |
-| Phase 6 알림·차단 | 카카오·Fail-Safe·음성 설정 | **카카오는 보류(의도적).** Fail-Safe는 판정 코드 자체가 없고, 음성 설정은 API·화면 모두 없음 — 이 둘은 미착수 |
+| Phase 6 알림·차단 | 카카오·Fail-Safe·음성 설정 | **카카오는 보류(의도적).** Fail-Safe 판정·구독 배선은 구현됐고 실측 문턱이 대기 중이며, 음성 설정은 API·화면 모두 없음 |
 | Phase 7 통합·**로컬 실행 패키징** | E2E·시나리오·실행 묶기 | **로컬 실행 패키징은 C8로 완료(2026-08-25)**. **AWS 배포 항목은 삭제**(클라우드 미사용). 프론트 단독 E2E(Playwright 29건, C8에서 1건 추가)는 동작 |
 
 세부 체크리스트는 [`PLAN.md` §8 개발 로드맵](../PLAN.md#8-개발-로드맵)을 기준으로 갱신한다. **담당자별 실행 목록은 [「남은 작업과 담당 경계」](#남은-작업과-담당-경계)를 본다.**
@@ -178,18 +187,18 @@ Timescale 적재, 물리 Fail-Safe는 여전히 별도 범위다.
 | # | 항목 | 완료 판정 |
 |---|---|---|
 | A1 | 호스트 PC에 Kafka 설치·토픽 3개 생성, LAN 한정 PLAINTEXT | 에지·추론·백엔드가 LAN에서 접속 성공 |
-| A2 | `battery-raw-metrics` Consumer → `telemetry_metric` 적재 | 에지 발행분이 테이블에 초 단위 지연으로 쌓임 |
+| A2 | `battery-raw-metrics` Consumer → `telemetry_metric` 적재 | version-1 frame이 session tagging·raw payload와 함께 테이블에 초 단위 지연으로 쌓임 |
 | A3 | TimescaleDB 하이퍼테이블·압축·보존정책 (`telemetry_metric`) | 100ms × 다중 세션 부하에서 조회 지연 확인 |
 | A4 | `battery-anomaly-alerts`(추론 결과) Consumer | 이상점수·AE/Informer 개별 점수·파생 온도가 적재됨 |
-| A5 | Consumer 오프셋·재처리·중복 방지 | 재시작 후 유실·중복 없음 |
+| A5 | Consumer 오프셋·재처리·중복 방지 | DB transaction 이후에만 offset commit, `(device_id, measured_at)` replay 무해 |
 
 > ⚠️ **`advertised.listeners`를 `localhost`로 두면 라즈베리파이가 못 붙는다.** 브로커가 클라이언트에게 자기 주소를 되돌려주는 값이라, `localhost`면 에지가 자기 자신에게 접속을 시도하며 조용히 실패한다. 호스트의 LAN IP로 잡는다.
 
-> **✅ A2~A5에 필요한 스키마와 진단 진행 스냅샷이 마이그레이션에 반영됐다** — 추론 결과 적재 테이블, `age_ms`·`temp_points`·`mode`·`soc_basis`, TimescaleDB 하이퍼테이블, 진단기(`device`) 테이블, 중복 방지 키, `battery_asset.memo`, `diagnosis.progress_snapshot`이 `backend/migrations/002`~`006`에 있다. A2~A5의 Consumer·provider 구현은 여전히 남아 있으며, 결정 기록은 [`docs/handover/schema-open-questions.md`](handover/schema-open-questions.md)다.
+> **✅ Raw A2/A5 구현에 필요한 스키마가 반영됐다** — 추론 결과 적재 테이블, `age_ms`·`temp_points`·`mode`·`soc_basis`, TimescaleDB 하이퍼테이블, 진단기(`device`) 테이블, 중복 방지 키, `battery_asset.memo`, `diagnosis.progress_snapshot`, `telemetry_metric.raw_payload`가 `backend/migrations/002`~`007`에 있다. 실 Kafka·PostgreSQL/Timescale 인수 검증과 anomaly Consumer는 남아 있으며, 결정 기록은 [`docs/handover/schema-open-questions.md`](handover/schema-open-questions.md)다.
 
-> ✅ **마이그레이션 실행 선행 문제는 해소됐다** — `000_identity.sql`이 `"user"` 테이블과 데모 seed를 먼저 만들고, `001`~`006`이 파일명 순서대로 적용된다. 실행기는 [`docs/handover/infra-implementations.md` §3-1·§4](handover/infra-implementations.md)를 따른다.
+> ✅ **마이그레이션 실행 선행 문제는 해소됐다** — `000_identity.sql`이 `"user"` 테이블과 데모 seed를 먼저 만들고, `001`~`007`이 파일명 순서대로 적용된다. 실행기는 [`docs/handover/infra-implementations.md` §3-1·§4](handover/infra-implementations.md)를 따른다.
 
-> 스키마의 정본은 `backend/migrations/000_identity.sql`~`006_diagnosis_progress_snapshot.sql`이다. `001`의 기존 8개 테이블과 `002`~`006`의 추가 테이블·컬럼은 `store.ts` 타입과 완전한 1:1이 아니므로, **스키마를 바꾸면 `store.ts` 타입도 같이 바꾸고 반드시 합의 후 변경한다.**
+> 스키마의 정본은 `backend/migrations/000_identity.sql`~`007_telemetry_raw_payload.sql`이다. `001`의 기존 8개 테이블과 `002`~`007`의 추가 테이블·컬럼은 `store.ts` 타입과 완전한 1:1이 아니므로, **스키마를 바꾸면 `store.ts` 타입도 같이 바꾸고 반드시 합의 후 변경한다.**
 
 ### A-2. AI 담당
 
@@ -224,21 +233,22 @@ Timescale 적재, 물리 Fail-Safe는 여전히 별도 범위다.
 **2단계 산출물(2026-09-14) — 정본은 `docs/handover/infra-implementations.md` 1부**:
 - `backend/src/store/postgres.ts`에 `createPostgresStore(pool: pg.Pool): CellGuardStore` 구현. 자산·세션·릴레이·진단·건강 집계·텔레메트리 CSV 조회와 멱등성/도메인 오류 변환을 포함한다.
 - 상태 변경과 감사 로그 6개 경로를 한 트랜잭션으로 처리하고, `23505` 전역 세션/진단 unique 위반을 기존 도메인 코드로 변환한다.
-- `backend/migrations/006_diagnosis_progress_snapshot.sql`을 추가해 진단 phase 경계 스냅샷을 저장한다. 기존 `000`~`005`는 수정하지 않았다.
+- `backend/migrations/006_diagnosis_progress_snapshot.sql`을 추가해 진단 phase 경계 스냅샷을 저장하고, `007_telemetry_raw_payload.sql`로 edge raw payload 보존 컬럼을 추가했다. 기존 `000`~`006`은 수정하지 않았다.
 - 남은 인수 조건은 `TEST_DATABASE_URL`을 가진 PostgreSQL에서 migrations 적용 후 계약·동시성 테스트와 실제 `DATA_MODE=postgres` 재시작 시나리오를 수행하는 것이다.
 
-### B2. `battery_id` 세션 태깅 — **명세 완료(2026-08-27) / Consumer 구현 인계**
+### B2. `battery_id` 세션 태깅 — **구현 완료(2026-09-14) / 실 인프라 인수 검증 대기**
 
 - **현재 상태**: 에지는 `device_id`만 싣고 `battery_id`를 모른다(CLAUDE.md 센서 스키마). 적재 시점에 백엔드 세션 정보로 귀속해야 한다.
-- **완료된 것(백엔드, Task 14)**: 태깅 규칙 명세 — [`docs/handover/b2-session-tagging.md`](handover/b2-session-tagging.md). 활성 세션 조회 방법(`device_id`+`status='ACTIVE'` 조회, 세션 시작/종료 시 무효화하는 캐시), 활성 세션이 없을 때 `battery_id=null`로 적재(버리지 않음), 세션 전환 경계 프레임은 **적재 시점의 활성 세션**을 기준으로 판정(에지 `measured_at`을 신뢰하지 않음, 시계 미동기화 대비), 완료 판정 SQL 2건을 포함해 규칙 5개를 실제 값으로 확정했다.
-- **남은 일(인프라, Consumer 구현)**: 위 문서의 규칙을 Kafka Consumer 코드로 옮긴다. 캐시 구현 방안(DB WAL/CDC 또는 `battery-events` 토픽 구독)은 문서 §2.2에서 선택지만 제시했으므로 인프라 담당자가 확정한다.
+- **완료된 것(백엔드)**: [`docs/handover/b2-session-tagging.md`](handover/b2-session-tagging.md)의 규칙을 `telemetryConsumer.ts`로 구현했다. 각 프레임의 처리 시점에 `device_id` + `status='ACTIVE'`를 DB에서 조회하고, 활성 세션이 없으면 `session_id`·`battery_id`를 `null`로 보존한다. edge payload의 backend ID는 받지 않는다.
+- **멱등성·최신값**: `(device_id, measured_at)` 자연키 충돌은 `on conflict do nothing`으로 처리하고, `battery_latest`는 `excluded.measured_at > battery_latest.measured_at` 조건에서만 갱신한다. DB transaction과 safety hook이 끝난 뒤에만 Kafka offset을 수동 commit한다.
+- **남은 일**: `TEST_DATABASE_URL`을 가진 PostgreSQL/Timescale과 실제 Kafka에서 migration 000~007 적용 후 세션 경계·재시작·부하 인수를 수행한다.
 - **완료 판정**: 세션 시작→종료 사이 프레임의 `battery_id`가 100% 채워지고, 세션 밖 프레임이 잘못 귀속되지 않음(문서 §5의 SQL 검증 2건).
 
-### B3. Fail-Safe 판정 주체 — **판정 엔진 완료(2026-08-27) / 문턱 실측·구독 배선 대기**
+### B3. Fail-Safe 판정 주체 — **판정 엔진·구독 배선 완료(2026-09-14) / 문턱 실측 대기**
 
 - **완료된 것(백엔드)**: 순수 판정 함수 `judgeFailsafe`(`backend/src/failsafe.ts`) — 절대온도(IR·접촉) → 가스 → 압력 상대상승률 → 온도 상승률 순으로 검사하고, 하드웨어 프로필(`MODE1_EXTERNAL_CELL_V1`/`COMBINED_EXISTING_PARTS_V1`)별로 실재하는 센서만 활성화한다. 이걸 저장소·에지·WS에 잇는 `evaluateFailsafe`(`backend/src/failsafeRunner.ts`) — 인터락 중복 방지(이미 걸려 있으면 재차단 안 함) → `engageFailsafe`(저장소, 릴레이 전이+`RELAY_AUTO_CUT` 감사 원자적) → `devicePort.relayCut`(에지 통보) → `broadcastAutoCut`(WS `relay.autoCut` 푸시) 순서로 실행하며, `backend/src/server.ts`가 `runFailsafe(batteryId, profile, sample, thresholds)`로 이 전체를 노출한다.
 - **⚠️ 문턱값이 전부 `0`이라 현재 어떤 계층도 차단하지 않는다.** `failsafe.ts`의 `UNSET_THRESHOLDS`가 미설정 sentinel이며, `judgeFailsafe`는 `threshold > 0`일 때만 그 계층을 활성화한다. 하드웨어 실측(`mode1_backend_spec.md` §13 H8, `mode2_powerbank_diagnosis_spec.md` §8 H2) 전까지 의도된 휴면 상태다.
-- **⚠️ 텔레메트리 구독 배선은 아직 없다** — `runFailsafe`를 프레임마다 부르는 호출부는 Kafka Consumer가 생긴 뒤에야 만들어진다(지금은 순수 로직만 완성되어 있고 호출부가 없다). 정본·인계 세부(TOCTOU 직렬화 요구사항, WS 실패 로깅 요구사항 포함)는 `docs/handover/infra-implementations.md` 2부 §14.
+- **구독 배선**: PostgreSQL + `KAFKA_CONSUMER_ENABLED=true`일 때 Consumer가 frame별 `runFailsafe` hook을 호출한다. 배터리별 Promise queue로 TOCTOU 경합을 직렬화하고, `relay.autoCut` WS broadcast 실패는 로그로 남긴다. memory/test 모드에서는 Kafka 연결을 만들지 않는다.
 - **완료 판정**: 문턱값 설정 후 — 조건 충족 시 모달이 뜨고, 릴레이가 `OPEN`으로 남고, 재인증·사유 없이는 복구되지 않음(자동 복구 없음).
 
 ### B4. 릴레이 차단 → 에지 실제 전달 — **포트 완료(2026-08-27) / Kafka 구현체 인계**
@@ -266,7 +276,7 @@ Timescale 적재, 물리 Fail-Safe는 여전히 별도 범위다.
 | `diagnosis.progress`/`.done`/`.aborted` | `:297` | `:1633` | ✗ |
 | `resync.required` | `:309` | `:1638` | ✓ |
 
-- **`relay.autoCut`은 2026-08-25 시점에는 시도하지 않았으나, B3(Fail-Safe 판정 로직)가 2026-08-27에 완료돼 지금은 배선돼 있다.** `judgeFailsafe`·`evaluateFailsafe`·`runFailsafe`(§3 B3 참조)가 조건 충족 시 이 이벤트를 실제로 발신한다. 단 **문턱값이 전부 `0`(미설정)이라 실행 경로는 있어도 실제로 트리거되지는 않는 휴면 상태**다 — 텔레메트리 구독 배선(Consumer)과 하드웨어 실측 문턱값이 갖춰져야 관찰 가능하다.
+- **`relay.autoCut`은 2026-08-25 시점에는 시도하지 않았으나, B3(Fail-Safe 판정 로직)가 2026-08-27에 완료돼 지금은 배선돼 있다.** `judgeFailsafe`·`evaluateFailsafe`·`runFailsafe`(§3 B3 참조)가 조건 충족 시 이 이벤트를 실제로 발신한다. 단 **문턱값이 전부 `0`(미설정)이라 실행 경로는 있어도 실제로 트리거되지는 않는 휴면 상태**다 — Raw Consumer 구독 배선은 완료됐고 하드웨어 실측 문턱값이 갖춰져야 관찰 가능하다.
 - **`diagnosis.progress`/`.done`/`.aborted`도 시도하지 않았다** — `store.ts`의 `F21_THRESHOLDS.configured`가 하드코딩 `false`라 `startDiagnosis`가 항상 `409 SAFETY_PROFILE_NOT_READY`를 던지고, 진단 진행을 시뮬레이션할 도달 가능한 코드 경로가 없다. 이 플래그를 켜는 작업(§8 H2 등 안전 문턱 확정)이 선행돼야 한다.
 - **`metrics.tick`은 100ms 원본을 그대로 흘리지 않는다.** 서버가 **1초 단위로 다운샘플링**해 푸시한다(`:1643`). 페이로드는 `GET /api/dashboard`의 `metrics`와 **동일 구조**(각 지표 `{ value, status }` + `measuredAt`).
 - **`relay.autoCut`을 `relay.changed`에 섞지 않는다**(`:1646`) — 사용자 차단과 구분이 안 된다.
@@ -283,7 +293,7 @@ Timescale 적재, 물리 Fail-Safe는 여전히 별도 범위다.
 - `GET /health`가 `{ status, auth, data }`를 반환하도록 바뀜 — 지금 어떤 조합으로 떠 있는지 즉시 보인다.
 - `/api/*` 도메인 게이트는 **`DATA_MODE`만 본다**: `memory`면 인메모리
   provider를, `postgres`면 PostgreSQL provider를 사용한다. PostgreSQL은
-  listen 전 migrations `000`~`006` 핵심 스키마 검사를 통과해야 하며, 실패 시
+  listen 전 migrations `000`~`007` 핵심 스키마 검사를 통과해야 하며, 실패 시
   `RUNTIME_NOT_READY`로 요청을 열지 않고 기동을 중단한다.
 
 `DATA_MODE=postgres`는 이제 실제 DB provider를 사용한다. 스키마가 없거나
@@ -352,9 +362,9 @@ Timescale 적재, 물리 Fail-Safe는 여전히 별도 범위다.
 ### C8. 로컬 실행 패키징 (구 Phase 7 배포) — **완료(2026-08-25), 실측 범위는 memory 모드 한정**
 
 정본은 `docs/local_run.md`. AWS 배포는 삭제됐고, 기본 시연은
-`AUTH_MODE=demo DATA_MODE=memory`로 한다. PostgreSQL provider는 구현됐지만
-DB 준비와 실측은 별도 인수 환경이 필요하며, Kafka Consumer·추론 프로세스는
-아직 별도 담당자 몫이다.
+`AUTH_MODE=demo DATA_MODE=memory`로 한다. PostgreSQL provider와 Raw Kafka
+Consumer는 구현됐지만, DB/Kafka 실측 인수와 AI 추론 프로세스는 별도 인수
+환경·담당자 몫이다.
 
 - **호스트 PC는 Windows로 확인됐다(2026-08-25)** — 이 사실을 CLAUDE.md와 개인 메모리에 남겼다. 이하 전부 Windows 기준.
 - **단일 오리진**: `backend/src/server.ts`에 `/api/*` 명시적 JSON 404(기존엔 Express 기본 HTML 404로 새고 있었음) + `express.static(frontend/dist)` + SPA 폴백(`index.html`)을 추가. `frontend/dist`가 없으면(백엔드 단독 dev 세션) 조용히 스킵된다.
@@ -385,7 +395,7 @@ DB 준비와 실측은 별도 인수 환경이 필요하며, Kafka Consumer·추
 1. ~~**B군 4건의 담당을 문서로 확정한다**~~ — 코드보다 먼저. 특히 B3(Fail-Safe)는 넘기지 않는다.
 2. ~~**C1 WebSocket 발신**~~ — **완료(2026-08-25).** 8/11종 발신, 링버퍼 재전송 포함. 잔여는 `relay.autoCut`(B3 선행)·`diagnosis.*`(F21 안전 프로필 선행).
 3. ~~**C2 `AUTH_MODE`/`DATA_MODE` 분리**~~ — **완료(2026-08-25), PostgreSQL provider 배선 보강(2026-09-14).** WS upgrade가 `DATA_MODE`를 별도로 보지 않는 갭은 남아 있다.
-4. ~~**B1 리포지토리 교체**~~ — **구현 완료(2026-09-14).** `TEST_DATABASE_URL`을 가진 DB에서 migrations `000`~`006` 적용 후 계약·동시성·재시작 인수 검증을 남겼다.
+4. ~~**B1 리포지토리 교체**~~ — **구현 완료(2026-09-14).** `TEST_DATABASE_URL`을 가진 DB에서 migrations `000`~`007` 적용 후 계약·동시성·재시작 인수 검증을 남겼다.
 5. **B3·B4 안전 경로** — A2/A4가 데이터를 주기 시작한 뒤. B3이 끝나면 C1의 `relay.autoCut`도 같이 닫힌다.
 6. ~~**C3 REST 미구현**~~ — **완료(2026-08-25).** `email-availability`·`exports` 계열 구현·실측 완료. `export.pdf`는 범위 밖 확정으로 남김.
 7. ~~**C8 로컬 실행 패키징**~~ — **완료(2026-08-25).** memory 모드 한정, Windows 배치 스크립트는 실제 Windows PC에서 미검증.

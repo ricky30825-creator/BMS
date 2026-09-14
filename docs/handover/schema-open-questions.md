@@ -6,7 +6,7 @@
 
 ## 0. 이 문서를 쓰는 법
 
-`backend/migrations/000_identity.sql`~`006_diagnosis_progress_snapshot.sql`에는 현재 `"user"`를 포함한 14개 테이블과 시계열 제약, 진단 progress 스냅샷 컬럼이 있다. `001_app_auth.sql`의 기존 8개 테이블은 `backend/src/store/types.ts`의 도메인 타입에 대응하며, 이 문서의 Q1~Q6은 그 뒤에 추가된 스키마 결정을 기록한다.
+`backend/migrations/000_identity.sql`~`007_telemetry_raw_payload.sql`에는 현재 `"user"`를 포함한 14개 테이블과 시계열 제약, 진단 progress 스냅샷, raw payload 보존 컬럼이 있다. `001_app_auth.sql`의 기존 8개 테이블은 `backend/src/store/types.ts`의 도메인 타입에 대응하며, 이 문서의 Q1~Q6은 그 뒤에 추가된 스키마 결정을 기록한다.
 
 > **⚠️ "1:1로 맞다"는 서술은 과장이다.** 컬럼과 타입이 정확히 일치하는 것은 `measurement_session` ↔ `DemoSession` 하나뿐이다. 어긋나는 곳: `telemetry_metric`·`idempotency_key`에 대응하는 행 타입이 아예 없고, `DemoBattery.latest`(8필드, `score` 포함)·`mode1Health`(6필드)·`battery_asset.capacity_mah`·`relay_state.reason_params`·`diagnosis.completed_at`·`app_user_profile.is_active`·`audit_log.ip_address`/`user_agent`가 한쪽에만 있다. 그중 **저장할 곳이 아예 없어 구현을 막는 것 하나**는 Q6으로 따로 뺐다.
 

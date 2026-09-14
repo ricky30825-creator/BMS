@@ -8,7 +8,7 @@ import cors from "cors";
 import express, { type NextFunction, type Request, type Response } from "express";
 import { fromNodeHeaders, toNodeHandler } from "better-auth/node";
 import { auth } from "./auth.js";
-import { corsOrigins, diagnosisAssumedEfficiency, diagnosisS1CPerMin, diagnosisSafetyThresholds, diagnosisTempSlopeMinSamples, diagnosisTempSlopeWindowMs, env } from "./config/env.js";
+import { corsOrigins, diagnosisAssumedEfficiency, diagnosisS1CPerMin, diagnosisSafetyThresholds, diagnosisTempSlopeMinSamples, diagnosisTempSlopeWindowMs, env, kafkaConfig, kafkaConsumerConfig } from "./config/env.js";
 import { applyAbort, stepDiagnosis } from "./diagnosis/runner.js";
 import { demoPasswordMatches, demoUserForToken, issueDemoToken, requireRole, requireSession, revokeDemoToken, setDemoPassword } from "./auth/middleware.js";
 import { resolveDemoUser } from "./demoLogin.js";
@@ -22,7 +22,9 @@ import { createLoggingDeviceCommandPort } from "./device/logging.js";
 import { diagnosisJson as buildDiagnosisJson } from "./diagnosis/routes.js";
 import { evaluateFailsafe } from "./failsafeRunner.js";
 import { measurementPhaseFor } from "./measurementState.js";
-import type { FailsafeSample, FailsafeThresholds, FailsafeVerdict, HardwareProfile } from "./failsafe.js";
+import { UNSET_THRESHOLDS, type FailsafeSample, type FailsafeThresholds, type FailsafeVerdict, type HardwareProfile } from "./failsafe.js";
+import { db } from "./db.js";
+import { createKafkaRawMetricsConsumer, type RawMetricsConsumer } from "./telemetryConsumer.js";
 import {
   abortDiagnosis,
   abortDiagnosisBySystem,
@@ -1338,9 +1340,8 @@ async function broadcastAutoCut(battery: DemoBattery, relay: DemoRelay, triggerC
   }, null, battery.id);
 }
 
-// 텔레메트리 Consumer가 생기면 프레임마다 이 함수를 부른다. 지금은 호출부가
-// 없다(2026-08-27 결정 — 순수 로직만 만들고 구독 배선은 Consumer 담당자 몫).
-// docs/handover/infra-implementations.md가 이 함수를 진입점으로 명시한다.
+// RawMetricsConsumer의 durable-frame callback이 프레임마다 이 함수를 부른다.
+// docs/handover/infra-implementations.md가 이 함수를 Fail-Safe 진입점으로 명시한다.
 export async function runFailsafe(
   batteryId: string,
   profile: HardwareProfile,
@@ -1353,7 +1354,11 @@ export async function runFailsafe(
     relayByBattery,
     engageFailsafe,
     relayCut: (id, code) => devicePort.relayCut(id, code),
-    onAutoCut: (relay, verdict) => { void broadcastAutoCut(battery, relay, verdict.triggerCode); }
+    onAutoCut: (relay, verdict) => {
+      void broadcastAutoCut(battery, relay, verdict.triggerCode).catch((error) => {
+        console.error("[failsafe] relay.autoCut broadcast failed", error);
+      });
+    }
   }, batteryId, profile, sample, thresholds);
 }
 
@@ -1375,12 +1380,41 @@ function listen(): Promise<void> {
 }
 
 let shuttingDown = false;
+let telemetryConsumer: RawMetricsConsumer | null = null;
+
+async function startTelemetryConsumer(): Promise<void> {
+  // Memory mode and test mode must stay independent of broker availability.
+  if (env.DATA_MODE !== "postgres" || env.NODE_ENV === "test" || !kafkaConsumerConfig.enabled) return;
+  if (!kafkaConfig.enabled) {
+    throw new Error("KAFKA_ENABLED must be true when KAFKA_CONSUMER_ENABLED is true");
+  }
+  telemetryConsumer = createKafkaRawMetricsConsumer({
+    db,
+    brokers: kafkaConfig.brokers,
+    clientId: kafkaConfig.clientId,
+    groupId: kafkaConfig.groupId,
+    topic: kafkaConfig.topics.rawMetrics,
+    onDurableFrame: async ({ batteryId, hardwareProfile, safetySample }) => {
+      // Thresholds are intentionally the existing fail-closed sentinel until
+      // hardware measurements establish production values.
+      await runFailsafe(batteryId, hardwareProfile, safetySample, UNSET_THRESHOLDS);
+    },
+  });
+  await telemetryConsumer.start();
+}
+
+async function stopTelemetryConsumer(): Promise<void> {
+  const consumer = telemetryConsumer;
+  telemetryConsumer = null;
+  if (consumer) await consumer.stop();
+}
 
 async function shutdown(signal: string): Promise<void> {
   if (shuttingDown) return;
   shuttingDown = true;
   if (runtimeTicker) clearInterval(runtimeTicker);
   try {
+    await stopTelemetryConsumer();
     await new Promise<void>((resolve, reject) => {
       if (!httpServer.listening) { resolve(); return; }
       httpServer.close((error) => error ? reject(error) : resolve());
@@ -1398,6 +1432,9 @@ process.once("SIGINT", () => { void shutdown("SIGINT"); });
 
 void initializeStore()
   .then(() => {
+    return startTelemetryConsumer();
+  })
+  .then(() => {
     startRuntimeTicker();
     return listen();
   })
@@ -1405,6 +1442,7 @@ void initializeStore()
     console.error("CellGuard backend startup failed", error);
     process.exitCode = 1;
     try {
+      await stopTelemetryConsumer();
       await closeStore();
     } catch (closeError) {
       console.error("CellGuard backend cleanup failed", closeError);

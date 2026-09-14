@@ -10,9 +10,11 @@ const envSchema = z.object({
   DATA_MODE: z.enum(["memory", "postgres"]).default("memory"),
   DATABASE_URL: z.string().min(1),
   DATABASE_SSL: z.enum(["true", "false"]).default("false"),
-  // Kafka is opt-in. These values are configuration only until a producer or
-  // consumer is explicitly created by a later integration step.
+  // Kafka is opt-in. `KAFKA_CONSUMER_ENABLED` is deliberately separate from
+  // the shared Kafka switch so a PostgreSQL process cannot subscribe by
+  // accident.
   KAFKA_ENABLED: z.enum(["true", "false"]).default("false"),
+  KAFKA_CONSUMER_ENABLED: z.enum(["true", "false"]).default("false"),
   KAFKA_BROKERS: z.string().trim().min(1).default("127.0.0.1:9092"),
   KAFKA_CLIENT_ID: z.string().trim().min(1).default("cellguard-backend"),
   KAFKA_GROUP_ID: z.string().trim().min(1).default("cellguard-backend"),
@@ -82,4 +84,8 @@ export const kafkaConfig = Object.freeze({
     anomalyAlerts: env.KAFKA_ANOMALY_ALERTS_TOPIC,
     events: env.KAFKA_EVENTS_TOPIC,
   }),
+});
+
+export const kafkaConsumerConfig = Object.freeze({
+  enabled: env.KAFKA_CONSUMER_ENABLED === "true",
 });

@@ -379,7 +379,7 @@ ADS1115          LAN          battery-anomaly-alerts ◀─ alerts 발행 ─┤
 
 > `battery_asset`, `measurement_session` 관계 테이블은 PostgreSQL(비시계열)에 두고, 시계열 하이퍼테이블은 `battery_id` FK로 참조한다.
 >
-> **⚠️ 위 두 스펙은 "설계"가 아니라 "이미 있는 스키마 위의 남은 작업"이다.** 실제 컬럼·제약의 정본은 `backend/migrations/000_identity.sql`~`006_diagnosis_progress_snapshot.sql`이며, 기존 8개 테이블에 더해 `002`~`005`가 추론 결과·Raw 보조 필드·하이퍼테이블·진단기·중복 방지·`battery_asset.memo`를, `006`이 진단 phase 경계 스냅샷을 반영했다. **이 문서가 "시계열 하이퍼테이블"이라 부르는 테이블의 실제 이름은 `telemetry_metric`이다.** 과거 결정 기록은 `docs/handover/schema-open-questions.md`에서 확인하고, 남은 작업은 Consumer 구현과 실제 인프라 검증이다.
+> **⚠️ 위 두 스펙은 "설계"가 아니라 "이미 있는 스키마 위의 남은 작업"이다.** 실제 컬럼·제약의 정본은 `backend/migrations/000_identity.sql`~`007_telemetry_raw_payload.sql`이며, 기존 8개 테이블에 더해 `002`~`005`가 추론 결과·Raw 보조 필드·하이퍼테이블·진단기·중복 방지·`battery_asset.memo`를, `006`이 진단 phase 경계 스냅샷을, `007`이 raw wire payload 보존을 반영했다. **이 문서가 "시계열 하이퍼테이블"이라 부르는 테이블의 실제 이름은 `telemetry_metric`이다.** 과거 결정 기록은 `docs/handover/schema-open-questions.md`에서 확인한다.
 
 ### AI 모델 (4개)
 | ID | 스펙 |
@@ -619,7 +619,7 @@ ADS1115          LAN          battery-anomaly-alerts ◀─ alerts 발행 ─┤
 > | 5 | `docs/handover/schema-open-questions.md` | **과거 미결정 6건의 결정 기록.** 해당 DDL은 `backend/migrations/002`~`005`에 반영됐고, Consumer 착수 시 실제 컬럼·제약과 함께 확인한다 |
 > | 6 | `docs/verification_matrix.md` | 무엇을 어떻게 검증하면 끝난 것으로 치는지. 백엔드 typecheck·빌드·`/health`·테스트 명령이 여기 있다 |
 >
-> ✅ **DB는 `npm run db:migrate` 하나로 올라간다(2026-08-28).** `backend/migrations/000`~`006`이 파일명 순서대로 적용된다. 예전에 `psql -f 001_app_auth.sql`이 첫 구문에서 멈추던 문제(`"user"` 테이블 DDL 부재)는 `000_identity.sql`이 해결했다. **`psql -f`로 001만 직접 돌리지 마라** — 순서가 있는 7개 파일이다. `npm run auth:generate`·`auth:migrate`는 CLI 패키지가 없어 실패하니 부르지 않는다(Better Auth는 지금 미사용).
+> ✅ **DB는 `npm run db:migrate` 하나로 올라간다(2026-08-28).** `backend/migrations/000`~`007`이 파일명 순서대로 적용된다. 예전에 `psql -f 001_app_auth.sql`이 첫 구문에서 멈추던 문제(`"user"` 테이블 DDL 부재)는 `000_identity.sql`이 해결했다. **`psql -f`로 001만 직접 돌리지 마라** — 순서가 있는 8개 파일이다. `npm run auth:generate`·`auth:migrate`는 CLI 패키지가 없어 실패하니 부르지 않는다(Better Auth는 지금 미사용).
 >
 > 세부 계약이 필요해지면 — 에러 코드는 `docs/backend_contract.md` §1.10, 원자성 요구는 §3.4, 에지 프레임 정의와 `battery-events`의 code+params는 `docs/hardware/mode1_backend_spec.md` §9·§11이다.
 >
@@ -631,7 +631,7 @@ ADS1115          LAN          battery-anomaly-alerts ◀─ alerts 발행 ─┤
 
 - [ ] 호스트 PC에 Kafka 설치·토픽 3개 생성, LAN 한정 PLAINTEXT 구성 (S-BYYPVQ) — `advertised.listeners`를 호스트 LAN IP로 잡아야 에지가 붙는다
 - [ ] 브로커·DB 포트를 방화벽에서 LAN으로 제한
-- [ ] PostgreSQL + TimescaleDB **설치** (S-NFEETD) — 설치만 남았다. ⚠️ **스키마를 새로 설계하지 않는다.** `backend/migrations/`의 7개 파일이 테이블 14개와 진단 progress 스냅샷 컬럼을 정의하고 `npm run db:migrate`가 적용한다. 하이퍼테이블 전환·보존정책(60일)은 `005_timescale.sql`에 이미 들어 있고, PK를 `(device_id, measured_at)`로 바꿔 `create_hypertable` 거부 문제도 해결됐다. 압축 정책은 재처리 창과 충돌해 **일부러 걸지 않았다**(되살리는 두 줄이 `005` 주석에 있다). 결정 근거는 `docs/handover/schema-open-questions.md`
+- [ ] PostgreSQL + TimescaleDB **설치** (S-NFEETD) — 설치만 남았다. ⚠️ **스키마를 새로 설계하지 않는다.** `backend/migrations/`의 8개 파일이 테이블 14개와 진단 progress 스냅샷·텔레메트리 raw payload 컬럼을 정의하고 `npm run db:migrate`가 적용한다. 하이퍼테이블 전환·보존정책(60일)은 `005_timescale.sql`에 이미 들어 있고, PK를 `(device_id, measured_at)`로 바꿔 `create_hypertable` 거부 문제도 해결됐다. 압축 정책은 재처리 창과 충돌해 **일부러 걸지 않았다**(되살리는 두 줄이 `005` 주석에 있다). 결정 근거는 `docs/handover/schema-open-questions.md`
 - [x] 백엔드 프로젝트 초기화 (Node.js + TypeScript + Express)
 - [x] Better Auth 기반 사용자 인증 골격 구현 (R-HBLCDS — F-SDSVND, F-TFJKKF, F-HUYIXC)
 - [ ] ~~Better Auth 실인증 전환~~ — **보류(2026-08-25 결정).** 코드는 그대로 두고 `AUTH_MODE=demo`로 꺼둔다. 나중에 환경변수만 바꿔 켠다. 데모 계정에 ADMIN이 있어 RBAC·감사로그 시연에는 지장이 없다
@@ -644,10 +644,10 @@ ADS1115          LAN          battery-anomaly-alerts ◀─ alerts 발행 ─┤
 - [ ] 센서 JSON 스키마 정의 및 Kafka 프로듀서 발행 (S-IBQMVJ, S-TNASAB) — **부분 완료: `backend/src/kafka.ts`에 version 1 Zod wire contract와 파티션 키 규칙을 고정. 실제 에지 producer는 미착수**
 
 ### Phase 3 — 스트리밍 파이프라인
-- [ ] Kafka Consumer 구현 → `telemetry_metric` 적재 (S-JGLAAI)
-- [ ] 배터리 자산/측정 세션 테이블 및 API (S-BATAST, S-MSESSN) — **부분 완료: DDL(`battery_asset`·`measurement_session`·`device`)과 REST 라우트, PostgreSQL `CellGuardStore` 구현이 있다.** 활성 세션은 **설비 전체 1개**이며 `uq_active_session_global`이 강제한다(2026-08-28 확정). 남은 것은 Kafka Consumer 세션 태깅과 `TEST_DATABASE_URL`을 이용한 실제 DB 인수 검증이다.
-- [ ] Consumer 적재 시 active 세션 조회 → `battery_id` 태깅 (S-MSESSN) — 규칙 정본 `docs/handover/b2-session-tagging.md`
-- [ ] 오프셋 커밋 및 재처리 전략 (S-SBCSJU)
+- [x] Kafka Consumer 구현 → `telemetry_metric` 적재 (S-JGLAAI) — `backend/src/telemetryConsumer.ts`가 version-1 raw frame·`raw_payload`를 transaction으로 적재한다. 실 Kafka/Timescale 인수는 별도다.
+- [ ] 배터리 자산/측정 세션 테이블 및 API (S-BATAST, S-MSESSN) — **부분 완료: DDL(`battery_asset`·`measurement_session`·`device`)과 REST 라우트, PostgreSQL `CellGuardStore` 구현이 있다.** 활성 세션은 **설비 전체 1개**이며 `uq_active_session_global`이 강제한다(2026-08-28 확정). 남은 것은 `TEST_DATABASE_URL`을 이용한 실제 DB 인수 검증이다.
+- [x] Consumer 적재 시 active 세션 조회 → `battery_id` 태깅 (S-MSESSN) — 처리 시점 DB 조회·세션 밖 `null` 귀속은 `docs/handover/b2-session-tagging.md` 정본과 일치한다.
+- [x] 오프셋 커밋 및 재처리 전략 (S-SBCSJU) — DB transaction + safety hook 뒤 manual commit, `(device_id, measured_at)` replay 무해. DB/Kafka 원자성은 주장하지 않는다.
 - [ ] 대시보드용 조회 뷰 생성 (S-ROGPIB)
 - [ ] 오류/예외 이벤트 기록 (S-MVDKKZ)
 
@@ -673,7 +673,7 @@ ADS1115          LAN          battery-anomaly-alerts ◀─ alerts 발행 ─┤
 ### Phase 6 — 알림 & 차단
 - [ ] ~~카카오톡 알림 연동 (S-EOCLMX, S-UZDNPT)~~ — **보류(2026-08-25 결정).** 설정 화면의 채널 토글은 **현행 유지**한다: 저장은 되지만 발송은 일어나지 않으며, 화면에 별도 미구현 표시를 추가하지 않는다. ⚠️ 시연에서 "알림이 간다"고 설명하지 않도록 주의
 - [ ] 릴레이/Kill-Switch 제어 API (S-ELAUQJ) — **부분 완료: REST(승인·재인증·사유·멱등성)와 감사 기록은 이미 있다.** 남은 건 그 결정을 실제 에지로 보내는 `DeviceCommandPort`의 Kafka 구현체(`battery-events` 발행) — `docs/handover/infra-implementations.md` 2부
-- [ ] 긴급 차단 자동화 Fail-Safe (S-VMNNAM) — **부분 완료: 판정 엔진(`judgeFailsafe`)과 인터락·에지통보·WS 배선(`runFailsafe`)은 이미 있다.** 남은 것 둘 — ① 하드웨어 실측 문턱값(지금 전부 `0`이라 어떤 계층도 차단하지 않는 휴면 상태) ② **Kafka Consumer가 프레임마다 `runFailsafe`를 부르는 호출부.** ⚠️ 같은 `batteryId`에 대해 동시 호출되면 감사 로그가 중복 오염되므로 **배터리별로 직렬화**해야 한다 — `docs/handover/infra-implementations.md` §14·§14b
+- [ ] 긴급 차단 자동화 Fail-Safe (S-VMNNAM) — **부분 완료: 판정 엔진(`judgeFailsafe`)과 인터락·에지통보·WS 배선(`runFailsafe`), Consumer의 프레임별 callback·배터리별 직렬화가 구현됐다.** 남은 것은 하드웨어 실측 문턱값(지금 전부 `0`이라 어떤 계층도 차단하지 않는 휴면 상태)과 실 Kafka/DB 인수 검증이다 — `docs/handover/infra-implementations.md` §14·§14b
 - [ ] 디바이스 음성 안내 웹 설정 및 백엔드 API (S-VOCALR)
 - [ ] 알림 설정 및 이력 페이지
 

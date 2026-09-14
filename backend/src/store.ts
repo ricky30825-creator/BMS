@@ -33,19 +33,24 @@ export async function initializeStore(): Promise<void> {
   const result = await db.query<{
     table_count: number;
     progress_snapshot: string | null;
+    raw_payload: string | null;
   }>(`
     select
       count(*)::int as table_count,
       (select column_name
        from information_schema.columns
        where table_schema = 'public' and table_name = 'diagnosis'
-         and column_name = 'progress_snapshot') as progress_snapshot
+         and column_name = 'progress_snapshot') as progress_snapshot,
+      (select column_name
+       from information_schema.columns
+       where table_schema = 'public' and table_name = 'telemetry_metric'
+         and column_name = 'raw_payload') as raw_payload
     from information_schema.tables
     where table_schema = 'public' and table_name = any($1::text[])
   `, [REQUIRED_POSTGRES_TABLES]);
   const schema = result.rows[0];
-  if (!schema || Number(schema.table_count) !== REQUIRED_POSTGRES_TABLES.length || !schema.progress_snapshot) {
-    throw new Error("PostgreSQL schema is not ready; run npm run db:migrate");
+  if (!schema || Number(schema.table_count) !== REQUIRED_POSTGRES_TABLES.length || !schema.progress_snapshot || !schema.raw_payload) {
+    throw new Error("PostgreSQL schema is not ready; run npm run db:migrate (including 007_telemetry_raw_payload.sql)");
   }
 }
 

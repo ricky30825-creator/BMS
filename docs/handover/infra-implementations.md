@@ -5,7 +5,9 @@
 > 백엔드가 이미 끝낸 것: 비동기 `CellGuardStore` 인터페이스(`backend/src/store/contract.ts`) + 인메모리 구현체(`backend/src/store/memory.ts`) + 계약 테스트 20건, `DeviceCommandPort` 인터페이스(`backend/src/device/port.ts`) + 로깅 스텁(`backend/src/device/logging.ts`), 순수 `judgeFailsafe` 판정 함수(`backend/src/failsafe.ts`) + 그 저장소/에지/WS 배선(`backend/src/failsafeRunner.ts`, `backend/src/server.ts`).
 > **2026-09-14 상태 갱신:** `CellGuardStore` PostgreSQL 구현체와 `DATA_MODE` 분기,
 > 기동 스키마 검사, DB 없는 환경에서 명확히 skip하는 계약 테스트가 추가됐다.
-> 남은 인계 대상은 Kafka 구현체·Consumer·실 DB 인수 검증이다.
+> **2026-09-14 Raw Consumer 갱신:** `backend/src/telemetryConsumer.ts`가 raw
+> 적재·session tagging·수동 offset commit·프레임별 Fail-Safe callback을 구현했다.
+> 남은 인계 대상은 별도 DeviceCommandPort producer/outbox와 실 Kafka·DB 인수 검증이다.
 
 ---
 
@@ -44,7 +46,7 @@ runStoreContractTests("postgres", async () => createPostgresStore(testPool));
 
 **⚠️ 스키마를 바꾸면 `store/types.ts`도 같이 바뀐다.** 마이그레이션과 타입 정의는 한 쌍이므로, 컬럼을 추가·삭제·이름 변경하기 전에 반드시 백엔드 담당자와 합의한다. 합의 없이 한쪽만 바꾸면 타입은 컴파일되는데 런타임에서 컬럼이 없어 조용히 깨지거나, 반대로 타입에 없는 컬럼이 방치된다.
 
-> **✅ 비어 있던 스키마와 진단 진행 스냅샷은 마이그레이션에 반영됐다** — 추론 결과 적재 테이블(`anomaly_score`), `age_ms`·`temp_points`·`mode`·`soc_basis`, TimescaleDB 하이퍼테이블, 진단기(`device`) 테이블, 중복 방지 키, `battery_asset.memo`는 `migrations/002`~`005`에, `diagnosis.progress_snapshot`은 `006`에 있다. 결정 기록과 "왜 그 안이었나"는 [`docs/handover/schema-open-questions.md`](schema-open-questions.md)에 있다.
+> **✅ 비어 있던 스키마와 진단 진행 스냅샷은 마이그레이션에 반영됐다** — 추론 결과 적재 테이블(`anomaly_score`), `age_ms`·`temp_points`·`mode`·`soc_basis`, TimescaleDB 하이퍼테이블, 진단기(`device`) 테이블, 중복 방지 키, `battery_asset.memo`는 `migrations/002`~`005`에, `diagnosis.progress_snapshot`은 `006`에, `telemetry_metric.raw_payload`는 `007`에 있다. 결정 기록과 "왜 그 안이었나"는 [`docs/handover/schema-open-questions.md`](schema-open-questions.md)에 있다.
 >
 > **테이블은 이제 8개가 아니라 14개다** — 위 8개 + `"user"`·`device`·`anomaly_score`·`battery_latest`·`battery_health`·`outbox`. PostgreSQL provider는 새 테이블을 기존 `CellGuardStore` 반환 타입으로 매핑하므로 별도 조회 메서드 델타가 필요하지 않다.
 
@@ -64,7 +66,7 @@ runStoreContractTests("postgres", async () => createPostgresStore(testPool));
 | 5 | `DATA_MODE` 게이트 열기 (§9) | ✅ 구현 완료(2026-09-14) |
 | 6 | `TEST_DATABASE_URL`로 계약·동시성·재시작 검증 | 실 DB 인수 환경에서 수행 |
 
-**마이그레이션 7개 파일** — 순서가 곧 의존성이다.
+**마이그레이션 8개 파일** — 순서가 곧 의존성이다.
 
 | 파일 | 내용 |
 |---|---|
@@ -75,11 +77,12 @@ runStoreContractTests("postgres", async () => createPostgresStore(testPool));
 | `004_anomaly_and_health.sql` | `anomaly_score`, `battery_latest`, `battery_health`, `outbox` |
 | `005_timescale.sql` | PK 교체 + 하이퍼테이블 2개 + 보존 60일 |
 | `006_diagnosis_progress_snapshot.sql` | 진단 phase 경계 복구용 `progress_snapshot jsonb` |
+| `007_telemetry_raw_payload.sql` | version-1 edge raw payload 보존용 `raw_payload jsonb` |
 
 > **`005`가 실패하면 004까지는 유효하다** — TimescaleDB 확장이 없으면
 > `telemetry_metric`이 평범한 PostgreSQL 테이블로 남지만, 현재 실행기는 순서상
-> `006`까지 진행하지 않는다. 따라서 `DATA_MODE=postgres`를 열려면 TimescaleDB를
-> 설치한 뒤 `npm run db:migrate`가 `006`까지 완료돼야 한다.
+> 이후 migration까지 진행하지 않는다. 따라서 `DATA_MODE=postgres`를 열려면
+> TimescaleDB를 설치한 뒤 `npm run db:migrate`가 `007`까지 완료돼야 한다.
 
 **예전에 2단계를 막던 것과, 어떻게 풀었는지:**
 
@@ -227,7 +230,7 @@ export function createKafkaDeviceCommandPort(/* producer, topic 등 */): DeviceC
 
 인터페이스는 `backend/src/device/port.ts`가 정본이며 메서드 4개다 — `relayCut(batteryId, reasonCode)`, `relayRestore(batteryId)`, `sessionStarted(sessionId, batteryId, targetMode)`, `sessionEnded(sessionId, batteryId, endReason)`. 전부 `battery-events` 토픽으로 발행한다. 이 단계에서 타입이 고정하는 것은 백엔드→에지 outbound 4종이며, 공유 토픽의 에지 센서 오류·`DIAG_*` 이벤트 전체를 이 인터페이스가 대표하지 않는다. `sessionEnded`의 `batteryId`는 세션 행에서 가져와 outbox payload와 Kafka 파티션 키에 함께 넣는다. 이 인터페이스는 전송 수단을 모르는 채로 설계돼 있으므로 파일 안에 Kafka 클라이언트 세부사항(브로커 주소, 파티션 키, 직렬화 포맷)을 감춰도 된다 — 도메인 코드(`server.ts`, `failsafeRunner.ts`)는 이 4개 메서드 시그니처만 안다.
 
-> **Kafka wire contract와 실행 설정 골격은 1단계에서 마련됐다.** `backend/src/kafka.ts`가 `version: 1`·세 토픽·Zod payload·파티션 키 규칙을 고정하고, `backend/package.json`은 `kafkajs`를 선택 의존성으로 둔다. `backend/.env.example`과 `backend/src/config/env.ts`에는 `KAFKA_*` 값이 있으며 `KAFKA_ENABLED=false`인 memory 모드에서는 브로커에 연결하지 않는다. 실제 producer·consumer·outbox worker 연결은 다음 단계다.
+> **Kafka wire contract와 실행 설정 골격은 1단계에서 마련됐다.** `backend/src/kafka.ts`가 `version: 1`·세 토픽·Zod payload·파티션 키 규칙을 고정하고, `backend/package.json`은 `kafkajs`를 의존성으로 둔다. `backend/.env.example`과 `backend/src/config/env.ts`에는 `KAFKA_*` 값이 있으며 `KAFKA_ENABLED`·`KAFKA_CONSUMER_ENABLED`가 모두 true인 PostgreSQL 모드에서만 embedded raw Consumer가 브로커에 연결된다. DeviceCommand producer·outbox worker 연결은 다음 단계다.
 >
 > **즉 §9의 "건드리지 말 것" 두 지점과 달리 `backend/src/config/env.ts`는 고쳐야 한다.** 브로커 주소와 배포별 topic alias는 이 스키마에 두고(`DATABASE_URL`과 같은 방식), canonical topic 이름·payload 검증·파티션 키 규칙은 `backend/src/kafka.ts`에서 유지한다. 백엔드 파일이므로 변경 사실을 백엔드 담당자에게 알린다.
 
@@ -251,7 +254,9 @@ export function createKafkaDeviceCommandPort(/* producer, topic 등 */): DeviceC
 
 ### 14. Fail-Safe 구독 진입점
 
-Consumer가 `battery-raw-metrics` 프레임을 처리할 때, `backend/src/server.ts`가 내보내는 아래 함수를 프레임마다 부르면 된다.
+`RawMetricsConsumer`가 `battery-raw-metrics` 프레임을 DB transaction으로
+처리한 뒤 `onDurableFrame` callback을 호출한다. 현재 서버 wiring은 이 callback에서
+`backend/src/server.ts`의 `runFailsafe`를 부른다.
 
 ```ts
 export async function runFailsafe(
@@ -262,13 +267,13 @@ export async function runFailsafe(
 ): Promise<FailsafeVerdict>
 ```
 
-판정(`judgeFailsafe`)·인터락(`engageFailsafe`)·에지 통보(`devicePort.relayCut`)·WS 푸시(`broadcastAutoCut` → `relay.autoCut`)가 이미 그 안에 배선돼 있다(`backend/src/failsafeRunner.ts`의 `evaluateFailsafe`가 실체). Consumer가 할 일은 프레임마다 이 함수를 호출하는 것뿐이다.
+판정(`judgeFailsafe`)·인터락(`engageFailsafe`)·에지 통보(`devicePort.relayCut`)·WS 푸시(`broadcastAutoCut` → `relay.autoCut`)가 이미 그 안에 배선돼 있다(`backend/src/failsafeRunner.ts`의 `evaluateFailsafe`가 실체). Consumer는 callback을 battery별로 직렬화하며, callback과 DB transaction이 끝난 뒤에만 Kafka offset을 commit한다.
 
-#### 14a. Consumer 프로세스 경계 — **결정: 2번 (2026-08-28)**
+#### 14a. Consumer 프로세스 경계 — **결정: backend 프로세스에 embedded (2026-09-14)**
 
-> **`runFailsafe`를 `server.ts` 밖으로 뺀다**(예: `backend/src/failsafeEntry.ts`). Consumer를 "이 저장소 밖"으로 둔 기존 서술을 지키면서 `EADDRINUSE`만 없앤다. 순수 로직은 이미 `failsafe.ts`·`failsafeRunner.ts`에 분리돼 있고 `server.ts:1233`은 저장소·포트·WS를 묶는 얇은 래퍼일 뿐이라 그 래퍼만 옮기면 된다.
+> **Raw Consumer를 backend 프로세스 안에서 명시적으로 시작한다.** `telemetryConsumer.ts`는 `server.ts`를 import하지 않고 callback을 주입받으므로 HTTP server의 module side effect나 `EADDRINUSE`가 없다. startup/shutdown은 `DATA_MODE=postgres` + `KAFKA_CONSUMER_ENABLED=true`에서만 배선한다.
 >
-> **⚠️ 백엔드 파일을 옮기는 일이라 아직 실행하지 않았다** — 2부(Kafka) 착수 시점에 백엔드와 함께 한다. 그전까지 `server.ts:1233`의 export는 그대로다.
+> `KAFKA_ENABLED=true`도 함께 요구하며, invalid configuration은 HTTP listen 전에 실패한다. memory/test mode에서는 Kafka client를 만들거나 connect하지 않는다.
 >
 > 아래는 그 결정의 근거가 된 원래 서술이다.
 
@@ -282,7 +287,7 @@ export async function runFailsafe(
 2. **`runFailsafe`를 `server.ts` 밖으로 뺀다** — 예: `backend/src/failsafeEntry.ts`. 순수 로직은 이미 `failsafe.ts`·`failsafeRunner.ts`에 분리돼 있고 `server.ts:1233`은 저장소·포트·WS를 묶는 얇은 래퍼일 뿐이라, 그 래퍼만 옮기면 된다. **백엔드 파일을 고치는 일이므로 합의 대상이다.**
 3. **Consumer가 HTTP로 백엔드를 부른다.** 프로세스가 완전히 분리되지만 프레임마다 왕복이 생겨 100ms 주기에 부담이고, 새 내부 엔드포인트가 필요하다(계약에 없다).
 
-**2번을 권장한다** — Consumer를 "이 저장소 밖"으로 둔 기존 서술을 지키면서 포트 충돌만 없앤다.
+**embedded wiring을 채택한다** — 현재 요청이 backend startup/shutdown과 기존 server safety/WS hook을 같은 프로세스에서 닫도록 명시하기 때문이다.
 
 - **`thresholds`는 인자로 받는다.** 현재 값(`backend/src/failsafe.ts`의 `UNSET_THRESHOLDS`)은 전부 `0`(미설정 sentinel)이라 어떤 계층도 차단하지 않는다. 하드웨어 실측 후(`mode1_backend_spec.md` §13 H8, `mode2_powerbank_diagnosis_spec.md` §8 H2) 나온 값을 설정에서 주입한다 — 값을 추정해 미리 채우지 않는다.
 - **`sample`(`FailsafeSample`)의 6개 필드**를 프레임에서 채운다: `tempContact`, `tempIrSurface`, `tempRiseRateCPerMin`, `pressureRaw`, `pressureBaseline`, `gasRaw`. 그중 **`pressureBaseline`은 프레임에 없는 값이다** — **세션마다 시작 10초 중앙값으로 새로 계산해 Consumer가 직접 들고 있어야 한다**(CLAUDE.md — FSR은 예압에 따라 baseline이 매번 달라져 절대값이 무의미하다). 세션이 바뀌면 이 값도 다시 계산한다.
@@ -292,21 +297,23 @@ export async function runFailsafe(
 
 `evaluateFailsafe`(`backend/src/failsafeRunner.ts:15-34`)는 "현재 인터락 상태를 읽고(`relayByBattery`) → 안 걸려 있으면 건다(`engageFailsafe`)"는 read-then-act 순서다. 이 사이에 경합 구간(race window)이 있다. **같은 `batteryId`에 대해 `runFailsafe`가 동시에 두 번 이상 호출되면**(예: 두 텔레메트리 프레임이 병렬로 처리되는 경우) 둘 다 "안 걸려 있다"고 읽은 뒤 둘 다 `engageFailsafe`를 부를 수 있다. `engageFailsafe`는 멱등이 아니므로(호출할 때마다 `RELAY_AUTO_CUT` 감사 로그를 새로 남긴다) 이러면 감사 로그가 중복 오염된다.
 
-**Consumer는 같은 `batteryId`에 대한 `runFailsafe` 호출이 절대 겹치지 않도록 직렬화해야 한다** — 배터리별 큐, 배터리별 뮤텍스/락, 또는 파티션 키를 `battery_id`로 잡아 Kafka 파티션 자체가 순서를 보장하게 하는 방법 중 하나를 쓴다. 이건 PostgreSQL의 UNIQUE 제약(§6)처럼 DB가 대신 막아주는 경합이 아니다 — `engageFailsafe` 자체에는 동시 호출을 막는 장치가 없으므로 순전히 호출부(Consumer)의 책임이다.
+**구현은 `RawMetricsConsumer`의 battery-keyed Promise queue다.** DB 적재는 transaction으로 각자 수행하되, 기존 `evaluateFailsafe`의 read-then-act hook은 같은 `batteryId`에서 겹치지 않는다. 이건 PostgreSQL의 UNIQUE 제약처럼 DB가 대신 막아주는 경합이 아니다.
 
 #### 14c. ⚠️ WS 통보가 조용히 사라질 수 있다 — `broadcastAutoCut` 실패를 반드시 로깅할 것
 
-`runFailsafe`가 넘기는 `onAutoCut` 콜백은 `backend/src/server.ts`에서 아래처럼 fire-and-forget이다.
+`runFailsafe`가 넘기는 `onAutoCut` 콜백은 `backend/src/server.ts`에서 fire-and-forget이므로 실패를 로그로 남긴다.
 
 ```ts
-onAutoCut: (relay, verdict) => { void broadcastAutoCut(battery, relay, verdict.triggerCode); }
+onAutoCut: (relay, verdict) => {
+  void broadcastAutoCut(battery, relay, verdict.triggerCode).catch((error) => {
+    console.error("[failsafe] relay.autoCut broadcast failed", error);
+  });
+}
 ```
 
 `broadcastAutoCut`이 언젠가 reject하면(예: WS `broadcast()` 호출 내부에서 예외가 던져지면) 이건 **unhandled promise rejection**이 되고 어디에도 로깅되지 않는다. 즉 실제 Fail-Safe가 트리거되어 릴레이는 물리적으로 끊겼는데, 대시보드에 뜨는 `relay.autoCut` WS 알림만 아무 흔적 없이 사라질 수 있다 — 릴레이 차단 자체는 `relay_state`·`audit_log`에 남으므로 안전 기능은 정상 동작하지만, 운영자가 화면으로 그 사실을 놓칠 위험이다.
 
-**Consumer를 배선할 때 다음 중 하나를 반드시 한다**:
-- `broadcastAutoCut` 호출에 `.catch((err) => console.error("[failsafe] broadcast 실패", err))`를 붙인다, 또는
-- `runFailsafe` 호출 지점 자체를 `try/catch`로 감싸고 실패를 로깅한다.
+현재 구현은 첫 번째 방법을 사용한다.
 
 둘 중 아무것도 안 하면 이 갭은 코드 리뷰로도 잘 안 보인다 — `void` 키워드가 "의도적으로 무시함"처럼 읽혀서, 실패 시나리오를 실제로 재현해보기 전까지는 아무도 눈치채지 못한다.
 
@@ -330,14 +337,13 @@ onAutoCut: (relay, verdict) => { void broadcastAutoCut(battery, relay, verdict.t
 
 ## 인계 후 남는 것 (요약)
 
-> **2026-09-14 갱신** — 설계 결정은 전부 닫혔고 `CellGuardStore` PostgreSQL 구현도 추가됐다. 남은 것은 Kafka·Consumer 구현과 실제 DB 인수 검증이다.
+> **2026-09-14 갱신** — Raw Consumer wiring까지 추가됐다. 남은 것은 별도 DeviceCommandPort producer/outbox와 실제 Kafka·PostgreSQL/Timescale 인수 검증이다.
 
-- ✅ **스키마** — `migrations/000`~`006`, `npm run db:migrate`로 적용. 결정 근거는 `schema-open-questions.md`.
+- ✅ **스키마** — `migrations/000`~`007`, `npm run db:migrate`로 적용. 결정 근거는 `schema-open-questions.md`.
 - ✅ **PostgreSQL 구현체** — 본 문서 1부. `backend/src/store/postgres.ts`, 계약 테스트 wiring, 전역 active-session unique 경합 테스트를 추가했다. `TEST_DATABASE_URL`이 없으면 실제 DB 테스트는 명시적으로 skip한다.
 - ✅ **`advanceDiagnosis`의 `progress` 영속화 방침** — 본 문서 §8-1. 런타임 메모리 + phase 경계 `progress_snapshot` 저장으로 결정했고 `006`에 반영했다.
 - ✅ **`store/types.ts`·`contract.ts` 델타** — CSV의 선택적 날짜 범위를 계약에 추가하고, 최신값·건강·텔레메트리 매핑을 기존 반환 타입에 연결했다.
-- **Kafka 구현체** — 본 문서 2부. `backend/src/device/kafka.ts` 신규 작성 + 도메인 코드를 outbox 방식으로 전환(§13·§15, 백엔드와 함께) + `runFailsafe`를 `server.ts` 밖으로 이동(§14a).
-- **Consumer의 `battery_id` 태깅** — `docs/handover/b2-session-tagging.md` (Task 14 산출물, 규칙 5개 확정).
+- **Kafka 구현체** — 본 문서 2부. `backend/src/device/kafka.ts` 신규 작성 + 도메인 코드를 outbox 방식으로 전환(§13·§15, 별도 범위).
+- ✅ **Raw Consumer의 `battery_id` 태깅** — `backend/src/telemetryConsumer.ts`와 `docs/handover/b2-session-tagging.md`; 실 Kafka·DB 인수 검증은 남았다.
 - **모드 1 SOH/RUL 산출 주체** — `battery_health` 테이블은 만들었지만 **누가 계산해 넣는지는 아직 미정**이다(`backend_contract.md` §9 Q6은 모드 2만 확정). DB는 저장만 맡는다.
-- **Fail-Safe 문턱값** — 하드웨어 실측 후 결정. `mode1_backend_spec.md` §13 H8(압력 baseline·상승률), `mode2_powerbank_diagnosis_spec.md` §8 H2(모드 2 표면온도 상승률). 값이 나오면 `UNSET_THRESHOLDS`를 실제 값으로 바꾸는 것만으로 그 계층이 살아난다 — 코드 변경이 필요 없다.
-- **텔레메트리 구독 배선** — `runFailsafe`를 프레임마다 부르는 호출부 자체(§14)는 Consumer가 생긴 뒤 이 문서의 인프라 담당자가 연결한다.
+- **Fail-Safe 문턱값** — 하드웨어 실측 후 결정. `mode1_backend_spec.md` §13 H8(압력 baseline·상승률), `mode2_powerbank_diagnosis_spec.md` §8 H2(모드 2 표면온도 상승률). `runFailsafe` 호출은 배선됐지만 `UNSET_THRESHOLDS`가 전부 0이라 현재 자동 차단은 휴면 상태다.

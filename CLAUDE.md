@@ -33,7 +33,7 @@ Raspberry Pi              Kafka → Consumer → PostgreSQL + TimescaleDB
 | 요구사항·기능·데이터 모델(`battery_asset`/`measurement_session`) | `PLAN.md` (Manyfast 프로젝트 ID `7241ba62-d21a-4de4-ba45-fe572dd0f4de`) |
 | 기능·유저플로우 (디자인 무관) | `docs/product_contract.md` — 새 디자인 작업의 입력 |
 | REST·WebSocket 인터페이스 | `docs/backend_contract.md` |
-| DB 스키마 (실제 컬럼·제약) | `backend/migrations/` — 6개 파일·테이블 14개. `npm run db:migrate`로 적용한다(`backend/scripts/migrate.mjs`). `backend/src/store/types.ts`와 **한 쌍**이라 한쪽만 고치면 조용히 깨진다 |
+| DB 스키마 (실제 컬럼·제약) | `backend/migrations/` — 8개 파일·테이블 14개. `npm run db:migrate`로 적용한다(`backend/scripts/migrate.mjs`). `backend/src/store/types.ts`와 **한 쌍**이라 한쪽만 고치면 조용히 깨진다 |
 | 검증·테스트·중단 조건 | `docs/verification_matrix.md` |
 | 인프라(Kafka·PostgreSQL) 인계 — 구현 경계·태깅 규칙·미결정 스키마 | `docs/handover/infra-implementations.md`, `docs/handover/b2-session-tagging.md`, `docs/handover/schema-open-questions.md` |
 | 관리자 기능·플로우 | `docs/admin_feature_definition.md`, `docs/admin_userflow.md` |
@@ -306,11 +306,11 @@ LSTM-AutoEncoder(재구성 오차 = 현재 이상)와 Informer(예측 오차 = �
 - **릴레이 자동 복구는 없다.** 한 번 차단되면 재인증·사유 입력으로 수동 복구만 가능하다.
 - 사용자당 진단기는 **1대 고정**이다. `deviceId`를 API로 받지 않고 서버가 자동 선택한다.
 - **기능정의서의 화면 위치는 v3와 어긋난 게 있다.** REQ-WEB-026(최근 이벤트)은 대시보드가 아니라 이상 탐지 화면, REQ-WEB-051(정렬)은 이벤트가 아니라 배터리 관리 화면, REQ-WEB-054/055(CSV·PDF)는 이벤트가 아니라 추세 화면, REQ-WEB-037의 제조사/모델 입력은 등록 폼에 없음. **충돌 시 `frontend/` 구현이 우선한다**(2026-08-28 — 예전에는 v3 HTML이 이 자리였다).
-- **DB는 `npm run db:migrate` 하나로 올린다(2026-08-28).** `migrations/000`~`006`을 파일명 순서대로 적용하고 `schema_migrations`에 기록한다. **`001_app_auth.sql`은 고치지 않는다** — 백엔드의 기준 파일이라 변경은 앞뒤 번호 파일로 쌓는다. `005`는 TimescaleDB 확장이 있어야 통과하며, 없으면 `005`만 실패하고 `006`까지 도달하지 못한다.
-- **Better Auth는 지금 쓰지 않는다(2026-08-28).** 다만 `"user"` 테이블은 **Better Auth 코어 스키마와 같은 모양으로 우리가 미리 만들어 둔다**(`000_identity.sql`) — `001`의 FK 4개가 그걸 전제하기 때문이고, 나중에 켤 때 `session`·`account`·`verification` 3개만 추가하면 되게 하려는 것이다. **`@better-auth/cli`는 저장소 의존성이 아니라 개발자가 자기 컴퓨터에 설치한다(2026-09-02 결정).** 설치 전에는 `npm run auth:generate`·`auth:migrate`가 `sh: auth: command not found`로 실패한다 — 고장이 아니다. 데모 경로와 PostgreSQL 스토어 구현에는 필요 없다. ⚠️ **켤 때도 `auth:migrate`는 쓰지 마라** — DB에 직접 테이블을 만들어 `schema_migrations` 바깥에 남기 때문에 `npm run db:migrate`가 적용 상태를 놓친다. `auth:generate`로 SQL을 뽑아 **새 번호 마이그레이션**(`007_better_auth.sql`)으로 쌓는다.
+- **DB는 `npm run db:migrate` 하나로 올린다(2026-08-28).** `migrations/000`~`007`을 파일명 순서대로 적용하고 `schema_migrations`에 기록한다. **`001_app_auth.sql`은 고치지 않는다** — 백엔드의 기준 파일이라 변경은 앞뒤 번호 파일로 쌓는다. `005`는 TimescaleDB 확장이 있어야 통과하며, 없으면 `005`만 실패하고 이후 migration까지 도달하지 못한다.
+- **Better Auth는 지금 쓰지 않는다(2026-08-28).** 다만 `"user"` 테이블은 **Better Auth 코어 스키마와 같은 모양으로 우리가 미리 만들어 둔다**(`000_identity.sql`) — `001`의 FK 4개가 그걸 전제하기 때문이고, 나중에 켤 때 `session`·`account`·`verification` 3개만 추가하면 되게 하려는 것이다. **`@better-auth/cli`는 저장소 의존성이 아니라 개발자가 자기 컴퓨터에 설치한다(2026-09-02 결정).** 설치 전에는 `npm run auth:generate`·`auth:migrate`가 `sh: auth: command not found`로 실패한다 — 고장이 아니다. 데모 경로와 PostgreSQL 스토어 구현에는 필요 없다. ⚠️ **켤 때도 `auth:migrate`는 쓰지 마라** — DB에 직접 테이블을 만들어 `schema_migrations` 바깥에 남기 때문에 `npm run db:migrate`가 적용 상태를 놓친다. `auth:generate`로 SQL을 뽑아 **새 번호 마이그레이션**(`008_better_auth.sql`)으로 쌓는다.
 - **활성 `measurement_session`은 설비 전체에 1개다(2026-08-28 확정, per-device 아님).** DB가 `uq_active_session_global`로 강제한다. 근거는 BQ27441 I2C 주소 고정 — 한 번에 배터리 1개만 측정할 수 있다. ⚠️ **계약 테스트 20건은 per-device와 전역을 구분하지 못하므로**(같은 진단기로만 두 번 부른다) 테스트 통과를 이 규칙의 근거로 삼지 마라.
 - **`telemetry_metric`의 PK는 `(device_id, measured_at)` 자연키다** — 대리키 `id`는 제거했다. TimescaleDB가 모든 UNIQUE 인덱스에 파티셔닝 컬럼을 요구해서이고, 덕분에 재처리 중복 방지가 같은 제약으로 닫힌다. **적재는 `on conflict do nothing`으로 한다.** 보존 60일, 압축은 일부러 걸지 않았다(재처리 창과 충돌).
-- **`DATA_MODE=postgres`는 `initializeStore()`가 migrations `000`~`006`의 핵심 스키마를 확인한 뒤에만 listen한다.** PostgreSQL 저장소(`backend/src/store/postgres.ts`)가 도메인 REST/WS 조회·변경을 담당하며, 연결·스키마 검사가 실패하면 memory 데이터로 대체하지 않고 기동을 중단한다. 정본은 `docs/handover/infra-implementations.md` §9.
+- **`DATA_MODE=postgres`는 `initializeStore()`가 migrations `000`~`007`의 핵심 스키마를 확인한 뒤에만 listen한다.** PostgreSQL 저장소(`backend/src/store/postgres.ts`)가 도메인 REST/WS 조회·변경을 담당하며, 연결·스키마 검사가 실패하면 memory 데이터로 대체하지 않고 기동을 중단한다. 정본은 `docs/handover/infra-implementations.md` §9.
   - `POST /api/demo/login`·`POST /api/demo/logout`도 선택된 provider 경로를 사용하므로, `AUTH_MODE=demo DATA_MODE=postgres`에서는 DB의 사용자/profile seed가 필요하다.
   - ⚠️ WebSocket upgrade는 여전히 `AUTH_MODE`만 보고 인증 분기한다(`AUTH_MODE=betterauth`의 cookie 기반 스트리밍은 보류). `AUTH_MODE=demo DATA_MODE=postgres`에서는 연결 후 store facade가 PostgreSQL provider를 사용하며 memory fallback은 없다.
 
