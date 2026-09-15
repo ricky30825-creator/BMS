@@ -61,14 +61,14 @@
 
 ## Task 3 — 공지사항 실제 구현
 
-- 현재 상태: `IN_PROGRESS`
+- 현재 상태: `REVIEW_REQUIRED`
 - 담당 에이전트: `/root/task3_notices_fix` (최초 구현 `/root/task3_notices`)
 - 기준 커밋: `200856f`
-- 결과 커밋: `e765546`
+- 결과 커밋: `e765546`, 수정 `64a8ec7`
 - 변경 파일: `backend/migrations/011_notices.sql`, backend store/server/tests/docs, frontend hooks/types/admin pages/MSW/E2E
-- 구현 결과: 공지 상태/audience CRUD, 24시간 조회 dedupe, 변경 감사, delivery intent 차단 상태, 사용자·관리자 dashboard/API/UI 연결
-- 부모 검토 결과: 결함 발견 — direct `ARCHIVED` create가 memory/PostgreSQL에서 다르게 실패하고, 빈 PATCH가 변경 없는 감사 로그를 생성할 수 있음
-- 서브에이전트 테스트: backend 318 passed/1 skipped, frontend 77 passed, 양쪽 typecheck/build 통과, Chromium Playwright 27 passed, `git diff --check` 통과
+- 구현 결과: 공지 상태/audience CRUD, 24시간 조회 dedupe, 변경 감사, delivery intent 차단 상태, 사용자·관리자 dashboard/API/UI 연결; ARCHIVED 직접 생성과 no-op PATCH 입력 결함 수정
+- 부모 검토 결과: 수정 결과 재검토 대기
+- 서브에이전트 테스트: 수정 후 backend 323 passed/1 skipped, frontend typecheck 및 77 passed, `git diff --check` 통과; 최초 구현에서 양쪽 build와 Chromium Playwright 27 passed
 - 부모 독립 테스트: 미실행
 - 실환경 검증 여부: 미실행
 - 남은 문제 또는 외부 차단 조건: 부모 독립 검토 필요; 실제 PostgreSQL/Docker와 Kakao/WebPush provider·자격증명 부재
