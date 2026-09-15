@@ -31,6 +31,7 @@
     "@types/node": "^24.0.10",
     "@types/pdfkit": "^0.17.6",
     "@types/pg": "^8.15.5",
+    "png-js": "2.0.0",
     "tsx": "^4.20.3",
     "typescript": "^5.8.3",
     "vitest": "^4.1.10"
