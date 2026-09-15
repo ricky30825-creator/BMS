@@ -37,6 +37,14 @@
 
 현재 데모 런타임에는 발급 토큰 인증, 자산/세션/계약형 대시보드, 핵심 사용자·관리자 REST, 관리자 상태·메모·계정 사유 게이트, F21 fail-closed, 릴레이 승인·멱등성, Raw CSV, 세션 스코프 WS가 있다. `DATA_MODE=postgres`는 기동 전에 migrations `000`~`009` 핵심 스키마를 확인한 뒤 실제 PostgreSQL domain provider를 사용하며, 초기화 실패 시 memory 데이터로 대체하지 않는다. Raw/Anomaly Consumer와 Outbox Worker unit 경로 및 수동 offset/재처리/lease 규칙은 구현됐지만 실제 Kafka·Timescale 부하 인수는 별도다. 프론트는 `npm --prefix frontend run dev:real`로 실제 REST/WS를 확인할 수 있고, 기본 `npm run e2e`는 MSW fixture 검증이다. PDF aggregate export는 아직 범위 밖이다.
 
+## 에지 명령 Consumer (Task 6)
+
+| 변경 범위 | 명령·방법 | 통과 기준 | 실패·중단 |
+|---|---|---|---|
+| `edge/commands/` 단위 테스트 | `python3 -m unittest discover -s edge/commands -p 'test_*.py'` | version-1 명령·파티션 키·durable SQLite 멱등성·fail-closed relay·manual commit, 실패한 현재 레코드의 retry/stall boundary, commit-failure durable duplicate replay가 통과한다 | 실패한 물리 명령을 자동 abandon하거나 성공으로 기록하지 않는다 |
+| 에지 Python 문법 | `python3 -m py_compile edge/commands/*.py` | 종료 코드 0 | 실제 GPIO/Kafka 의존성을 fake 통과로 대체하지 않는다 |
+| 실물 인수 | Raspberry Pi의 실제 `RPi.GPIO`·로컬 Kafka broker에서 startup, relay, restart, duplicate, offset 순서를 수행 | 실제 핀 HIGH fail-closed, 배터리별 순서, commit 뒤 재실행 없음 확인 | 현재 환경에서는 Pi·Kafka 연결과 실물 릴레이를 검증하지 않고 **미검증**으로 기록한다 |
+
 ## Python 도구
 
 ```bash

@@ -249,21 +249,33 @@ class CommandConsumerService:
                 message = await self.consumer.receive(self.config.poll_timeout_ms)
                 if message is None:
                     continue
-                try:
-                    await self.process_message(message)
-                except Exception as exc:
-                    self.logger("command failed; offset remains uncommitted", {
-                        "topic": message.topic,
-                        "partition": message.partition,
-                        "offset": message.offset,
-                        "error": str(exc),
-                    })
-                    # Keep retrying the same record, but leave enough time for
-                    # an operator to correct a physical gate/tool failure.
+                # kafka-python advances its local position when ``poll``
+                # returns a record, even though the group offset is still
+                # uncommitted.  Do not poll again after a failure: this exact
+                # record is the retry/stall boundary until its physical work
+                # and durable success are followed by a successful commit, or
+                # shutdown/cancellation interrupts the loop.
+                while not self._stopping:
                     try:
-                        await asyncio.sleep(self.retry_delay_ms / 1000.0)
-                    except asyncio.CancelledError:
-                        raise
+                        await self.process_message(message)
+                    except Exception as exc:
+                        self.logger("command failed; offset remains uncommitted", {
+                            "topic": message.topic,
+                            "partition": message.partition,
+                            "offset": message.offset,
+                            "error": str(exc),
+                        })
+                        # Keep retrying the same record, but leave enough time
+                        # for an operator to correct a physical gate/tool
+                        # failure.  In particular, never abandon a PROCESSING
+                        # identity or turn a failed physical command into a
+                        # success merely to advance this partition.
+                        try:
+                            await asyncio.sleep(self.retry_delay_ms / 1000.0)
+                        except asyncio.CancelledError:
+                            raise
+                        continue
+                    break
         finally:
             await self.stop()
 

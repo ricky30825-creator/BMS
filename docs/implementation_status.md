@@ -68,7 +68,7 @@ DB를 초기화해 실행한다. 현재 실행 환경에는 이 변수가 없어
 | 알림 발송 (카카오·SMS·메일) | 채널 ON/OFF 토글과 policy 응답만 있고(`server.ts:405`·`:409`), **실제로 메시지를 보내는 코드는 `backend/src`에 없다** | **보류(의도적)** — 토글 현행 유지, 추가 작업 없음 |
 | AI 로컬 추론 프로세스 | `ai/`에 v1 raw/anomaly 계약 validator, fail-closed bundle loader, 외부 adapter/broker 경계, raw timestamp 기반 결정적 replay identity, 수동 offset lifecycle과 표준 테스트가 있다. 실제 checkpoint·scaler·권위 feature metadata와 외부 모델 adapter는 없다 | **외부 차단(`EXTERNALLY_BLOCKED`)** — 실제 추론·점수 품질을 주장하지 않음 (`docs/ai_inference.md`) |
 | 로컬 실행 패키징 | **C8 완료(2026-08-25)** — 단일 오리진(`:3005`), `start-local.bat`(Windows, 수동 실행), `docs/local_run.md`. memory 모드 한정(Kafka·PostgreSQL·추론은 별도) | 완료 (memory 모드) |
-| 에지 소프트웨어 | `edge/bw150/`에 BW150 HID 로거·탐지·BLE 프로브(914줄)만 있고, 센서·릴레이·Kafka 프로듀서 구현은 없음 | 부분 구현 (BW150 한정) |
+| 에지 소프트웨어 | `edge/commands/`에 version-1 `battery-events` 명령 Consumer, durable SQLite 멱등성, `RPi.GPIO` fail-closed 릴레이 adapter가 있고 `edge/bw150/`에는 BW150 HID 로거·탐지·BLE 프로브가 있다 | **Task 6 명령 경계·단위 테스트 구현 완료 / 실제 Raspberry Pi GPIO·Kafka broker 인수 검증 대기** |
 | AI 소프트웨어 | `ai/contracts.py`, `ai/bundle.py`, `ai/inference.py`, `ai/runtime.py`, `ai/kafka.py`에 계약·번들 검증·외부 adapter·Kafka lifecycle 골격과 테스트가 있다. 학습 코드·모델 binary·실 adapter는 저장하지 않는다 | **안전 경계 구현 / 외부 artifact·adapter 차단** |
 | 프론트엔드 | [`frontend/src/`](../frontend/src/)의 Vite + React + TypeScript strict 앱, v3 사용자 15·관리자 6 라우트, 계약형 API/WS 계층, MSW 시나리오, `npm run dev:real` 데모 경로. WS 이벤트 11종 핸들러 중 **9종이 서버 발신을 실제로 수신**(C1 8종 + B3의 `relay.autoCut`), 잔여 `diagnosis.*` 2종은 F21이 fail-closed라 도달 불가 | 부분 구현 / production WS 인증 미착수 |
 | 프론트엔드 실행 기반 | `frontend/package.json`, React Router, Query, RHF/Zod, 토큰 CSS, 공용 UI, Vitest/RTL/Playwright. **Vitest 44건·Playwright 28건·`tsc --noEmit` 통과**(2026-08-25 실행) | 구현됨 |
@@ -266,6 +266,8 @@ Timescale 적재, 물리 Fail-Safe는 여전히 별도 범위다.
 
 - **완료된 것(백엔드)**: `DeviceCommandPort` 인터페이스(`backend/src/device/port.ts`, 메서드 4개 — `relayCut`/`relayRestore`/`sessionStarted`/`sessionEnded`) + memory 전용 로깅 스텁(`backend/src/device/logging.ts`). PostgreSQL `store/postgres.ts`가 상태·감사·`battery-events` outbox를 한 transaction으로 기록하고, `008_outbox_identity.sql`의 durable `event_id`/unique `dedupe_key`로 relay 멱등 재처리를 보호한다. SUPERSEDED·BLOCKED 세션 종료와 모드 전환 전 이전 릴레이 차단도 outbox 순서를 보존한다.
 - **완료된 것(인프라)**: `backend/src/device/kafka.ts`의 실제 KafkaJS producer가 outbox payload를 version-1 계약으로 검증해 `params.batteryId` key와 `x-cellguard-event-id` header로 발행한다. `backend/src/outboxWorker.ts`가 `FOR UPDATE SKIP LOCKED` claim, 배터리별 head ordering, lease/restart recovery, capped exponential retry를 수행하며 Kafka publish 성공 후에만 `sent_at`을 갱신한다. malformed outbox는 `dead_at` poison row로 보존하고 후속 배터리 명령을 진행한다.
+- **완료된 것(에지)**: `edge/commands/consumer.py`가 payload·key·header 검증, 물리 명령, durable SQLite 성공 기록, manual offset commit 순서를 지킨다. `run_forever()`는 `kafka-python`의 `poll()`이 로컬 위치를 전진시키더라도 실패한 현재 레코드를 commit 또는 shutdown/cancellation까지 다시 처리하며, `PROCESSING` 물리 명령을 자동 해제하거나 실패를 성공으로 기록하지 않는다. commit 실패 replay는 durable duplicate 경로로 GPIO를 재호출하지 않는다.
+- **에지 단위 검증**: `python3 -m unittest discover -s edge/commands -p 'test_*.py'` 21건 통과. 실제 Raspberry Pi GPIO, Kafka broker, 재시작·실물 릴레이 인수는 아직 검증하지 않았다.
 - **남은 일(실 인프라)**: 실제 Kafka broker·PostgreSQL/Timescale에서 migration 000~009, 재시작·중복·edge relay 인수를 수행한다.
 - **완료 판정**: DB transaction rollback/replay 및 순서 테스트 통과 → 실제 인프라에서 백엔드 차단 승인 → 라즈베리파이 릴레이가 실제로 열림 → 결과가 `battery-events`로 되돌아와 상태가 일치
 

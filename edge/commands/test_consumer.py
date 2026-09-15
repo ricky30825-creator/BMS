@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import tempfile
 import unittest
@@ -69,6 +70,43 @@ class FakeConsumer:
         self.closed = True
 
 
+class SequencedConsumer(FakeConsumer):
+    """Expose poll order so the run-loop retry boundary can be asserted."""
+
+    def __init__(self, records: list[KafkaCommandRecord]) -> None:
+        super().__init__()
+        self.records = list(records)
+        self.receive_calls = 0
+        self.first_received = asyncio.Event()
+        self.release = asyncio.Event()
+
+    async def receive(self, timeout_ms: int) -> KafkaCommandRecord | None:
+        self.receive_calls += 1
+        if self.receive_calls == 1:
+            self.first_received.set()
+        if self.records:
+            return self.records.pop(0)
+        await self.release.wait()
+        return None
+
+
+class FailFirstRelay(FakeRelayAdapter):
+    """Fail one physical dispatch, leaving its durable claim PROCESSING."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.failures_remaining = 1
+        self.first_failed = asyncio.Event()
+
+    async def relay_cut(self, battery_id: str, reason_code: str | None) -> None:
+        if self.failures_remaining:
+            self.failures_remaining -= 1
+            self.calls.append(("RELAY_CUT_FAILED", battery_id, reason_code))
+            self.first_failed.set()
+            raise RuntimeError("fake relay failure: RELAY_CUT")
+        await super().relay_cut(battery_id, reason_code)
+
+
 class CommandConsumerTests(unittest.IsolatedAsyncioTestCase):
     async def test_success_is_durable_before_offset_commit_and_duplicate_cut_is_noop(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -98,6 +136,41 @@ class CommandConsumerTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaisesRegex(EdgeProcessingError, "EDGE_EVENT_IN_FLIGHT"):
                 await service.process_message(record("evt-fail", 0))
             store.close()
+
+    async def test_run_loop_stalls_on_failed_record_before_later_same_battery_record(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            store = SQLiteIdempotencyStore(Path(directory) / "edge.sqlite")
+            first = record("evt-fail-first", 0)
+            later = record("evt-later", 1)
+            consumer = SequencedConsumer([first, later])
+            relay = FailFirstRelay()
+            service = CommandConsumerService(
+                config(store.path),
+                consumer,
+                relay,
+                store,
+                logger=lambda _message, _details: None,
+            )
+            task = asyncio.create_task(service.run_forever())
+            try:
+                await asyncio.wait_for(consumer.first_received.wait(), timeout=1)
+                # The first dispatch fails once, then its PROCESSING row keeps
+                # every retry in-flight.  A kafka-python poll must not happen
+                # again while that record is unresolved.
+                await asyncio.wait_for(relay.first_failed.wait(), timeout=1)
+                await asyncio.sleep(0.02)
+                self.assertEqual(consumer.receive_calls, 1)
+                self.assertEqual(consumer.records, [later])
+                self.assertEqual(consumer.commits, [])
+                self.assertEqual(store.successful_event_count(), 0)
+                self.assertEqual(
+                    [call[0] for call in relay.calls],
+                    ["initialize", "RELAY_CUT_FAILED"],
+                )
+            finally:
+                service._stopping = True
+                consumer.release.set()
+                await asyncio.wait_for(task, timeout=1)
 
     async def test_commit_failure_leaves_durable_success_and_retry_does_not_touch_relay(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
