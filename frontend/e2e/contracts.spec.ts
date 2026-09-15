@@ -126,6 +126,32 @@ test.describe("CellGuard contract flows (MSW)", () => {
     await expect.poll(() => trendPeriods).toContain("30d");
   });
 
+  test("downloads the aggregate trend PDF with the period, batteries, and metrics query", async ({ page }) => {
+    const trendRequests: URL[] = [];
+    page.on("request", (request) => {
+      const url = new URL(request.url());
+      if (url.pathname === "/api/trends/export.pdf") trendRequests.push(url);
+    });
+
+    await signIn(page, "hong@cellguard.io");
+    await connectBattery(page, "PACK-004");
+    await page.locator("aside").getByRole("button", { name: "추세 차트", exact: true }).click();
+    await expect(page).toHaveURL(/\/trend$/);
+    await expect(page.getByRole("heading", { name: "추세 차트", exact: true })).toBeVisible();
+
+    const downloadPromise = page.waitForEvent("download");
+    await page.getByRole("button", { name: "PDF", exact: true }).click();
+    const download = await downloadPromise;
+    expect(download.suggestedFilename()).toBe("trend-report.pdf");
+    await expect.poll(() => trendRequests.length).toBe(1);
+    expect(trendRequests[0].searchParams.get("period")).toBe("7d");
+    expect(trendRequests[0].searchParams.get("batteryIds")).toBe("b_pack_004");
+    expect(trendRequests[0].searchParams.get("metrics")).toBe("volt,curr,temp,soc,anomaly");
+    expect(trendRequests[0].searchParams.has("sessionId")).toBe(false);
+    expect(trendRequests[0].searchParams.has("from")).toBe(false);
+    expect(trendRequests[0].searchParams.has("to")).toBe(false);
+  });
+
   test("keeps admin status and memo saves as separate controls", async ({ page }) => {
     await signIn(page, "lee@lab.io");
     await page.locator("aside").getByRole("button", { name: "관리자 대시보드" }).click();

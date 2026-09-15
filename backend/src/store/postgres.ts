@@ -3,6 +3,7 @@ import type pg from "pg";
 
 import type { CellGuardStore, CreateBatteryInput, IdempotencyResult, UpdateBatteryInput } from "./contract.js";
 import type { CreateNoticeInput, NoticeListQuery, UpdateNoticeInput } from "./contract.js";
+import { TREND_METRICS } from "./types.js";
 import { CSV_HEADER, INPUT_LIMITS } from "./types.js";
 import type {
   AdminEventTrend,
@@ -28,9 +29,12 @@ import type {
   NoticeStatus,
   OpsStatus,
   RecordDomainEventInput,
+  TrendMetric,
+  TrendResponse,
 } from "./types.js";
 import { quickPhases, totalDurationMs } from "../diagnosis/phases.js";
 import { KAFKA_CONTRACT_VERSION, KAFKA_TOPICS, type BackendOutboundCommandEvent } from "../kafka.js";
+import { bucketIndex, emptyTrendResponse, PHYSICAL_TREND_METRICS, trendWindow } from "../trendAggregate.js";
 
 type AnyRow = Record<string, any>;
 type QueryExecutor = pg.Pool | pg.PoolClient;
@@ -748,25 +752,6 @@ export function createPostgresStore(pool: pg.Pool): CellGuardStore {
     return result.rows[0] ?? null;
   }
 
-  function trendWindow(period: EventTrendPeriod, now = Date.now()): {
-    count: number;
-    stepMs: number;
-    startMs: number;
-    endExclusiveMs: number;
-  } {
-    const hourMs = 60 * 60 * 1000;
-    const dayMs = 24 * hourMs;
-    const count = period === "24h" ? 25 : period === "7d" ? 7 : period === "30d" ? 30 : 0;
-    if (!count) throw new Error("VALIDATION_FAILED");
-    const stepMs = period === "24h" ? hourMs : dayMs;
-    const current = new Date(now);
-    const endBucketMs = period === "24h"
-      ? Math.floor(now / hourMs) * hourMs
-      : Date.UTC(current.getUTCFullYear(), current.getUTCMonth(), current.getUTCDate());
-    const startMs = endBucketMs - (count - 1) * stepMs;
-    return { count, stepMs, startMs, endExclusiveMs: endBucketMs + stepMs };
-  }
-
   async function adminEventTrend(period: EventTrendPeriod): Promise<AdminEventTrend> {
     const window = trendWindow(period);
     const result = await query<AnyRow>(pool, `
@@ -818,6 +803,77 @@ export function createPostgresStore(pool: pg.Pool): CellGuardStore {
         peakTotal,
       },
     };
+  }
+
+  async function trendForBatteries(
+    batteryIds: readonly string[],
+    period: EventTrendPeriod,
+    metrics: readonly TrendMetric[] = PHYSICAL_TREND_METRICS,
+  ): Promise<TrendResponse> {
+    const uniqueIds = new Set(batteryIds);
+    if (uniqueIds.size !== batteryIds.length || new Set(metrics).size !== metrics.length || metrics.length === 0 || metrics.some((metric) => !TREND_METRICS.includes(metric))) {
+      throw new Error("VALIDATION_FAILED");
+    }
+    const now = Date.now();
+    const window = trendWindow(period, now);
+    const batteries = await Promise.all(batteryIds.map((batteryId) => batteryRow(pool, batteryId)));
+    if (batteries.some((battery) => !battery)) throw new Error("NOT_FOUND");
+    const labels = new Map(batteries.map((battery, index) => [batteryIds[index], String(battery?.label ?? batteryIds[index])]));
+    const response = emptyTrendResponse(batteryIds, labels, period, metrics, now);
+    const seriesByKey = new Map(response.series.map((series) => [`${series.batteryId}:${series.metric}`, series]));
+    const physicalMetrics = metrics.filter((metric): metric is Exclude<TrendMetric, "anomaly"> => metric !== "anomaly");
+    if (physicalMetrics.length > 0) {
+      const bucketExpression = period === "24h"
+        ? "date_trunc('hour', measured_at at time zone 'UTC') at time zone 'UTC'"
+        : "date_trunc('day', measured_at at time zone 'UTC') at time zone 'UTC'";
+      const result = await query<AnyRow>(pool, `
+        select battery_id, ${bucketExpression} as bucket_at,
+               avg(voltage_v) as volt_avg,
+               avg(current_a) as curr_avg,
+               greatest(max(temp_contact), max(temp_ir_surface)) as temp_max,
+               avg(soc_pct) as soc_avg
+        from telemetry_metric
+        where battery_id = any($1::text[])
+          and measured_at >= $2::timestamptz
+          and measured_at < $3::timestamptz
+        group by battery_id, bucket_at
+        order by bucket_at asc, battery_id asc
+      `, [batteryIds, new Date(window.startMs), new Date(window.endExclusiveMs)]);
+      for (const row of result.rows) {
+        const batteryId = row.battery_id == null ? null : String(row.battery_id);
+        if (!batteryId) continue;
+        const index = bucketIndex(row.bucket_at, window);
+        if (index < 0) continue;
+        for (const metric of physicalMetrics) {
+          const series = seriesByKey.get(`${batteryId}:${metric}`);
+          if (!series) continue;
+          const column = metric === "volt" ? "volt_avg" : metric === "curr" ? "curr_avg" : metric === "temp" ? "temp_max" : "soc_avg";
+          series.points[index] = numberOrNull(row[column]);
+        }
+      }
+    }
+    if (metrics.includes("anomaly")) {
+      const bucketExpression = period === "24h"
+        ? "date_trunc('hour', evaluated_at at time zone 'UTC') at time zone 'UTC'"
+        : "date_trunc('day', evaluated_at at time zone 'UTC') at time zone 'UTC'";
+      const result = await query<AnyRow>(pool, `
+        select battery_id, ${bucketExpression} as bucket_at, max(score) as anomaly_max
+        from anomaly_score
+        where battery_id = any($1::text[])
+          and evaluated_at >= $2::timestamptz
+          and evaluated_at < $3::timestamptz
+        group by battery_id, bucket_at
+        order by bucket_at asc, battery_id asc
+      `, [batteryIds, new Date(window.startMs), new Date(window.endExclusiveMs)]);
+      for (const row of result.rows) {
+        const batteryId = row.battery_id == null ? null : String(row.battery_id);
+        if (!batteryId) continue;
+        const index = bucketIndex(row.bucket_at, window);
+        const series = seriesByKey.get(`${batteryId}:anomaly`);
+        if (index >= 0 && series) series.points[index] = numberOrNull(row.anomaly_max);
+      }
+    }
+    return response;
   }
 
   async function noticeDeliveryIntentRows(executor: QueryExecutor, noticeId: string): Promise<NoticeDeliveryIntent[]> {
@@ -1099,6 +1155,10 @@ export function createPostgresStore(pool: pg.Pool): CellGuardStore {
 
     async getAdminEventTrend(period) {
       return dbCall(() => adminEventTrend(period));
+    },
+
+    async trendForBatteries(batteryIds, period, metrics) {
+      return dbCall(() => trendForBatteries(batteryIds, period, metrics));
     },
 
     async publishedNotices(queryInput = {}) {

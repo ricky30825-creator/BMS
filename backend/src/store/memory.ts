@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 
 import type { CellGuardStore, CreateBatteryInput, CreateNoticeInput, IdempotencyResult, NoticeListQuery, UpdateBatteryInput, UpdateNoticeInput } from "./contract.js";
-import { CSV_HEADER, INPUT_LIMITS, csvRow } from "./types.js";
+import { CSV_HEADER, INPUT_LIMITS, TREND_METRICS, csvRow } from "./types.js";
 import type {
   AdminEventTrend,
   AdminNotice,
@@ -17,6 +17,8 @@ import type {
   DomainEvent,
   DomainEventQuery,
   EventTrendPeriod,
+  TrendMetric,
+  TrendResponse,
   NoticeCategory,
   NoticeDeliveryChannel,
   NoticeDeliveryIntent,
@@ -26,6 +28,7 @@ import type {
   RecordDomainEventInput,
 } from "./types.js";
 import { quickPhases, totalDurationMs } from "../diagnosis/phases.js";
+import { emptyTrendResponse, PHYSICAL_TREND_METRICS } from "../trendAggregate.js";
 
 export function createMemoryStore(): CellGuardStore & { demoUsers: DemoUser[] } {
   function normalizeReason(value: string): string {
@@ -539,6 +542,23 @@ export function createMemoryStore(): CellGuardStore & { demoUsers: DemoUser[] } 
     };
   };
 
+  const trendForBatteries = (batteryIds: readonly string[], period: EventTrendPeriod, metrics: readonly TrendMetric[] = PHYSICAL_TREND_METRICS): TrendResponse => {
+    const uniqueIds = new Set(batteryIds);
+    if (uniqueIds.size !== batteryIds.length || new Set(metrics).size !== metrics.length || metrics.length === 0 || metrics.some((metric) => !TREND_METRICS.includes(metric))) {
+      throw new Error("VALIDATION_FAILED");
+    }
+    const labels = new Map<string, string>();
+    for (const batteryId of batteryIds) {
+      const battery = findBattery(batteryId);
+      if (!battery) throw new Error("NOT_FOUND");
+      labels.set(battery.id, battery.label);
+    }
+    // Memory is an explicitly isolated fixture provider. It has no persisted
+    // telemetry history, so it returns a correctly shaped all-null series
+    // rather than turning the latest fixture reading into a fake trend.
+    return emptyTrendResponse(batteryIds, labels, period, metrics);
+  };
+
   const audit = (input: Omit<DemoAudit, "id" | "at">): DemoAudit => {
     const entry = { ...input, id: `audit_${randomUUID()}`, at: isoNow() };
     demoAudits.unshift(entry);
@@ -843,6 +863,7 @@ export function createMemoryStore(): CellGuardStore & { demoUsers: DemoUser[] } 
     async domainEventById(id) { return eventById(id); },
     async domainEvents(query) { return listDomainEvents(query); },
     async getAdminEventTrend(period) { return eventTrend(period); },
+    async trendForBatteries(batteryIds, period, metrics) { return trendForBatteries(batteryIds, period, metrics); },
     async publishedNotices(query) { return listPublicNotices(query); },
     async adminNotices(query) { return listAdminNotices(query); },
     async noticeForUser(id, viewerId) { return publicNoticeForUser(id, viewerId); },

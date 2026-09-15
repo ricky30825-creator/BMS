@@ -31,6 +31,9 @@ import { createKafkaRawMetricsConsumer, type RawMetricsConsumer, type Unassigned
 import { createStartupController, isStartupCancelled } from "./runtimeLifecycle.js";
 import { NOTICE_AUDIENCES, NOTICE_CATEGORIES, NOTICE_STATUSES, parseNoticeMutationBody } from "./noticePayload.js";
 import { parseAdminEventTrendPeriod } from "./adminEventTrend.js";
+import { PHYSICAL_TREND_METRICS } from "./trendAggregate.js";
+import { parseTrendBatteryIds, parseTrendMetrics, parseTrendPeriod } from "./trendQuery.js";
+import { renderTrendPdf, safeFilenameSegment } from "./trendPdf.js";
 import {
   abortDiagnosis,
   abortDiagnosisBySystem,
@@ -69,6 +72,7 @@ import {
   startDiagnosis,
   startSession,
   sessionsForBattery,
+  trendForBatteries,
   updateNotice,
   users,
   updateBattery,
@@ -783,44 +787,21 @@ app.get("/api/events", requireSession, asyncRoute(async (req, res) => {
   res.json(pageEnvelope(items, Number(req.query.page) || 1, Number(req.query.size) || 20));
 }));
 
-function trendForBattery(battery: NonNullable<Awaited<ReturnType<typeof batteryById>>>, period: "24h" | "7d" | "30d") {
-  const count = period === "24h" ? 25 : period === "30d" ? 30 : 7;
-  const stepMs = period === "24h" ? 60 * 60 * 1000 : 24 * 60 * 60 * 1000;
-  const end = battery.latest.measuredAt ? Date.parse(battery.latest.measuredAt) : Number.NaN;
-  const emptySeries = [
-    { batteryId: battery.id, batteryLabel: battery.label, metric: "volt", unit: "V", points: [] as Array<number | null> },
-    { batteryId: battery.id, batteryLabel: battery.label, metric: "curr", unit: "A", points: [] as Array<number | null> },
-    { batteryId: battery.id, batteryLabel: battery.label, metric: "temp", unit: "°C", points: [] as Array<number | null> },
-    { batteryId: battery.id, batteryLabel: battery.label, metric: "soc", unit: "%", points: [] as Array<number | null> },
-  ];
-  if (!Number.isFinite(end)) return { buckets: [], series: emptySeries };
-  const buckets = Array.from({ length: count }, (_, index) => new Date(end - (count - index - 1) * stepMs).toISOString());
-  const point = (value: number | null) => [...Array<number | null>(count - 1).fill(null), value];
-  return { buckets, series: [
-    { batteryId: battery.id, batteryLabel: battery.label, metric: "volt", unit: "V", points: point(battery.latest.voltageV) },
-    { batteryId: battery.id, batteryLabel: battery.label, metric: "curr", unit: "A", points: point(battery.latest.currentA) },
-    { batteryId: battery.id, batteryLabel: battery.label, metric: "temp", unit: "°C", points: point(Math.max(battery.latest.tempContact ?? -Infinity, battery.latest.tempIrSurface ?? -Infinity) === -Infinity ? null : Math.max(battery.latest.tempContact ?? -Infinity, battery.latest.tempIrSurface ?? -Infinity)) },
-    { batteryId: battery.id, batteryLabel: battery.label, metric: "soc", unit: "%", points: point(battery.targetMode === 2 ? null : battery.latest.socPct) }
-  ] };
-}
-
 app.get("/api/trends", requireSession, asyncRoute(async (req, res) => {
-  const period = req.query.period === "24h" || req.query.period === "30d" ? req.query.period : "7d";
-  const requested = typeof req.query.batteryIds === "string" ? req.query.batteryIds.split(",").filter(Boolean).slice(0, 5) : [];
+  const period = parseTrendPeriod(req.query.period);
+  if (!period || Object.prototype.hasOwnProperty.call(req.query, "metrics")) { apiError(res, 400, "VALIDATION_FAILED", "The trend period and query shape are invalid."); return; }
+  const requested = parseTrendBatteryIds(req.query.batteryIds);
+  if (requested === null) { apiError(res, 400, "VALIDATION_FAILED", "batteryIds must contain one to five unique battery IDs."); return; }
   let candidates: Array<NonNullable<Awaited<ReturnType<typeof batteryById>>>>;
-  if (requested.length) {
-    const resolved = await Promise.all(requested.map((id) => ensureOwner(req, id)));
-    candidates = resolved.filter((battery): battery is NonNullable<Awaited<ReturnType<typeof batteryById>>> => Boolean(battery));
-  } else {
+  if (requested === undefined) {
     const scoped = await sessionBattery(req);
     candidates = scoped ? [scoped.battery] : [];
+  } else {
+    candidates = (await Promise.all(requested.map((id) => ensureOwner(req, id)))).filter((battery): battery is NonNullable<Awaited<ReturnType<typeof batteryById>>> => Boolean(battery));
   }
-  if (requested.length && candidates.length !== requested.length) { apiError(res, 404, "NOT_FOUND", "One or more batteries were not found."); return; }
-  const first = candidates[0];
-  if (!first) { res.json({ period, buckets: [], series: [] }); return; }
-  const base = trendForBattery(first, period);
-  const series = candidates.flatMap((battery) => trendForBattery(battery, period).series);
-  res.json({ period, buckets: base.buckets, series });
+  if (requested && candidates.length !== requested.length) { apiError(res, 404, "NOT_FOUND", "One or more batteries were not found."); return; }
+  if (!candidates.length) { res.json({ period, buckets: [], series: [] }); return; }
+  res.json(await trendForBatteries(candidates.map((battery) => battery.id), period, PHYSICAL_TREND_METRICS));
 }));
 
 const demoAlerts: Array<Record<string, unknown>> = [];
@@ -1196,9 +1177,27 @@ app.get("/api/exports/:id/download", requireSession, (req, res) => {
   res.status(200).type("text/csv").setHeader("Content-Disposition", `attachment; filename="${job.id}.csv"`).send(job.csv);
 });
 
-app.get("/api/trends/export.pdf", requireSession, (_req, res) => {
-  apiError(res, 503, "RUNTIME_NOT_READY", "PDF trend export is unavailable until the aggregate export provider is implemented.");
-});
+app.get("/api/trends/export.pdf", requireSession, asyncRoute(async (req, res) => {
+  const period = parseTrendPeriod(req.query.period, true);
+  const requested = parseTrendBatteryIds(req.query.batteryIds);
+  const metrics = parseTrendMetrics(req.query.metrics);
+  const forbidden = ["sessionId", "from", "to", "format"].some((name) => Object.prototype.hasOwnProperty.call(req.query, name));
+  if (!period || requested === null || !metrics || forbidden) {
+    apiError(res, 400, "VALIDATION_FAILED", "PDF trend export parameters are invalid.");
+    return;
+  }
+  const sessionScoped = requested === undefined ? await sessionBattery(req) : null;
+  const candidates = requested === undefined
+    ? sessionScoped ? [sessionScoped.battery] : []
+    : (await Promise.all(requested.map((id) => ensureOwner(req, id)))).filter((battery): battery is NonNullable<Awaited<ReturnType<typeof batteryById>>> => Boolean(battery));
+  if (requested && candidates.length !== requested.length) { apiError(res, 404, "NOT_FOUND", "One or more batteries were not found."); return; }
+  if (!candidates.length) { apiError(res, 409, "NO_ACTIVE_SESSION", "An active session or explicit batteryIds is required."); return; }
+  const batteryIds = candidates.map((battery) => battery.id);
+  const report = await trendForBatteries(batteryIds, period, metrics);
+  const pdf = await renderTrendPdf(report, batteryIds, metrics);
+  const filename = `cellguard-trend-${period}-${safeFilenameSegment(batteryIds[0] ?? "batteries")}.pdf`;
+  res.status(200).type("application/pdf").setHeader("Content-Disposition", `attachment; filename="${filename}"`).send(pdf);
+}));
 
 app.use((error: unknown, _req: Request, res: Response, _next: NextFunction) => {
   console.error(error);

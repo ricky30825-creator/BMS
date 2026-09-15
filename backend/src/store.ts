@@ -125,6 +125,7 @@ export const anomalyScoresForBattery = active.anomalyScoresForBattery.bind(activ
 export const domainEventById = active.domainEventById.bind(active);
 export const domainEvents = active.domainEvents.bind(active);
 export const getAdminEventTrend = active.getAdminEventTrend.bind(active);
+export const trendForBatteries = active.trendForBatteries.bind(active);
 export const publishedNotices = active.publishedNotices.bind(active);
 export const adminNotices = active.adminNotices.bind(active);
 export const noticeForUser = active.noticeForUser.bind(active);

@@ -13,6 +13,8 @@ import type {
   DomainEvent,
   DomainEventQuery,
   EventTrendPeriod,
+  TrendMetric,
+  TrendResponse,
   NoticeCategory,
   NoticeDeliveryChannel,
   NoticeDeliveryIntent,
@@ -90,6 +92,8 @@ export interface CellGuardStore {
   domainEventById(id: string): Promise<DomainEvent | undefined>;
   domainEvents(query?: DomainEventQuery): Promise<DomainEvent[]>;
   getAdminEventTrend(period: EventTrendPeriod): Promise<AdminEventTrend>;
+  /** Bucketed telemetry/anomaly aggregates shared by JSON trends and PDF. */
+  trendForBatteries(batteryIds: readonly string[], period: EventTrendPeriod, metrics?: readonly TrendMetric[]): Promise<TrendResponse>;
   /** Published public notices, optionally filtered and paged. */
   publishedNotices(query?: NoticeListQuery): Promise<import("./types.js").NoticeSummary[]>;
   /** All notices for administrators, including drafts and archived rows. */

@@ -96,6 +96,24 @@ export type AdminEventTrend = {
   };
 };
 
+export const TREND_METRICS = ["volt", "curr", "temp", "soc", "anomaly"] as const;
+export type TrendMetric = (typeof TREND_METRICS)[number];
+
+export type TrendSeries = {
+  batteryId: string;
+  batteryLabel: string;
+  metric: TrendMetric;
+  unit: string;
+  points: Array<number | null>;
+};
+
+/** Shared bucketed aggregate returned by the trend API and PDF renderer. */
+export type TrendResponse = {
+  period: EventTrendPeriod;
+  buckets: string[];
+  series: TrendSeries[];
+};
+
 export type NoticeCategory = "IMPORTANT" | "MAINTENANCE" | "FEATURE" | "INFO";
 export type NoticeStatus = "DRAFT" | "PUBLISHED" | "ARCHIVED";
 export type NoticeAudience = "ALL" | "USER" | "ADMIN";

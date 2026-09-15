@@ -7,6 +7,7 @@ COPY package.json package-lock.json ./
 RUN npm ci
 COPY tsconfig.json ./
 COPY src ./src
+COPY assets ./assets
 COPY migrations ./migrations
 COPY scripts ./scripts
 RUN npm run build
@@ -18,6 +19,7 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev && npm cache clean --force
 COPY --from=build /app/dist ./dist
+COPY --from=build /app/assets ./assets
 COPY --from=build /app/migrations ./migrations
 COPY --from=build /app/scripts ./scripts
 
