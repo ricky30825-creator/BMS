@@ -2,7 +2,23 @@ import { createHash, randomUUID } from "node:crypto";
 
 import type { CellGuardStore, CreateBatteryInput, IdempotencyResult, UpdateBatteryInput } from "./contract.js";
 import { CSV_HEADER, INPUT_LIMITS, csvRow } from "./types.js";
-import type { AnomalyScoreRecord, DemoAudit, DemoBattery, DemoDiagnosis, DemoRelay, DemoSession, DemoStatus, DemoUser, DiagnosisProgress, OpsStatus } from "./types.js";
+import type {
+  AdminEventTrend,
+  AnomalyScoreRecord,
+  DemoAudit,
+  DemoBattery,
+  DemoDiagnosis,
+  DemoRelay,
+  DemoSession,
+  DemoStatus,
+  DemoUser,
+  DiagnosisProgress,
+  DomainEvent,
+  DomainEventQuery,
+  EventTrendPeriod,
+  OpsStatus,
+  RecordDomainEventInput,
+} from "./types.js";
 import { quickPhases, totalDurationMs } from "../diagnosis/phases.js";
 
 export function createMemoryStore(): CellGuardStore & { demoUsers: DemoUser[] } {
@@ -53,6 +69,7 @@ export function createMemoryStore(): CellGuardStore & { demoUsers: DemoUser[] } 
   const demoSessions = new Map<string, DemoSession>();
   const demoRelays = new Map<string, DemoRelay>();
   const demoDiagnoses = new Map<string, DemoDiagnosis>();
+  const domainEventsByDedupe = new Map<string, DomainEvent>();
 
   // PB-HONG-002의 기준선 이력. 이게 없으면 정밀 용량 테스트가 항상
   // isBaseline: true라 sohRelPct가 나오는 화면을 볼 수 없다.
@@ -112,6 +129,112 @@ export function createMemoryStore(): CellGuardStore & { demoUsers: DemoUser[] } 
     return { ...(demoRelays.get(id) ?? { batteryId: id, state: "CLOSED", interlockEngaged: false, interlockCondition: null, reasonCode: null, reason: null, changedAt: isoNow(), changedBy: "SYSTEM" }) };
   };
   const listAudits = (): DemoAudit[] => demoAudits.map((audit) => ({ ...audit }));
+
+  const DOMAIN_EVENT_SEVERITIES = new Set(["NORMAL", "CAUTION", "WARNING", "DANGER", "CUT"]);
+  const DOMAIN_EVENT_SOURCES = new Set(["SYSTEM", "AI", "INGEST", "USER"]);
+
+  const recordDomainEvent = (input: RecordDomainEventInput): DomainEvent => {
+    const dedupeKey = input.dedupeKey.normalize("NFKC").trim();
+    if (!dedupeKey) throw new Error("VALIDATION_FAILED");
+    const existing = domainEventsByDedupe.get(dedupeKey);
+    if (existing) return structuredClone(existing);
+    if (!DOMAIN_EVENT_SEVERITIES.has(input.severity) || !DOMAIN_EVENT_SOURCES.has(input.source) || !input.eventType.trim()) {
+      throw new Error("VALIDATION_FAILED");
+    }
+    const occurredMs = Date.parse(input.occurredAt);
+    if (!Number.isFinite(occurredMs)) throw new Error("VALIDATION_FAILED");
+    const score = input.score ?? null;
+    if (score !== null && (!Number.isFinite(score) || score < 0 || score > 1)) throw new Error("VALIDATION_FAILED");
+    const event: DomainEvent = {
+      id: input.id?.normalize("NFKC").trim() || `evt_${randomUUID()}`,
+      eventType: input.eventType,
+      severity: input.severity,
+      source: input.source,
+      deviceId: input.deviceId ?? null,
+      batteryId: input.batteryId ?? null,
+      sessionId: input.sessionId ?? null,
+      occurredAt: new Date(occurredMs).toISOString(),
+      score,
+      params: structuredClone(input.params ?? {}),
+      acknowledgedAt: null,
+      acknowledgedBy: null,
+      dedupeKey,
+      createdAt: isoNow(),
+    };
+    domainEventsByDedupe.set(dedupeKey, event);
+    return structuredClone(event);
+  };
+
+  const eventById = (id: string): DomainEvent | undefined => {
+    for (const event of domainEventsByDedupe.values()) {
+      if (event.id === id) return structuredClone(event);
+    }
+    return undefined;
+  };
+
+  const listDomainEvents = (query: DomainEventQuery = {}): DomainEvent[] => {
+    const eventTypes = query.eventType === undefined ? null : new Set(Array.isArray(query.eventType) ? query.eventType : [query.eventType]);
+    const severities = query.severity === undefined ? null : new Set(Array.isArray(query.severity) ? query.severity : [query.severity]);
+    const fromMs = query.from === undefined ? null : Date.parse(query.from);
+    const toMs = query.to === undefined ? null : Date.parse(query.to);
+    if ((fromMs !== null && !Number.isFinite(fromMs)) || (toMs !== null && !Number.isFinite(toMs))) throw new Error("VALIDATION_FAILED");
+    if (query.limit !== undefined && (!Number.isInteger(query.limit) || query.limit < 0)) throw new Error("VALIDATION_FAILED");
+    if (query.offset !== undefined && (!Number.isInteger(query.offset) || query.offset < 0)) throw new Error("VALIDATION_FAILED");
+    const filtered = [...domainEventsByDedupe.values()]
+      .filter((event) => {
+        const occurredMs = Date.parse(event.occurredAt);
+        const battery = event.batteryId ? demoBatteries.find((item) => item.id === event.batteryId) : undefined;
+        return (!query.ownerId || battery?.ownerId === query.ownerId)
+          && (!query.batteryId || event.batteryId === query.batteryId)
+          && (!query.deviceId || event.deviceId === query.deviceId)
+          && (!eventTypes || eventTypes.has(event.eventType))
+          && (!severities || severities.has(event.severity))
+          && (fromMs === null || occurredMs >= fromMs)
+          && (toMs === null || occurredMs < toMs)
+          && (query.acknowledged === undefined || (event.acknowledgedAt !== null) === query.acknowledged);
+      })
+      .sort((left, right) => Date.parse(right.occurredAt) - Date.parse(left.occurredAt) || right.id.localeCompare(left.id));
+    const offset = query.offset ?? 0;
+    const limit = query.limit === undefined ? filtered.length : query.limit;
+    return filtered.slice(offset, offset + limit).map((event) => structuredClone(event));
+  };
+
+  const eventTrend = (period: EventTrendPeriod): AdminEventTrend => {
+    if (period !== "24h" && period !== "7d" && period !== "30d") throw new Error("VALIDATION_FAILED");
+    const now = Date.now();
+    const dayMs = 24 * 60 * 60 * 1000;
+    const hourMs = 60 * 60 * 1000;
+    const count = period === "24h" ? 25 : period === "7d" ? 7 : 30;
+    const stepMs = period === "24h" ? hourMs : dayMs;
+    const endMs = period === "24h"
+      ? Math.floor(now / hourMs) * hourMs
+      : Date.UTC(new Date(now).getUTCFullYear(), new Date(now).getUTCMonth(), new Date(now).getUTCDate());
+    const startMs = endMs - (count - 1) * stepMs;
+    const buckets = Array.from({ length: count }, (_, index) => new Date(startMs + index * stepMs).toISOString());
+    const values = { CAUTION: Array<number>(count).fill(0), WARNING: Array<number>(count).fill(0), DANGER: Array<number>(count).fill(0) };
+    for (const event of domainEventsByDedupe.values()) {
+      if (event.eventType !== "ANOMALY_GRADE_CHANGED" || !(event.severity in values)) continue;
+      const at = Date.parse(event.occurredAt);
+      const index = Math.floor((at - startMs) / stepMs);
+      if (index >= 0 && index < count) values[event.severity as keyof typeof values][index] += 1;
+    }
+    const total = values.CAUTION.reduce((sum, value) => sum + value, 0)
+      + values.WARNING.reduce((sum, value) => sum + value, 0)
+      + values.DANGER.reduce((sum, value) => sum + value, 0);
+    const dangerTotal = values.DANGER.reduce((sum, value) => sum + value, 0);
+    const peakTotal = Math.max(0, ...Array.from({ length: count }, (_, index) => values.CAUTION[index] + values.WARNING[index] + values.DANGER[index]));
+    const peakIndex = peakTotal === 0 ? -1 : Array.from({ length: count }, (_, index) => values.CAUTION[index] + values.WARNING[index] + values.DANGER[index]).findIndex((value) => value === peakTotal);
+    return {
+      period,
+      buckets,
+      series: [
+        { grade: "CAUTION", values: values.CAUTION },
+        { grade: "WARNING", values: values.WARNING },
+        { grade: "DANGER", values: values.DANGER },
+      ],
+      summary: { total, dangerTotal, peakAt: peakIndex < 0 ? null : buckets[peakIndex], peakTotal },
+    };
+  };
 
   const audit = (input: Omit<DemoAudit, "id" | "at">): DemoAudit => {
     const entry = { ...input, id: `audit_${randomUUID()}`, at: isoNow() };
@@ -267,6 +390,7 @@ export function createMemoryStore(): CellGuardStore & { demoUsers: DemoUser[] } 
     const battery = findBattery(batteryId);
     if (!battery) throw new Error("NOT_FOUND");
     const current = readRelay(batteryId);
+    if (current.interlockEngaged) return { ...current };
     const next: DemoRelay = {
       ...current,
       state: "OPEN",
@@ -279,6 +403,15 @@ export function createMemoryStore(): CellGuardStore & { demoUsers: DemoUser[] } 
     };
     demoRelays.set(batteryId, next);
     audit({ actorId: "SYSTEM", action: "RELAY_AUTO_CUT", resource: batteryId, result: "SUCCESS", reason: triggerCode });
+    recordDomainEvent({
+      eventType: "RELAY_AUTO_CUT",
+      severity: "CUT",
+      source: "SYSTEM",
+      batteryId,
+      occurredAt: next.changedAt,
+      params: { triggerCode, condition },
+      dedupeKey: `failsafe:${batteryId}:${triggerCode}:${condition}`,
+    });
     return { ...next };
   };
 
@@ -404,6 +537,9 @@ export function createMemoryStore(): CellGuardStore & { demoUsers: DemoUser[] } 
     // it as a fabricated anomaly row would blur the demo/production boundary.
     async latestAnomaly(_batteryId): Promise<AnomalyScoreRecord | null> { return null; },
     async anomalyScoresForBattery(_batteryId, _from, _to): Promise<AnomalyScoreRecord[]> { return []; },
+    async domainEventById(id) { return eventById(id); },
+    async domainEvents(query) { return listDomainEvents(query); },
+    async getAdminEventTrend(period) { return eventTrend(period); },
     async activeDiagnosis(batteryId) { return findActiveDiagnosis(batteryId); },
     async diagnosisById(id) { return findDiagnosisById(id); },
     async diagnosesForBattery(batteryId) { return listDiagnosesForBattery(batteryId); },
@@ -419,6 +555,16 @@ export function createMemoryStore(): CellGuardStore & { demoUsers: DemoUser[] } 
     async changeUserStatus(actorId, userId, status, reason) { return setUserStatus(actorId, userId, status, reason); },
     async changeRelay(actorId, batteryId, action, reason) { return setRelay(actorId, batteryId, action, reason); },
     async engageFailsafe(batteryId, triggerCode, condition) { return engage(batteryId, triggerCode, condition); },
+    async recordDomainEvent(input) { return recordDomainEvent(input); },
+    async acknowledgeDomainEvent(actorId, eventId) {
+      const event = [...domainEventsByDedupe.values()].find((item) => item.id === eventId);
+      if (!event) throw new Error("NOT_FOUND");
+      if (!event.acknowledgedAt) {
+        event.acknowledgedAt = isoNow();
+        event.acknowledgedBy = actorId;
+      }
+      return structuredClone(event);
+    },
     async startDiagnosis(ownerId, kind, batteryId, input) { return beginDiagnosis(ownerId, kind, batteryId, input); },
     async abortDiagnosis(ownerId, batteryId) { return cancelDiagnosis(ownerId, batteryId); },
     async advanceDiagnosis(id, phase, progress) { return advance(id, phase, progress); },

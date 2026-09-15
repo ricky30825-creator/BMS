@@ -27,6 +27,72 @@ export type AnomalyScoreRecord = {
   tempCellEstimated: number | null;
 };
 
+export type DomainEventType = "ANOMALY_GRADE_CHANGED" | "RELAY_AUTO_CUT" | (string & {});
+export type DomainEventSeverity = "NORMAL" | "CAUTION" | "WARNING" | "DANGER" | "CUT";
+export type DomainEventSource = "SYSTEM" | "AI" | "INGEST" | "USER";
+
+/** A durable domain event.  Human-readable copy is kept out of this type. */
+export type DomainEvent = {
+  id: string;
+  eventType: DomainEventType;
+  severity: DomainEventSeverity;
+  source: DomainEventSource;
+  deviceId: string | null;
+  batteryId: string | null;
+  sessionId: string | null;
+  occurredAt: string;
+  score: number | null;
+  params: Record<string, unknown>;
+  acknowledgedAt: string | null;
+  acknowledgedBy: string | null;
+  dedupeKey: string;
+  createdAt: string;
+};
+
+export type RecordDomainEventInput = {
+  /** Optional only for callers that need a stable externally visible id. */
+  id?: string;
+  eventType: DomainEventType;
+  severity: DomainEventSeverity;
+  source: DomainEventSource;
+  deviceId?: string | null;
+  batteryId?: string | null;
+  sessionId?: string | null;
+  occurredAt: string;
+  score?: number | null;
+  params?: Record<string, unknown>;
+  dedupeKey: string;
+};
+
+export type DomainEventQuery = {
+  ownerId?: string;
+  batteryId?: string;
+  deviceId?: string;
+  eventType?: DomainEventType | DomainEventType[];
+  severity?: DomainEventSeverity | DomainEventSeverity[];
+  from?: string;
+  to?: string;
+  acknowledged?: boolean;
+  limit?: number;
+  offset?: number;
+};
+
+export type EventTrendPeriod = "24h" | "7d" | "30d";
+export type AdminEventTrend = {
+  period: EventTrendPeriod;
+  buckets: string[];
+  series: Array<{
+    grade: "CAUTION" | "WARNING" | "DANGER";
+    values: number[];
+  }>;
+  summary: {
+    total: number;
+    dangerTotal: number;
+    peakAt: string | null;
+    peakTotal: number;
+  };
+};
+
 export type DemoUser = {
   id: string;
   email: string;

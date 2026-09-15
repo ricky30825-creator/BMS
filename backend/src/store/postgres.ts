@@ -4,6 +4,7 @@ import type pg from "pg";
 import type { CellGuardStore, CreateBatteryInput, IdempotencyResult, UpdateBatteryInput } from "./contract.js";
 import { CSV_HEADER, INPUT_LIMITS } from "./types.js";
 import type {
+  AdminEventTrend,
   AnomalyScoreRecord,
   DemoAudit,
   DemoBattery,
@@ -13,7 +14,13 @@ import type {
   DemoStatus,
   DemoUser,
   DiagnosisProgress,
+  DomainEvent,
+  DomainEventQuery,
+  DomainEventSeverity,
+  DomainEventSource,
+  EventTrendPeriod,
   OpsStatus,
+  RecordDomainEventInput,
 } from "./types.js";
 import { quickPhases, totalDurationMs } from "../diagnosis/phases.js";
 import { KAFKA_CONTRACT_VERSION, KAFKA_TOPICS, type BackendOutboundCommandEvent } from "../kafka.js";
@@ -305,6 +312,83 @@ function mapAudit(row: AnyRow): DemoAudit {
   };
 }
 
+function mapDomainEvent(row: AnyRow): DomainEvent {
+  return {
+    id: String(row.id),
+    eventType: String(row.event_type),
+    severity: String(row.severity) as DomainEventSeverity,
+    source: String(row.source) as DomainEventSource,
+    deviceId: row.device_id == null ? null : String(row.device_id),
+    batteryId: row.battery_id == null ? null : String(row.battery_id),
+    sessionId: row.session_id == null ? null : String(row.session_id),
+    occurredAt: iso(row.occurred_at),
+    score: numberOrNull(row.score),
+    params: jsonObject(row.params),
+    acknowledgedAt: nullableIso(row.acknowledged_at),
+    acknowledgedBy: row.acknowledged_by == null ? null : String(row.acknowledged_by),
+    dedupeKey: String(row.dedupe_key),
+    createdAt: iso(row.created_at),
+  };
+}
+
+const DOMAIN_EVENT_COLUMNS = `
+  id, event_type, severity, source, device_id, battery_id, session_id,
+  occurred_at, score, params, acknowledged_at, acknowledged_by,
+  dedupe_key, created_at
+`;
+const DOMAIN_EVENT_COLUMNS_QUALIFIED = `
+  e.id, e.event_type, e.severity, e.source, e.device_id, e.battery_id, e.session_id,
+  e.occurred_at, e.score, e.params, e.acknowledged_at, e.acknowledged_by,
+  e.dedupe_key, e.created_at
+`;
+
+const DOMAIN_EVENT_SEVERITIES = new Set<DomainEventSeverity>(["NORMAL", "CAUTION", "WARNING", "DANGER", "CUT"]);
+const DOMAIN_EVENT_SOURCES = new Set<DomainEventSource>(["SYSTEM", "AI", "INGEST", "USER"]);
+
+function domainEventJson(value: unknown): Record<string, unknown> {
+  if (value === undefined) return {};
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("VALIDATION_FAILED");
+  return clone(value as Record<string, unknown>);
+}
+
+function validateDomainEventInput(input: RecordDomainEventInput): {
+  id: string;
+  eventType: string;
+  severity: DomainEventSeverity;
+  source: DomainEventSource;
+  deviceId: string | null;
+  batteryId: string | null;
+  sessionId: string | null;
+  occurredAt: Date;
+  score: number | null;
+  params: Record<string, unknown>;
+  dedupeKey: string;
+} {
+  const eventType = input.eventType.normalize("NFKC").trim();
+  const dedupeKey = input.dedupeKey.normalize("NFKC").trim();
+  const eventId = input.id?.normalize("NFKC").trim() || `evt_${randomUUID()}`;
+  if (!eventType || !dedupeKey || !eventId || !DOMAIN_EVENT_SEVERITIES.has(input.severity) || !DOMAIN_EVENT_SOURCES.has(input.source)) {
+    throw new Error("VALIDATION_FAILED");
+  }
+  const occurredAt = new Date(input.occurredAt);
+  if (Number.isNaN(occurredAt.getTime())) throw new Error("VALIDATION_FAILED");
+  const score = input.score ?? null;
+  if (score !== null && (!Number.isFinite(score) || score < 0 || score > 1)) throw new Error("VALIDATION_FAILED");
+  return {
+    id: eventId,
+    eventType,
+    severity: input.severity,
+    source: input.source,
+    deviceId: input.deviceId ?? null,
+    batteryId: input.batteryId ?? null,
+    sessionId: input.sessionId ?? null,
+    occurredAt,
+    score,
+    params: domainEventJson(input.params),
+    dedupeKey,
+  };
+}
+
 function csvCell(value: unknown): string {
   if (value === null || value === undefined) return "";
   const text = typeof value === "string" ? value : typeof value === "object" ? JSON.stringify(value) : String(value);
@@ -501,9 +585,119 @@ export function createPostgresStore(pool: pg.Pool): CellGuardStore {
     return mapAudit(result.rows[0]);
   }
 
+  /**
+   * Insert a domain event as part of the caller's transaction.  The natural
+   * dedupe key is the replay boundary; a duplicate is deliberately a no-op.
+   * The helper does not start or commit a transaction itself so anomaly-score,
+   * relay, audit, and outbox writes can share one atomic boundary.
+   */
+  async function insertDomainEvent(executor: QueryExecutor, input: RecordDomainEventInput): Promise<void> {
+    const normalized = validateDomainEventInput(input);
+    await query(executor, `
+      insert into domain_event (
+        id, event_type, severity, source, device_id, battery_id, session_id,
+        occurred_at, score, params, acknowledged_at, acknowledged_by,
+        dedupe_key
+      ) values (
+        $1, $2, $3, $4, $5, $6, $7,
+        $8, $9, $10::jsonb, null, null,
+        $11
+      )
+      on conflict (dedupe_key) do nothing
+    `, [
+      normalized.id,
+      normalized.eventType,
+      normalized.severity,
+      normalized.source,
+      normalized.deviceId,
+      normalized.batteryId,
+      normalized.sessionId,
+      normalized.occurredAt,
+      normalized.score,
+      normalized.params,
+      normalized.dedupeKey,
+    ]);
+  }
+
   async function fetchBattery(batteryId: string, executor: QueryExecutor = pool): Promise<DemoBattery | undefined> {
     const row = await batteryRow(executor, batteryId);
     return row ? clone(mapBattery(row)) : undefined;
+  }
+
+  async function domainEventRow(executor: QueryExecutor, eventId: string, lock = false): Promise<AnyRow | null> {
+    const result = await query<AnyRow>(executor, `
+      select ${DOMAIN_EVENT_COLUMNS}
+      from domain_event
+      where id = $1
+      ${lock ? "for update" : ""}
+    `, [eventId]);
+    return result.rows[0] ?? null;
+  }
+
+  function trendWindow(period: EventTrendPeriod, now = Date.now()): {
+    count: number;
+    stepMs: number;
+    startMs: number;
+    endExclusiveMs: number;
+  } {
+    const hourMs = 60 * 60 * 1000;
+    const dayMs = 24 * hourMs;
+    const count = period === "24h" ? 25 : period === "7d" ? 7 : period === "30d" ? 30 : 0;
+    if (!count) throw new Error("VALIDATION_FAILED");
+    const stepMs = period === "24h" ? hourMs : dayMs;
+    const current = new Date(now);
+    const endBucketMs = period === "24h"
+      ? Math.floor(now / hourMs) * hourMs
+      : Date.UTC(current.getUTCFullYear(), current.getUTCMonth(), current.getUTCDate());
+    const startMs = endBucketMs - (count - 1) * stepMs;
+    return { count, stepMs, startMs, endExclusiveMs: endBucketMs + stepMs };
+  }
+
+  async function adminEventTrend(period: EventTrendPeriod): Promise<AdminEventTrend> {
+    const window = trendWindow(period);
+    const result = await query<AnyRow>(pool, `
+      select severity, occurred_at, count(*)::int as count
+      from domain_event
+      where event_type = 'ANOMALY_GRADE_CHANGED'
+        and severity in ('CAUTION', 'WARNING', 'DANGER')
+        and occurred_at >= $1::timestamptz
+        and occurred_at < $2::timestamptz
+      group by severity, occurred_at
+      order by occurred_at asc
+    `, [new Date(window.startMs), new Date(window.endExclusiveMs)]);
+    const buckets = Array.from({ length: window.count }, (_, index) => new Date(window.startMs + index * window.stepMs).toISOString());
+    const values: Record<"CAUTION" | "WARNING" | "DANGER", number[]> = {
+      CAUTION: Array<number>(window.count).fill(0),
+      WARNING: Array<number>(window.count).fill(0),
+      DANGER: Array<number>(window.count).fill(0),
+    };
+    for (const row of result.rows) {
+      const severity = String(row.severity) as keyof typeof values;
+      if (!(severity in values)) continue;
+      const occurredAt = new Date(row.occurred_at).getTime();
+      const index = Math.floor((occurredAt - window.startMs) / window.stepMs);
+      if (index >= 0 && index < window.count) values[severity][index] += integerOrNull(row.count) ?? 0;
+    }
+    const totals = Array.from({ length: window.count }, (_, index) => values.CAUTION[index] + values.WARNING[index] + values.DANGER[index]);
+    const total = totals.reduce((sum, value) => sum + value, 0);
+    const dangerTotal = values.DANGER.reduce((sum, value) => sum + value, 0);
+    const peakTotal = Math.max(0, ...totals);
+    const peakIndex = peakTotal === 0 ? -1 : totals.findIndex((value) => value === peakTotal);
+    return {
+      period,
+      buckets,
+      series: [
+        { grade: "CAUTION", values: values.CAUTION },
+        { grade: "WARNING", values: values.WARNING },
+        { grade: "DANGER", values: values.DANGER },
+      ],
+      summary: {
+        total,
+        dangerTotal,
+        peakAt: peakIndex < 0 ? null : buckets[peakIndex],
+        peakTotal,
+      },
+    };
   }
 
   function estimatedEnd(kind: "QUICK" | "CAPACITY", battery: DemoBattery, input: Record<string, unknown>, startMs: number): string {
@@ -627,6 +821,63 @@ export function createPostgresStore(pool: pg.Pool): CellGuardStore {
       });
     },
 
+    async domainEventById(id) {
+      return dbCall(async () => {
+        const row = await domainEventRow(pool, id);
+        return row ? clone(mapDomainEvent(row)) : undefined;
+      });
+    },
+
+    async domainEvents(filters: DomainEventQuery = {}) {
+      return dbCall(async () => {
+        const values: unknown[] = [];
+        const where: string[] = ["1 = 1"];
+        const add = (value: unknown): string => {
+          values.push(value);
+          return `$${values.length}`;
+        };
+        const normalizedEventTypes = filters.eventType === undefined
+          ? null
+          : (Array.isArray(filters.eventType) ? filters.eventType : [filters.eventType]).map((value) => String(value));
+        const normalizedSeverities = filters.severity === undefined
+          ? null
+          : (Array.isArray(filters.severity) ? filters.severity : [filters.severity]).map((value) => String(value));
+        if (normalizedEventTypes?.length === 0 || normalizedSeverities?.length === 0) return [];
+        if (filters.ownerId !== undefined) where.push(`b.owner_user_id = ${add(filters.ownerId)}`);
+        if (filters.batteryId !== undefined) where.push(`e.battery_id = ${add(filters.batteryId)}`);
+        if (filters.deviceId !== undefined) where.push(`e.device_id = ${add(filters.deviceId)}`);
+        if (normalizedEventTypes) where.push(`e.event_type = any(${add(normalizedEventTypes)}::text[])`);
+        if (normalizedSeverities) where.push(`e.severity = any(${add(normalizedSeverities)}::text[])`);
+        if (filters.from !== undefined) {
+          if (Number.isNaN(Date.parse(filters.from))) throw new Error("VALIDATION_FAILED");
+          where.push(`e.occurred_at >= ${add(filters.from)}::timestamptz`);
+        }
+        if (filters.to !== undefined) {
+          if (Number.isNaN(Date.parse(filters.to))) throw new Error("VALIDATION_FAILED");
+          where.push(`e.occurred_at < ${add(filters.to)}::timestamptz`);
+        }
+        if (filters.acknowledged !== undefined) where.push(filters.acknowledged ? "e.acknowledged_at is not null" : "e.acknowledged_at is null");
+        if (filters.limit !== undefined && (!Number.isInteger(filters.limit) || filters.limit < 0)) throw new Error("VALIDATION_FAILED");
+        if (filters.offset !== undefined && (!Number.isInteger(filters.offset) || filters.offset < 0)) throw new Error("VALIDATION_FAILED");
+        const limit = filters.limit === undefined ? null : add(filters.limit);
+        const offset = filters.offset === undefined ? null : add(filters.offset);
+        const result = await query<AnyRow>(pool, `
+          select ${DOMAIN_EVENT_COLUMNS_QUALIFIED}
+          from domain_event e
+          left join battery_asset b on b.id = e.battery_id
+          where ${where.join(" and ")}
+          order by e.occurred_at desc, e.id desc
+          ${limit === null ? "" : `limit ${limit}`}
+          ${offset === null ? "" : `offset ${offset}`}
+        `, values);
+        return result.rows.map((row) => clone(mapDomainEvent(row)));
+      });
+    },
+
+    async getAdminEventTrend(period) {
+      return dbCall(() => adminEventTrend(period));
+    },
+
     async activeDiagnosis(batteryId) {
       return dbCall(async () => {
         const row = await activeDiagnosisRow(pool, batteryId);
@@ -747,6 +998,39 @@ export function createPostgresStore(pool: pg.Pool): CellGuardStore {
 
     async recordAudit(input) {
       return dbCall(async () => clone(await insertAudit(pool, input)));
+    },
+
+    async recordDomainEvent(input) {
+      const normalized = validateDomainEventInput(input);
+      return dbCall(async () => transaction(async (client) => {
+        await insertDomainEvent(client, { ...normalized, occurredAt: normalized.occurredAt.toISOString() });
+        const row = await domainEventRow(client, normalized.id);
+        if (row) return clone(mapDomainEvent(row));
+        const byKey = await query<AnyRow>(client, `
+          select ${DOMAIN_EVENT_COLUMNS}
+          from domain_event
+          where dedupe_key = $1
+          limit 1
+        `, [normalized.dedupeKey]);
+        if (!byKey.rows[0]) throw new Error("INTERNAL_ERROR");
+        return clone(mapDomainEvent(byKey.rows[0]));
+      }));
+    },
+
+    async acknowledgeDomainEvent(actorId, eventId) {
+      return dbCall(async () => transaction(async (client) => {
+        const current = await domainEventRow(client, eventId, true);
+        if (!current) throw new Error("NOT_FOUND");
+        const result = await query<AnyRow>(client, `
+          update domain_event
+          set acknowledged_at = coalesce(acknowledged_at, clock_timestamp()),
+              acknowledged_by = coalesce(acknowledged_by, $2)
+          where id = $1
+          returning ${DOMAIN_EVENT_COLUMNS}
+        `, [eventId, actorId === "SYSTEM" ? null : actorId]);
+        if (!result.rows[0]) throw new Error("NOT_FOUND");
+        return clone(mapDomainEvent(result.rows[0]));
+      }));
     },
 
     async startSession(ownerId, batteryId) {
@@ -995,6 +1279,11 @@ export function createPostgresStore(pool: pg.Pool): CellGuardStore {
         const battery = await batteryRow(client, batteryId);
         if (!battery) throw new Error("NOT_FOUND");
         await ensureRelay(client, batteryId);
+        const current = await relayRow(client, batteryId, true);
+        if (!current) throw new Error("NOT_FOUND");
+        // A Fail-Safe interlock is latched.  Replayed frames or concurrent
+        // safety evaluations must not append another audit/domain/outbox row.
+        if (Boolean(current.interlock_engaged)) return clone(mapRelay(current));
         await query(client, `
           update relay_state
           set state = 'OPEN', interlock_engaged = true, interlock_condition = $2,
@@ -1002,11 +1291,32 @@ export function createPostgresStore(pool: pg.Pool): CellGuardStore {
           where battery_id = $1
         `, [batteryId, condition, triggerCode]);
         await insertAudit(client, { actorId: "SYSTEM", action: "RELAY_AUTO_CUT", resource: batteryId, result: "SUCCESS", reason: triggerCode });
+        const activeSession = await query<SessionRow>(client, `
+          select id, battery_id, device_id
+          from measurement_session
+          where battery_id = $1 and status = 'ACTIVE'
+          order by started_at desc
+          limit 1
+        `, [batteryId]);
+        const session = activeSession.rows[0];
+        await insertDomainEvent(client, {
+          id: `evt_${createHash("sha256").update(`failsafe:${batteryId}:${triggerCode}:${condition}`).digest("hex").slice(0, 32)}`,
+          eventType: "RELAY_AUTO_CUT",
+          severity: "CUT",
+          source: "SYSTEM",
+          deviceId: session?.device_id == null ? null : String(session.device_id),
+          batteryId,
+          sessionId: session?.id == null ? null : String(session.id),
+          occurredAt: new Date().toISOString(),
+          score: null,
+          params: { triggerCode, condition },
+          dedupeKey: `failsafe:${batteryId}:${triggerCode}:${condition}`,
+        });
         await enqueueOutbox(client, {
           version: KAFKA_CONTRACT_VERSION,
           code: "RELAY_CUT",
           params: { batteryId, reasonCode: triggerCode },
-        }, transientOutboxDedupe(`failsafe-relay-cut:${batteryId}`));
+        }, `failsafe-relay-cut:${batteryId}:${triggerCode}:${condition}`);
         const updated = await relayRow(client, batteryId);
         if (!updated) throw new Error("NOT_FOUND");
         return clone(mapRelay(updated));

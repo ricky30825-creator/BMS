@@ -23,6 +23,7 @@ const REQUIRED_POSTGRES_TABLES = [
   "battery_latest",
   "battery_health",
   "outbox",
+  "domain_event",
 ] as const;
 
 // 서버는 listen 전에 스키마와 연결을 확인한다. PostgreSQL 모드에서
@@ -89,7 +90,7 @@ export async function initializeStore(): Promise<void> {
   `, [REQUIRED_POSTGRES_TABLES]);
   const schema = result.rows[0];
   if (!schema || Number(schema.table_count) !== REQUIRED_POSTGRES_TABLES.length || !schema.progress_snapshot || !schema.raw_payload || !schema.outbox_event_id || !schema.outbox_dedupe_key || !schema.outbox_next_attempt_at || !schema.outbox_claim_token || !schema.outbox_lease_until || !schema.outbox_dead_at) {
-    throw new Error("PostgreSQL schema is not ready; run npm run db:migrate (including 009_outbox_delivery.sql)");
+    throw new Error("PostgreSQL schema is not ready; run npm run db:migrate (including 010_domain_events.sql)");
   }
 
   const hypertables = await db.query<{ hypertable_name: string }>(`
@@ -118,6 +119,9 @@ export const sessionById = active.sessionById.bind(active);
 export const sessionsForBattery = active.sessionsForBattery.bind(active);
 export const latestAnomaly = active.latestAnomaly.bind(active);
 export const anomalyScoresForBattery = active.anomalyScoresForBattery.bind(active);
+export const domainEventById = active.domainEventById.bind(active);
+export const domainEvents = active.domainEvents.bind(active);
+export const getAdminEventTrend = active.getAdminEventTrend.bind(active);
 export const activeDiagnosis = active.activeDiagnosis.bind(active);
 export const diagnosisById = active.diagnosisById.bind(active);
 export const diagnosesForBattery = active.diagnosesForBattery.bind(active);
@@ -132,6 +136,8 @@ export const saveMemo = active.saveMemo.bind(active);
 export const changeUserStatus = active.changeUserStatus.bind(active);
 export const changeRelay = active.changeRelay.bind(active);
 export const engageFailsafe = active.engageFailsafe.bind(active);
+export const recordDomainEvent = active.recordDomainEvent.bind(active);
+export const acknowledgeDomainEvent = active.acknowledgeDomainEvent.bind(active);
 export const startDiagnosis = active.startDiagnosis.bind(active);
 export const abortDiagnosis = active.abortDiagnosis.bind(active);
 export const advanceDiagnosis = active.advanceDiagnosis.bind(active);

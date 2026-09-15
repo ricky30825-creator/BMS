@@ -1,4 +1,20 @@
-import type { AnomalyScoreRecord, DemoAudit, DemoBattery, DemoDiagnosis, DemoRelay, DemoSession, DemoStatus, DemoUser, DiagnosisProgress, OpsStatus } from "./types.js";
+import type {
+  AdminEventTrend,
+  AnomalyScoreRecord,
+  DemoAudit,
+  DemoBattery,
+  DemoDiagnosis,
+  DemoRelay,
+  DemoSession,
+  DemoStatus,
+  DemoUser,
+  DiagnosisProgress,
+  DomainEvent,
+  DomainEventQuery,
+  EventTrendPeriod,
+  OpsStatus,
+  RecordDomainEventInput,
+} from "./types.js";
 
 export type CreateBatteryInput = {
   label: string;
@@ -44,6 +60,9 @@ export interface CellGuardStore {
   sessionsForBattery(batteryId: string): Promise<DemoSession[]>;
   latestAnomaly(batteryId: string): Promise<AnomalyScoreRecord | null>;
   anomalyScoresForBattery(batteryId: string, from?: string, to?: string): Promise<AnomalyScoreRecord[]>;
+  domainEventById(id: string): Promise<DomainEvent | undefined>;
+  domainEvents(query?: DomainEventQuery): Promise<DomainEvent[]>;
+  getAdminEventTrend(period: EventTrendPeriod): Promise<AdminEventTrend>;
   activeDiagnosis(batteryId?: string): Promise<DemoDiagnosis | null>;
   diagnosisById(id: string): Promise<DemoDiagnosis | undefined>;
   diagnosesForBattery(batteryId: string): Promise<DemoDiagnosis[]>;
@@ -67,6 +86,9 @@ export interface CellGuardStore {
   // (store/memory.ts:51-62의 픽스처가 유일) B3가 이 메서드를 필요로 한다.
   // 릴레이 상태 전이 + RELAY_AUTO_CUT 감사 기록이 원자적이어야 한다.
   engageFailsafe(batteryId: string, triggerCode: string, condition: string): Promise<DemoRelay>;
+  /** Insert once for a durable natural key; an existing key is an idempotent replay. */
+  recordDomainEvent(input: RecordDomainEventInput): Promise<DomainEvent>;
+  acknowledgeDomainEvent(actorId: string, eventId: string): Promise<DomainEvent>;
   startDiagnosis(ownerId: string, kind: "QUICK" | "CAPACITY", batteryId: string, input: Record<string, unknown>): Promise<DemoDiagnosis>;
   abortDiagnosis(ownerId: string, batteryId: string): Promise<DemoDiagnosis>;
   advanceDiagnosis(id: string, phase: string, progress: DiagnosisProgress): Promise<DemoDiagnosis>;

@@ -32,7 +32,7 @@ type FakeOptions = {
     battery_target_mode: number;
   }> | null;
   registeredDevice?: boolean;
-  failOn?: "anomaly" | "latest" | "commit";
+  failOn?: "anomaly" | "latest" | "domainEvent" | "commit";
 };
 
 type StoredAnomaly = {
@@ -50,12 +50,24 @@ type StoredAnomaly = {
 };
 
 type StoredLatest = { score: number | null; evaluated_at: Date | null };
+type StoredDomainEvent = {
+  id: string;
+  severity: string;
+  device_id: string;
+  battery_id: string | null;
+  session_id: string | null;
+  occurred_at: Date;
+  score: number;
+  params: unknown;
+  dedupe_key: string;
+};
 
 function fakeDb(options: FakeOptions = {}) {
   const queries: Array<{ text: string; values: unknown[] }> = [];
   const anomalies = new Map<string, StoredAnomaly>();
   const latest = new Map<string, StoredLatest>();
-  let transactionSnapshot: { anomalies: Map<string, StoredAnomaly>; latest: Map<string, StoredLatest> } | null = null;
+  const domainEvents = new Map<string, StoredDomainEvent>();
+  let transactionSnapshot: { anomalies: Map<string, StoredAnomaly>; latest: Map<string, StoredLatest>; domainEvents: Map<string, StoredDomainEvent> } | null = null;
   const session = () => options.activeSession === null ? null : {
     id: "session-1",
     battery_id: "battery-1",
@@ -65,12 +77,13 @@ function fakeDb(options: FakeOptions = {}) {
   };
   const copyAnomalyMap = () => new Map([...anomalies].map(([key, row]) => [key, { ...row, evaluated_at: new Date(row.evaluated_at) }]));
   const copyLatestMap = () => new Map([...latest].map(([key, row]) => [key, { ...row, evaluated_at: row.evaluated_at ? new Date(row.evaluated_at) : null }]));
+  const copyDomainEventMap = () => new Map([...domainEvents].map(([key, row]) => [key, { ...row, occurred_at: new Date(row.occurred_at) }]));
   const client: AnomalyDbClient = {
     query: vi.fn(async (text: string, values: unknown[] = []) => {
       queries.push({ text, values });
       const normalized = text.replace(/\s+/g, " ").trim().toLowerCase();
       if (normalized === "begin") {
-        transactionSnapshot = { anomalies: copyAnomalyMap(), latest: copyLatestMap() };
+        transactionSnapshot = { anomalies: copyAnomalyMap(), latest: copyLatestMap(), domainEvents: copyDomainEventMap() };
         return { rows: [] };
       }
       if (normalized === "rollback") {
@@ -79,6 +92,8 @@ function fakeDb(options: FakeOptions = {}) {
           for (const [key, row] of transactionSnapshot.anomalies) anomalies.set(key, { ...row, evaluated_at: new Date(row.evaluated_at) });
           latest.clear();
           for (const [key, row] of transactionSnapshot.latest) latest.set(key, { ...row, evaluated_at: row.evaluated_at ? new Date(row.evaluated_at) : null });
+          domainEvents.clear();
+          for (const [key, row] of transactionSnapshot.domainEvents) domainEvents.set(key, { ...row, occurred_at: new Date(row.occurred_at) });
         }
         transactionSnapshot = null;
         return { rows: [] };
@@ -122,6 +137,25 @@ function fakeDb(options: FakeOptions = {}) {
         const row = anomalies.get(key);
         return { rows: row ? [{ ...row }] : [] };
       }
+      if (normalized.startsWith("insert into domain_event")) {
+        if (options.failOn === "domainEvent") throw new Error("domain event insert failed");
+        const key = String(values[8]);
+        if (domainEvents.has(key)) return { rows: [] };
+        const row: StoredDomainEvent = {
+          id: String(values[0]),
+          severity: String(values[1]),
+          device_id: String(values[2]),
+          battery_id: values[3] as string | null,
+          session_id: values[4] as string | null,
+          occurred_at: values[5] as Date,
+          score: values[6] as number,
+          params: values[7],
+          dedupe_key: key,
+        };
+        domainEvents.set(key, row);
+        return { rows: [] };
+      }
+      if (normalized.includes("from domain_event")) return { rows: [] };
       if (normalized.includes("from battery_latest")) {
         const row = latest.get(String(values[0]));
         return { rows: row ? [{ ...row }] : [] };
@@ -147,6 +181,7 @@ function fakeDb(options: FakeOptions = {}) {
     queries,
     anomalies,
     latest,
+    domainEvents,
   };
 }
 
@@ -238,6 +273,43 @@ describe("anomaly score ingestion", () => {
     expect(fake.latest.get("battery-1")?.score).toBe(0.82);
     const latestQuery = fake.queries.find((query) => query.text.toLowerCase().includes("insert into battery_latest"));
     expect(latestQuery?.text).toContain("excluded.evaluated_at > battery_latest.evaluated_at");
+  });
+
+  it("stores one grade-transition domain event in the score transaction", async () => {
+    const fake = fakeDb();
+    await ingestAnomalyAlert(fake.pool, anomaly);
+    const transitioned = await ingestAnomalyAlert(fake.pool, {
+      ...anomaly,
+      evaluated_at: "2026-09-14T04:00:01.100Z",
+      score: 0.55,
+    });
+
+    expect(transitioned.previousGrade).toBe("DANGER");
+    expect(transitioned.grade).toBe("CAUTION");
+    expect(fake.domainEvents.size).toBe(1);
+    const event = [...fake.domainEvents.values()][0];
+    expect(event).toMatchObject({
+      severity: "CAUTION",
+      device_id: "device-1",
+      battery_id: "battery-1",
+      session_id: "session-1",
+      score: 0.55,
+    });
+
+    const replay = await ingestAnomalyAlert(fake.pool, { ...anomaly, evaluated_at: "2026-09-14T04:00:01.100Z", score: 0.55 });
+    expect(replay.kind).toBe("duplicate");
+    expect(fake.domainEvents.size).toBe(1);
+  });
+
+  it("rolls back the score and latest cache when domain-event persistence fails", async () => {
+    const fake = fakeDb({ failOn: "domainEvent" });
+    const seededLatest = { score: 0.82, evaluated_at: new Date("2026-09-14T04:00:00.100Z") };
+    fake.latest.set("battery-1", seededLatest);
+    await expect(ingestAnomalyAlert(fake.pool, { ...anomaly, score: 0.55, evaluated_at: "2026-09-14T04:00:01.100Z" })).rejects.toThrow("domain event insert failed");
+    expect(fake.anomalies.size).toBe(0);
+    expect(fake.latest.get("battery-1")).toEqual(seededLatest);
+    expect(fake.domainEvents.size).toBe(0);
+    expect(fake.queries.map((query) => query.text.toLowerCase())).toContain("rollback");
   });
 });
 

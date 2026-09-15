@@ -176,6 +176,63 @@ export function runStoreContractTests(name: string, makeStore: () => Promise<Cel
       expect((await store.idempotent("kimeng", "shared", body)).kind).toBe("new");
     });
 
+    it("도메인 이벤트는 dedupe key로 멱등 저장되고 단일 행만 ack한다", async () => {
+      const battery = (await store.batteries())[0];
+      const input = {
+        eventType: "ANOMALY_GRADE_CHANGED" as const,
+        severity: "DANGER" as const,
+        source: "AI" as const,
+        deviceId: "event-test-device",
+        batteryId: battery.id,
+        sessionId: null,
+        occurredAt: "2026-09-15T00:00:00.000Z",
+        score: 0.82,
+        params: { from: "WARNING", to: "DANGER" },
+        dedupeKey: "anomaly-grade:event-test-device:2026-09-15T00:00:00.000Z",
+      };
+      const first = await store.recordDomainEvent(input);
+      const replay = await store.recordDomainEvent({ ...input, severity: "NORMAL", score: 0.1 });
+      expect(replay).toEqual(first);
+      expect((await store.domainEvents({ eventType: "ANOMALY_GRADE_CHANGED", batteryId: battery.id })).map((event) => event.id)).toEqual([first.id]);
+
+      const acknowledged = await store.acknowledgeDomainEvent("leelab", first.id);
+      expect(acknowledged.acknowledgedAt).not.toBeNull();
+      expect(acknowledged.acknowledgedBy).toBe("leelab");
+      const replayAck = await store.acknowledgeDomainEvent("hong", first.id);
+      expect(replayAck.acknowledgedAt).toBe(acknowledged.acknowledgedAt);
+      expect(replayAck.acknowledgedBy).toBe("leelab");
+    });
+
+    it("관리자 이벤트 추이는 UTC 버킷과 위험 3등급만 반환한다", async () => {
+      await store.recordDomainEvent({
+        eventType: "ANOMALY_GRADE_CHANGED",
+        severity: "CAUTION",
+        source: "AI",
+        occurredAt: new Date().toISOString(),
+        score: 0.3,
+        dedupeKey: "trend-caution-1",
+      });
+      await store.recordDomainEvent({
+        eventType: "RELAY_AUTO_CUT",
+        severity: "CUT",
+        source: "SYSTEM",
+        occurredAt: new Date().toISOString(),
+        score: null,
+        dedupeKey: "trend-cut-1",
+      });
+      const trend = await store.getAdminEventTrend("24h");
+      expect(trend.period).toBe("24h");
+      expect(trend.buckets).toHaveLength(25);
+      expect(trend.buckets.every((bucket) => bucket.endsWith(".000Z"))).toBe(true);
+      expect(trend.series).toEqual(expect.arrayContaining([
+        expect.objectContaining({ grade: "CAUTION" }),
+        expect.objectContaining({ grade: "WARNING" }),
+        expect.objectContaining({ grade: "DANGER" }),
+      ]));
+      expect(trend.summary.total).toBe(1);
+      expect(trend.summary.dangerTotal).toBe(0);
+    });
+
     it("반환값을 고쳐도 저장소가 오염되지 않는다", async () => {
       const battery = (await store.batteries())[0];
       battery.label = "손으로 바꾼 이름";
@@ -206,6 +263,7 @@ async function resetPostgresContractDatabase(pool: pg.Pool): Promise<void> {
   await pool.query(`
     truncate table audit_log, idempotency_key, diagnosis, telemetry_metric,
       anomaly_score, battery_health, battery_latest, relay_state, measurement_session, outbox,
+      domain_event,
       battery_asset restart identity cascade
   `);
   await pool.query(`
@@ -281,6 +339,24 @@ if (postgresTestPool) {
       expect(rejected?.reason).toEqual(expect.objectContaining({ message: "NO_ACTIVE_SESSION" }));
       expect((await stores[0].activeSession())?.status).toBe("ACTIVE");
       expect((await stores[0].sessionsForBattery("pg-mode2")).filter((session) => session.status === "ACTIVE")).toHaveLength(1);
+    });
+
+    it("동시 동일 domain-event dedupe는 한 행으로 수렴한다", async () => {
+      await resetPostgresContractDatabase(postgresTestPool);
+      const input = {
+        eventType: "ANOMALY_GRADE_CHANGED" as const,
+        severity: "DANGER" as const,
+        source: "AI" as const,
+        deviceId: "event-concurrency-device",
+        batteryId: "pg-mode2",
+        occurredAt: "2026-09-15T00:00:00.000Z",
+        score: 0.82,
+        dedupeKey: "anomaly-grade:event-concurrency-device:2026-09-15T00:00:00.000Z",
+      };
+      const stores = [createPostgresStore(postgresTestPool), createPostgresStore(postgresTestPool)];
+      const rows = await Promise.all(stores.map((store) => store.recordDomainEvent(input)));
+      expect(rows[0].id).toBe(rows[1].id);
+      expect((await stores[0].domainEvents({ deviceId: "event-concurrency-device" }))).toHaveLength(1);
     });
   });
 } else {

@@ -62,6 +62,7 @@ type FakeOptions = {
   activeSession?: Record<string, unknown>;
   relayState?: Record<string, unknown>;
   anomalyRows?: Record<string, unknown>[];
+  domainEventRows?: Record<string, unknown>[];
 };
 
 function fakePool(options: FakeOptions = {}) {
@@ -79,6 +80,7 @@ function fakePool(options: FakeOptions = {}) {
   let diagnosisRow = { ...diagnosis };
   let relayState = options.relayState ? { ...options.relayState } : null;
   const outboxRows: Array<{ event_id: string; dedupe_key: string }> = [];
+  const domainEventRows: Record<string, unknown>[] = [...(options.domainEventRows ?? [])];
   const run = vi.fn(async (text: string, values: unknown[] = []) => {
     queries.push({ text, values });
     const normalized = text.replace(/\s+/g, " ").trim().toLowerCase();
@@ -93,6 +95,30 @@ function fakePool(options: FakeOptions = {}) {
     }
     if (normalized.includes("from battery_asset")) return { rows: options.missingBattery ? [] : [batteryRow] };
     if (normalized.includes("from anomaly_score")) return { rows: options.anomalyRows ?? [] };
+    if (normalized.startsWith("insert into domain_event")) {
+      const dedupeKey = String(values[10]);
+      if (!domainEventRows.some((row) => row.dedupe_key === dedupeKey)) {
+        domainEventRows.push({
+          id: String(values[0]), event_type: values[1], severity: values[2], source: values[3],
+          device_id: values[4], battery_id: values[5], session_id: values[6], occurred_at: values[7],
+          score: values[8], params: values[9], acknowledged_at: null, acknowledged_by: null,
+          dedupe_key: dedupeKey, created_at: "2026-09-15T01:30:00.000Z",
+        });
+      }
+      return { rows: [] };
+    }
+    if (normalized.startsWith("update domain_event")) {
+      const row = domainEventRows.find((candidate) => candidate.id === values[0]);
+      if (!row) return { rows: [] };
+      row.acknowledged_at = row.acknowledged_at ?? "2026-09-15T01:30:01.000Z";
+      row.acknowledged_by = row.acknowledged_by ?? values[1];
+      return { rows: [row] };
+    }
+    if (normalized.includes("from domain_event")) {
+      if (normalized.includes("where id = $1")) return { rows: domainEventRows.filter((row) => row.id === values[0]) };
+      if (normalized.includes("where dedupe_key = $1")) return { rows: domainEventRows.filter((row) => row.dedupe_key === values[0]) };
+      return { rows: domainEventRows };
+    }
     if (normalized.startsWith("update battery_asset")) {
       if (normalized.includes("ops_status")) batteryRow = { ...batteryRow, ops_status: values[1], version: 1 };
       return { rows: [] };
@@ -159,7 +185,7 @@ function fakePool(options: FakeOptions = {}) {
     query: run,
     connect: vi.fn(async () => client),
   } as unknown as pg.Pool;
-  return { pool, queries };
+  return { pool, queries, domainEventRows };
 }
 
 function progress(phase: string): DiagnosisProgress {
@@ -240,6 +266,30 @@ describe("PostgreSQL store query mapping", () => {
     });
     first!.contributions![0].contribution = 99;
     expect((await store.latestAnomaly("b1"))?.contributions).toEqual([{ feature: "dT_dt", contribution: 0.41 }]);
+  });
+
+  it("persists and acknowledges a domain event idempotently", async () => {
+    const fake = fakePool();
+    const store = createPostgresStore(fake.pool);
+    const input = {
+      eventType: "ANOMALY_GRADE_CHANGED" as const,
+      severity: "WARNING" as const,
+      source: "AI" as const,
+      deviceId: "demo-device-01",
+      batteryId: "b1",
+      sessionId: "ses1",
+      occurredAt: "2026-09-15T01:00:00.000Z",
+      score: 0.61,
+      params: { from: "CAUTION", to: "WARNING" },
+      dedupeKey: "anomaly-grade:demo-device-01:2026-09-15T01:00:00.000Z",
+    };
+    const first = await store.recordDomainEvent(input);
+    const replay = await store.recordDomainEvent({ ...input, score: 0.7 });
+    expect(replay).toEqual(first);
+    expect(fake.domainEventRows).toHaveLength(1);
+    const acknowledged = await store.acknowledgeDomainEvent("hong", first.id);
+    expect(acknowledged.acknowledgedBy).toBe("hong");
+    expect((await store.domainEventById(first.id))?.acknowledgedAt).toBe(acknowledged.acknowledgedAt);
   });
 
   it("rejects a session request for another owner's battery before device lookup", async () => {

@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { Kafka, type EachMessagePayload } from "kafkajs";
 import { ZodError } from "zod";
 
@@ -340,6 +341,8 @@ export async function ingestAnomalyAlert(
 
     let previousScore: number | null = null;
     let latestUpdated = false;
+    let previousGrade: Grade | null = null;
+    let grade: Grade | null = null;
 
     if (inserted && effectiveRecord.batteryId) {
       const previousResult = await client.query<LatestAnomalyRow>(`
@@ -367,13 +370,44 @@ export async function ingestAnomalyAlert(
       `, [effectiveRecord.batteryId, effectiveRecord.score, effectiveRecord.evaluatedAt]);
 
       latestUpdated = latestResult.rows.length > 0;
+
+      previousGrade = latestUpdated ? gradeForScore(previousScore) : null;
+      grade = gradeForScore(effectiveRecord.score);
+      if (latestUpdated && previousGrade && grade && previousGrade !== grade) {
+        const dedupeKey = `anomaly-grade:${effectiveRecord.deviceId}:${effectiveRecord.evaluatedAt.toISOString()}`;
+        await client.query(`
+          insert into domain_event (
+            id, event_type, severity, source, device_id, battery_id, session_id,
+            occurred_at, score, params, acknowledged_at, acknowledged_by, dedupe_key
+          ) values (
+            $1, 'ANOMALY_GRADE_CHANGED', $2, 'AI', $3, $4, $5,
+            $6, $7, $8::jsonb, null, null, $9
+          )
+          on conflict (dedupe_key) do nothing
+        `, [
+          `evt_${createHash("sha256").update(dedupeKey).digest("hex").slice(0, 32)}`,
+          grade,
+          effectiveRecord.deviceId,
+          effectiveRecord.batteryId,
+          effectiveRecord.sessionId,
+          effectiveRecord.evaluatedAt,
+          effectiveRecord.score,
+          JSON.stringify({
+            from: previousGrade,
+            to: grade,
+            previousScore,
+            score: effectiveRecord.score,
+            evaluatedAt: effectiveRecord.evaluatedAt.toISOString(),
+          }),
+          dedupeKey,
+        ]);
+      }
     }
 
     await client.query("commit");
     committed = true;
 
-    const previousGrade = gradeForScore(latestUpdated ? previousScore : null);
-    const grade = gradeForScore(effectiveRecord.score);
+    if (!grade) grade = gradeForScore(effectiveRecord.score);
     const result: AnomalyIngestResult = {
       kind: inserted ? "accepted" : "duplicate",
       alert,
