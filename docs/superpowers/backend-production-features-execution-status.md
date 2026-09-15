@@ -47,27 +47,27 @@
 
 ## Task 2 — 영속 이벤트·알림 기반
 
-- 현재 상태: `REVIEW_REQUIRED`
+- 현재 상태: `COMPLETE`
 - 담당 에이전트: `/root/task2_events_fix` (최초 구현 `/root/task2_events`)
 - 기준 커밋: `047bbe7`
 - 결과 커밋: `a0aacb1`, 수정 `747eea9`
 - 변경 파일: `backend/migrations/010_domain_events.sql`, `backend/src/store/{types,contract,memory,postgres}.ts`, `backend/src/store.ts`, `backend/src/anomalyConsumer.ts` 및 관련 테스트
 - 구현 결과: domain event 저장/조회/ack/UTC bucket 객체 집계, anomaly 전이 transaction/dedupe, Fail-Safe relay/audit/domain-event/outbox 원자성 기반 구현
-- 부모 검토 결과: 수정 결과 재검토 대기
+- 부모 검토 결과: 통과 — migration/SQL transaction, anomaly replay, Fail-Safe 원자성, 공통 bucket 객체 계약과 경계 테스트를 직접 검토함
 - 서브에이전트 테스트: backend typecheck 통과, 수정 후 Vitest 312 passed/1 skipped, `git diff --check` 통과
-- 부모 독립 테스트: 미실행
-- 실환경 검증 여부: 미실행
-- 남은 문제 또는 외부 차단 조건: 부모 독립 검토 필요; `TEST_DATABASE_URL` 미설정으로 실 PostgreSQL 테스트 skip
+- 부모 독립 테스트: backend typecheck 통과, 전체 Vitest 312 passed/1 skipped, 전체 `git diff --check` 통과
+- 실환경 검증 여부: memory/unit 검증 완료; `TEST_DATABASE_URL` 미설정으로 실 PostgreSQL 계약 테스트 skip
+- 남은 문제 또는 외부 차단 조건: 실 PostgreSQL 재시작·동시성 인수는 Task 8 환경 확인 대상
 
 ## Task 3 — 공지사항 실제 구현
 
-- 현재 상태: `PENDING`
-- 담당 에이전트: 미배정
-- 기준 커밋: 미정
+- 현재 상태: `IN_PROGRESS`
+- 담당 에이전트: `/root/task3_notices`
+- 기준 커밋: `200856f`
 - 결과 커밋: 미정
 - 변경 파일: 미정
-- 구현 결과: 미착수
-- 부모 검토 결과: 미착수
+- 구현 결과: 공지 DB/API/프론트 연결 구현 진행 중
+- 부모 검토 결과: 대기
 - 서브에이전트 테스트: 미실행
 - 부모 독립 테스트: 미실행
 - 실환경 검증 여부: 미실행
