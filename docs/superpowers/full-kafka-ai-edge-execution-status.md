@@ -85,7 +85,7 @@
 - 담당 에이전트: 부모 세션
 - 기준 커밋: `4d46b17`
 - 결과 커밋: 미정
-- 부모 리뷰 결과: 보완 필요 — listen 실패 경로가 runtime ticker를 정리하지 않고 store를 직접 닫은 뒤 signal shutdown에서 다시 닫아 `Called end on pool more than once`가 발생함. startup failure와 signal 종료를 하나의 idempotent lifecycle로 통합해야 함
+- 부모 리뷰 결과: 추가 보완 필요 — `fba566d`가 listen 실패의 중복 cleanup은 해결했으나 SIGTERM이 DB/worker/consumer startup await 도중 오면 cleanup 이후 기존 startup chain이 다음 단계 또는 listen을 재개할 수 있는 경합이 남음
 - 실행한 테스트와 결과: 1차 부모 독립 실행 — 전체 자동 테스트·typecheck·build·계약 린트·Compose 정적 검증 통과. memory 실제 기동은 샌드박스 `listen EPERM`에서 lifecycle 중복 종료 결함 발견
 - 실환경 검증 여부: 대기
 - 남은 문제 또는 외부 차단 조건: 대기
