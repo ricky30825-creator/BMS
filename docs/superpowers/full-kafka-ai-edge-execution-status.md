@@ -59,14 +59,14 @@
 
 ## Task 6 — Raspberry Pi 명령 Consumer와 릴레이 어댑터
 
-- 현재 상태: `IN_PROGRESS`
-- 담당 에이전트: `/root/task6_edge_command`(사용량 오류), 복구 `/root/task6_edge_command_recovery`, 보완 예정
+- 현재 상태: `COMPLETE`
+- 담당 에이전트: `/root/task6_edge_command`(사용량 오류), 복구 `/root/task6_edge_command_recovery`, 보완 `/root/task6_ordering_fix`
 - 기준 커밋: `45bafae`
-- 결과 커밋: 1차 `889bac2`
-- 부모 리뷰 결과: 보완 필요 — 실제 consumer poll position은 미commit이어도 전진하는데 처리 실패 후 동일 record를 재시도하지 않고 다음 poll로 넘어가 배터리별 명령 순서를 깨뜨릴 수 있음. relay 구현 중복 코드와 구현상태/검증문서 갱신도 보완 필요
-- 실행한 테스트와 결과: 1차 에이전트 실행 — edge unittest 20 passed, Python compile 통과, `git diff --check` 통과. 부모 독립 재검증은 보완 후 수행
-- 실환경 검증 여부: 대기
-- 남은 문제 또는 외부 차단 조건: 대기
+- 결과 커밋: `889bac2`, 순서 보완 `51603395f68d4f1066662d83d6209278a101534b`
+- 부모 리뷰 결과: 통과 — strict payload/key/header, SQLite PROCESSING/SUCCEEDED 경계, duplicate/commit replay, GPIO 5/6/13/19 active-LOW 초기화, 허용 상태표, break-before-make, manual gates, interlock, shutdown을 직접 검토. poll 실패 record를 commit 또는 종료까지 유지해 후속 명령 선실행 결함을 보완함
+- 실행한 테스트와 결과: 부모 독립 실행 — edge unittest 21 passed, Python compile 통과, backend Kafka/device/outbox 집중 테스트 39 passed, backend typecheck 통과, 전체 backend Vitest 298 passed/1 skipped, backend build 통과, 설정 없는 production entrypoint가 fail-closed exit 1, `git diff --check` 및 구현 commit check 통과
+- 실환경 검증 여부: 미검증 — Raspberry Pi 5, RPi.GPIO, Kafka broker, 실제 4채널 릴레이 없음
+- 남은 문제 또는 외부 차단 조건: 실제 Pi에서 부팅 all-HIGH, GPIO library 호환성, 접점 전환, manual SOURCE_P/current/OVF gate, duplicate/restart Kafka 인수 필요
 
 ## Task 7 — 로컬 통합 실행 구성
 
