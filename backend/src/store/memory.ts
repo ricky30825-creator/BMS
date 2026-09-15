@@ -210,29 +210,39 @@ export function createMemoryStore(): CellGuardStore & { demoUsers: DemoUser[] } 
       ? Math.floor(now / hourMs) * hourMs
       : Date.UTC(new Date(now).getUTCFullYear(), new Date(now).getUTCMonth(), new Date(now).getUTCDate());
     const startMs = endMs - (count - 1) * stepMs;
-    const buckets = Array.from({ length: count }, (_, index) => new Date(startMs + index * stepMs).toISOString());
-    const values = { CAUTION: Array<number>(count).fill(0), WARNING: Array<number>(count).fill(0), DANGER: Array<number>(count).fill(0) };
+    const buckets = Array.from({ length: count }, (_, index) => ({
+      at: new Date(startMs + index * stepMs).toISOString(),
+      caution: 0,
+      warning: 0,
+      danger: 0,
+    }));
     for (const event of domainEventsByDedupe.values()) {
-      if (event.eventType !== "ANOMALY_GRADE_CHANGED" || !(event.severity in values)) continue;
+      if (event.eventType !== "ANOMALY_GRADE_CHANGED") continue;
       const at = Date.parse(event.occurredAt);
       const index = Math.floor((at - startMs) / stepMs);
-      if (index >= 0 && index < count) values[event.severity as keyof typeof values][index] += 1;
+      if (index < 0 || index >= count) continue;
+      const bucket = buckets[index];
+      if (event.severity === "CAUTION") bucket.caution += 1;
+      else if (event.severity === "WARNING") bucket.warning += 1;
+      else if (event.severity === "DANGER") bucket.danger += 1;
     }
-    const total = values.CAUTION.reduce((sum, value) => sum + value, 0)
-      + values.WARNING.reduce((sum, value) => sum + value, 0)
-      + values.DANGER.reduce((sum, value) => sum + value, 0);
-    const dangerTotal = values.DANGER.reduce((sum, value) => sum + value, 0);
-    const peakTotal = Math.max(0, ...Array.from({ length: count }, (_, index) => values.CAUTION[index] + values.WARNING[index] + values.DANGER[index]));
-    const peakIndex = peakTotal === 0 ? -1 : Array.from({ length: count }, (_, index) => values.CAUTION[index] + values.WARNING[index] + values.DANGER[index]).findIndex((value) => value === peakTotal);
+    const total = buckets.reduce((sum, bucket) => sum + bucket.caution + bucket.warning + bucket.danger, 0);
+    const dangerTotal = buckets.reduce((sum, bucket) => sum + bucket.danger, 0);
+    // Scan from oldest to newest and update only on a strictly larger total;
+    // this makes an equal peak retain the earliest bucket by contract.
+    let peakTotal = 0;
+    let peakIndex = -1;
+    buckets.forEach((bucket, index) => {
+      const bucketTotal = bucket.caution + bucket.warning + bucket.danger;
+      if (bucketTotal > peakTotal) {
+        peakTotal = bucketTotal;
+        peakIndex = index;
+      }
+    });
     return {
       period,
       buckets,
-      series: [
-        { grade: "CAUTION", values: values.CAUTION },
-        { grade: "WARNING", values: values.WARNING },
-        { grade: "DANGER", values: values.DANGER },
-      ],
-      summary: { total, dangerTotal, peakAt: peakIndex < 0 ? null : buckets[peakIndex], peakTotal },
+      summary: { total, dangerTotal, peakAt: peakIndex < 0 ? null : buckets[peakIndex].at, peakTotal },
     };
   };
 

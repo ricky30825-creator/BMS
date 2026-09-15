@@ -1,9 +1,42 @@
 import pg from "pg";
-import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CellGuardStore } from "./contract.js";
 import { createMemoryStore } from "./memory.js";
 import { createPostgresStore } from "./postgres.js";
 import { measurementPhaseFor } from "../measurementState.js";
+
+const EVENT_TREND_NOW = new Date("2026-09-15T12:34:56.789Z");
+
+async function recordTrendEvent(
+  store: CellGuardStore,
+  input: {
+    eventType?: "ANOMALY_GRADE_CHANGED" | "RELAY_AUTO_CUT";
+    severity: "NORMAL" | "CAUTION" | "WARNING" | "DANGER" | "CUT";
+    occurredAt: string;
+    dedupeKey: string;
+    deviceId?: string;
+  },
+): Promise<void> {
+  const eventType = input.eventType ?? "ANOMALY_GRADE_CHANGED";
+  await store.recordDomainEvent({
+    eventType,
+    severity: input.severity,
+    source: eventType === "ANOMALY_GRADE_CHANGED" ? "AI" : "SYSTEM",
+    deviceId: input.deviceId ?? input.dedupeKey,
+    occurredAt: input.occurredAt,
+    dedupeKey: input.dedupeKey,
+  });
+}
+
+async function withTrendClock<T>(fn: () => Promise<T>): Promise<T> {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(EVENT_TREND_NOW);
+  try {
+    return await fn();
+  } finally {
+    vi.useRealTimers();
+  }
+}
 
 // 저장소 구현체가 지켜야 하는 도메인 계약. 인메모리와 PostgreSQL이 같은
 // 스위트를 통과해야 한다. B1 2단계 담당자는 아래 한 줄을 추가하면 된다:
@@ -203,34 +236,74 @@ export function runStoreContractTests(name: string, makeStore: () => Promise<Cel
       expect(replayAck.acknowledgedBy).toBe("leelab");
     });
 
-    it("관리자 이벤트 추이는 UTC 버킷과 위험 3등급만 반환한다", async () => {
-      await store.recordDomainEvent({
-        eventType: "ANOMALY_GRADE_CHANGED",
-        severity: "CAUTION",
-        source: "AI",
-        occurredAt: new Date().toISOString(),
-        score: 0.3,
-        dedupeKey: "trend-caution-1",
+    it("관리자 이벤트 추이는 UTC 25/7/30 버킷과 확정 응답 형식을 반환한다", async () => {
+      await withTrendClock(async () => {
+        const trend24h = await store.getAdminEventTrend("24h");
+        expect(trend24h.period).toBe("24h");
+        expect(trend24h.buckets).toHaveLength(25);
+        expect(trend24h.buckets[0]).toEqual({ at: "2026-09-14T12:00:00.000Z", caution: 0, warning: 0, danger: 0 });
+        expect(trend24h.buckets[24]?.at).toBe("2026-09-15T12:00:00.000Z");
+
+        const trend7d = await store.getAdminEventTrend("7d");
+        expect(trend7d.buckets).toHaveLength(7);
+        expect(trend7d.buckets[0]?.at).toBe("2026-09-09T00:00:00.000Z");
+        expect(trend7d.buckets[6]?.at).toBe("2026-09-15T00:00:00.000Z");
+
+        const trend30d = await store.getAdminEventTrend("30d");
+        expect(trend30d.buckets).toHaveLength(30);
+        expect(trend30d.buckets[0]?.at).toBe("2026-08-17T00:00:00.000Z");
+        expect(trend30d.buckets[29]?.at).toBe("2026-09-15T00:00:00.000Z");
+        expect(Object.keys(trend24h.buckets[0] ?? {}).sort()).toEqual(["at", "caution", "danger", "warning"]);
+        expect(trend24h).not.toHaveProperty("series");
       });
-      await store.recordDomainEvent({
-        eventType: "RELAY_AUTO_CUT",
-        severity: "CUT",
-        source: "SYSTEM",
-        occurredAt: new Date().toISOString(),
-        score: null,
-        dedupeKey: "trend-cut-1",
+    });
+
+    it("관리자 이벤트 추이는 경계 시각·동일 timestamp·허용 severity만 집계한다", async () => {
+      await withTrendClock(async () => {
+        await recordTrendEvent(store, { severity: "CAUTION", occurredAt: "2026-09-14T12:00:00.000Z", dedupeKey: "trend-boundary-start" });
+        await recordTrendEvent(store, { severity: "DANGER", occurredAt: "2026-09-14T11:59:59.999Z", dedupeKey: "trend-boundary-before" });
+        await recordTrendEvent(store, { severity: "WARNING", occurredAt: "2026-09-15T12:00:00.000Z", dedupeKey: "trend-same-timestamp-warning" });
+        await recordTrendEvent(store, { severity: "DANGER", occurredAt: "2026-09-15T12:00:00.000Z", dedupeKey: "trend-same-timestamp-danger" });
+        await recordTrendEvent(store, { severity: "DANGER", occurredAt: "2026-09-15T13:00:00.000Z", dedupeKey: "trend-boundary-end" });
+        await recordTrendEvent(store, { severity: "NORMAL", occurredAt: "2026-09-15T12:00:00.000Z", dedupeKey: "trend-normal-excluded" });
+        await recordTrendEvent(store, { eventType: "RELAY_AUTO_CUT", severity: "DANGER", occurredAt: "2026-09-15T12:00:00.000Z", dedupeKey: "trend-cut-excluded" });
+        await recordTrendEvent(store, { severity: "CUT", occurredAt: "2026-09-15T12:00:00.000Z", dedupeKey: "trend-cut-severity-excluded" });
+
+        const trend = await store.getAdminEventTrend("24h");
+        expect(trend.buckets[0]).toMatchObject({ at: "2026-09-14T12:00:00.000Z", caution: 1, warning: 0, danger: 0 });
+        expect(trend.buckets[24]).toMatchObject({ at: "2026-09-15T12:00:00.000Z", caution: 0, warning: 1, danger: 1 });
+        expect(trend.summary).toEqual({
+          total: 3,
+          dangerTotal: 1,
+          peakAt: "2026-09-15T12:00:00.000Z",
+          peakTotal: 2,
+        });
       });
-      const trend = await store.getAdminEventTrend("24h");
-      expect(trend.period).toBe("24h");
-      expect(trend.buckets).toHaveLength(25);
-      expect(trend.buckets.every((bucket) => bucket.endsWith(".000Z"))).toBe(true);
-      expect(trend.series).toEqual(expect.arrayContaining([
-        expect.objectContaining({ grade: "CAUTION" }),
-        expect.objectContaining({ grade: "WARNING" }),
-        expect.objectContaining({ grade: "DANGER" }),
-      ]));
-      expect(trend.summary.total).toBe(1);
-      expect(trend.summary.dangerTotal).toBe(0);
+    });
+
+    it("관리자 이벤트 추이의 빈 기간은 0과 null을 반환한다", async () => {
+      await withTrendClock(async () => {
+        for (const period of ["24h", "7d", "30d"] as const) {
+          const trend = await store.getAdminEventTrend(period);
+          expect(trend.buckets.every((bucket) => bucket.caution === 0 && bucket.warning === 0 && bucket.danger === 0)).toBe(true);
+          expect(trend.summary).toEqual({ total: 0, dangerTotal: 0, peakAt: null, peakTotal: 0 });
+        }
+      });
+    });
+
+    it("동률 peak는 가장 이른 UTC bucket을 유지한다", async () => {
+      await withTrendClock(async () => {
+        await recordTrendEvent(store, { severity: "CAUTION", occurredAt: "2026-09-14T12:00:00.000Z", dedupeKey: "trend-tie-earliest-caution" });
+        await recordTrendEvent(store, { severity: "WARNING", occurredAt: "2026-09-15T12:00:00.000Z", dedupeKey: "trend-tie-latest-warning" });
+
+        const trend = await store.getAdminEventTrend("24h");
+        expect(trend.summary).toEqual({
+          total: 2,
+          dangerTotal: 0,
+          peakAt: "2026-09-14T12:00:00.000Z",
+          peakTotal: 1,
+        });
+      });
     });
 
     it("반환값을 고쳐도 저장소가 오염되지 않는다", async () => {

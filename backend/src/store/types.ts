@@ -78,13 +78,16 @@ export type DomainEventQuery = {
 };
 
 export type EventTrendPeriod = "24h" | "7d" | "30d";
+export type AdminEventTrendBucket = {
+  at: string;
+  caution: number;
+  warning: number;
+  danger: number;
+};
+
 export type AdminEventTrend = {
   period: EventTrendPeriod;
-  buckets: string[];
-  series: Array<{
-    grade: "CAUTION" | "WARNING" | "DANGER";
-    values: number[];
-  }>;
+  buckets: AdminEventTrendBucket[];
   summary: {
     total: number;
     dangerTotal: number;

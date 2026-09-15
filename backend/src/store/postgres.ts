@@ -665,36 +665,42 @@ export function createPostgresStore(pool: pg.Pool): CellGuardStore {
       group by severity, occurred_at
       order by occurred_at asc
     `, [new Date(window.startMs), new Date(window.endExclusiveMs)]);
-    const buckets = Array.from({ length: window.count }, (_, index) => new Date(window.startMs + index * window.stepMs).toISOString());
-    const values: Record<"CAUTION" | "WARNING" | "DANGER", number[]> = {
-      CAUTION: Array<number>(window.count).fill(0),
-      WARNING: Array<number>(window.count).fill(0),
-      DANGER: Array<number>(window.count).fill(0),
-    };
+    const buckets = Array.from({ length: window.count }, (_, index) => ({
+      at: new Date(window.startMs + index * window.stepMs).toISOString(),
+      caution: 0,
+      warning: 0,
+      danger: 0,
+    }));
     for (const row of result.rows) {
-      const severity = String(row.severity) as keyof typeof values;
-      if (!(severity in values)) continue;
       const occurredAt = new Date(row.occurred_at).getTime();
       const index = Math.floor((occurredAt - window.startMs) / window.stepMs);
-      if (index >= 0 && index < window.count) values[severity][index] += integerOrNull(row.count) ?? 0;
+      if (index < 0 || index >= window.count) continue;
+      const count = integerOrNull(row.count) ?? 0;
+      const bucket = buckets[index];
+      if (row.severity === "CAUTION") bucket.caution += count;
+      else if (row.severity === "WARNING") bucket.warning += count;
+      else if (row.severity === "DANGER") bucket.danger += count;
     }
-    const totals = Array.from({ length: window.count }, (_, index) => values.CAUTION[index] + values.WARNING[index] + values.DANGER[index]);
-    const total = totals.reduce((sum, value) => sum + value, 0);
-    const dangerTotal = values.DANGER.reduce((sum, value) => sum + value, 0);
-    const peakTotal = Math.max(0, ...totals);
-    const peakIndex = peakTotal === 0 ? -1 : totals.findIndex((value) => value === peakTotal);
+    const total = buckets.reduce((sum, bucket) => sum + bucket.caution + bucket.warning + bucket.danger, 0);
+    const dangerTotal = buckets.reduce((sum, bucket) => sum + bucket.danger, 0);
+    // Scan from oldest to newest and update only on a strictly larger total;
+    // this makes an equal peak retain the earliest bucket by contract.
+    let peakTotal = 0;
+    let peakIndex = -1;
+    buckets.forEach((bucket, index) => {
+      const bucketTotal = bucket.caution + bucket.warning + bucket.danger;
+      if (bucketTotal > peakTotal) {
+        peakTotal = bucketTotal;
+        peakIndex = index;
+      }
+    });
     return {
       period,
       buckets,
-      series: [
-        { grade: "CAUTION", values: values.CAUTION },
-        { grade: "WARNING", values: values.WARNING },
-        { grade: "DANGER", values: values.DANGER },
-      ],
       summary: {
         total,
         dangerTotal,
-        peakAt: peakIndex < 0 ? null : buckets[peakIndex],
+        peakAt: peakIndex < 0 ? null : buckets[peakIndex].at,
         peakTotal,
       },
     };
