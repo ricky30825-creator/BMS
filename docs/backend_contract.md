@@ -473,6 +473,11 @@ monotonic하게 전진시키며, duplicate replay는 `OFFLINE` 장치를 되살�
   `ARCHIVED`는 terminal이고 게시를 다시 임시저장으로 되돌리거나 보관을
   해제하지 않는다. `published_at`은 최초 게시 시 고정하고 `archived_at`은
   보관 시 기록한다. 삭제는 `DRAFT`에만 허용한다.
+- `POST /api/admin/notices`는 `DRAFT` 또는 `PUBLISHED`로만 시작할 수 있으며,
+  `status=ARCHIVED`는 저장소에 도달하기 전에 `400 VALIDATION_FAILED`로 거부한다.
+  `PATCH /api/admin/notices/{id}`의 빈 본문 또는 저장된 값과 실질적으로 같은
+  요청도 `400 VALIDATION_FAILED`로 거부하며, 이 경우 `updated_at`과
+  `NOTICE_UPDATE` 감사 기록을 만들지 않는다.
 - `audience`는 `ALL`·`USER`·`ADMIN`이다. 일반 사용자 목록·상세는
   `status=PUBLISHED`이면서 `audience in (ALL, USER)`인 공지만 반환하고,
   `ADMIN` 공지는 관리자 API에서만 반환한다. 관리자 목록은 모든 상태와

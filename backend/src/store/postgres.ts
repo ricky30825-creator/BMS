@@ -1297,6 +1297,7 @@ export function createPostgresStore(pool: pg.Pool): CellGuardStore {
     async createNotice(actorId, input) {
       const status = input.status ?? "DRAFT";
       if (!validateNoticeCategory(input.category) || !validateNoticeAudience(input.audience) || !validateNoticeStatus(status)) throw new Error("VALIDATION_FAILED");
+      if (status === "ARCHIVED") throw new Error("VALIDATION_FAILED");
       const title = noticeText(input.title);
       const body = noticeText(input.body);
       assertPublishableNotice(title, body, status);
@@ -1338,6 +1339,13 @@ export function createPostgresStore(pool: pg.Pool): CellGuardStore {
         const body = input.body === undefined ? String(current.body ?? "") : noticeText(input.body);
         assertPublishableNotice(title, body, nextStatus);
         if (currentStatus === "PUBLISHED" && channels.length) throw new Error("VALIDATION_FAILED");
+        if (
+          category === String(current.category)
+          && audience === String(current.audience)
+          && title === String(current.title ?? "")
+          && body === String(current.body ?? "")
+          && nextStatus === currentStatus
+        ) throw new Error("VALIDATION_FAILED");
         const publishing = currentStatus === "DRAFT" && nextStatus === "PUBLISHED";
         const updated = await query<AnyRow>(client, `
           update notice

@@ -295,6 +295,7 @@ export function createMemoryStore(): CellGuardStore & { demoUsers: DemoUser[] } 
   function createNoticeInMemory(actorId: string, input: CreateNoticeInput): MemoryNotice {
     const status = input.status ?? "DRAFT";
     assertNoticeInput(input.category, input.audience, status);
+    if (status === "ARCHIVED") throw new Error("VALIDATION_FAILED");
     const title = noticeText(input.title);
     const body = noticeText(input.body);
     assertPublishable(title, body, status);
@@ -339,6 +340,13 @@ export function createMemoryStore(): CellGuardStore & { demoUsers: DemoUser[] } 
     assertPublishable(title, body, nextStatus);
     const channels = normalizeNoticeChannels(input.notifyChannels);
     if (notice.status === "PUBLISHED" && channels.length) throw new Error("VALIDATION_FAILED");
+    if (
+      category === notice.category
+      && audience === notice.audience
+      && title === notice.title
+      && body === notice.body
+      && nextStatus === notice.status
+    ) throw new Error("VALIDATION_FAILED");
     const wasDraft = notice.status === "DRAFT";
     notice.category = category;
     notice.audience = audience;

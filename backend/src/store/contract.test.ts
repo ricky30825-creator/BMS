@@ -346,6 +346,33 @@ export function runStoreContractTests(name: string, makeStore: () => Promise<Cel
       ]);
     });
 
+    it("보관 상태 직접 생성과 실제 변경 없는 공지 PATCH를 원자적으로 거부한다", async () => {
+      await expect(store.createNotice("leelab", {
+        category: "INFO",
+        audience: "ALL",
+        title: "보관 상태로 생성",
+        body: "게시 전에 보관할 수 없다",
+        status: "ARCHIVED",
+      })).rejects.toThrow("VALIDATION_FAILED");
+
+      const draft = await store.createNotice("leelab", {
+        category: "INFO",
+        audience: "ALL",
+        title: "임시 공지",
+        body: "임시 본문",
+      });
+      const before = await store.adminNoticeById(draft.id);
+      const auditCount = (await store.audits()).filter((audit) => audit.resource === draft.id).length;
+
+      await expect(store.updateNotice("leelab", draft.id, {})).rejects.toThrow("VALIDATION_FAILED");
+      await expect(store.updateNotice("leelab", draft.id, { status: "DRAFT" })).rejects.toThrow("VALIDATION_FAILED");
+      await expect(store.updateNotice("leelab", draft.id, { title: draft.title, body: draft.body })).rejects.toThrow("VALIDATION_FAILED");
+
+      const after = await store.adminNoticeById(draft.id);
+      expect(after?.updatedAt).toBe(before?.updatedAt);
+      expect((await store.audits()).filter((audit) => audit.resource === draft.id)).toHaveLength(auditCount);
+    });
+
     it("동률 peak는 가장 이른 UTC bucket을 유지한다", async () => {
       await withTrendClock(async () => {
         await recordTrendEvent(store, { severity: "CAUTION", occurredAt: "2026-09-14T12:00:00.000Z", dedupeKey: "trend-tie-earliest-caution" });

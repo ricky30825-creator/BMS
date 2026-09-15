@@ -29,6 +29,7 @@ import { db } from "./db.js";
 import { createKafkaAnomalyAlertsConsumer, type AnomalyAlertsConsumer, type AnomalyIngestResult } from "./anomalyConsumer.js";
 import { createKafkaRawMetricsConsumer, type RawMetricsConsumer, type UnassignedTelemetryEvent } from "./telemetryConsumer.js";
 import { createStartupController, isStartupCancelled } from "./runtimeLifecycle.js";
+import { NOTICE_AUDIENCES, NOTICE_CATEGORIES, NOTICE_STATUSES, parseNoticeMutationBody } from "./noticePayload.js";
 import {
   abortDiagnosis,
   abortDiagnosisBySystem,
@@ -72,7 +73,7 @@ import {
   userById
 } from "./store.js";
 import { closeStore, initializeStore } from "./store.js";
-import type { AdminNotice, CreateNoticeInput, DemoBattery, DemoRelay, NoticeCategory, NoticeDeliveryChannel, NoticeStatus, UpdateNoticeInput } from "./store.js";
+import type { AdminNotice, CreateNoticeInput, DemoBattery, DemoRelay, NoticeCategory, NoticeStatus, UpdateNoticeInput } from "./store.js";
 
 const app = express();
 const httpServer = createServer(app);
@@ -277,11 +278,6 @@ function pageEnvelope<T>(items: T[], page = 1, size = 20) {
   return { items: paged, page: { number: page, size, total: items.length, totalPages: items.length ? Math.ceil(items.length / size) : 0 } };
 }
 
-const NOTICE_CATEGORIES = new Set<NoticeCategory>(["IMPORTANT", "MAINTENANCE", "FEATURE", "INFO"]);
-const NOTICE_STATUSES = new Set<NoticeStatus>(["DRAFT", "PUBLISHED", "ARCHIVED"]);
-const NOTICE_AUDIENCES = new Set(["ALL", "USER", "ADMIN"]);
-const NOTICE_CHANNELS = new Set<NoticeDeliveryChannel>(["KAKAO", "EMAIL", "SMS", "WEBPUSH", "INAPP"]);
-
 function parseNoticeListQuery(req: Request, admin = false): { category?: NoticeCategory; status?: NoticeStatus } | null {
   const category = req.query.category;
   const status = req.query.status;
@@ -300,38 +296,8 @@ function noticePage(req: Request): { page: number; size: number } | null {
   return { page, size };
 }
 
-function parseNoticeChannels(value: unknown): NoticeDeliveryChannel[] | null {
-  if (!Array.isArray(value) || value.some((channel) => typeof channel !== "string" || !NOTICE_CHANNELS.has(channel as NoticeDeliveryChannel))) return null;
-  return [...new Set(value as NoticeDeliveryChannel[])];
-}
-
 function noticeMutationBody(req: Request, partial: boolean): { value: Record<string, unknown> } | { error: string } {
-  if (!isRecord(req.body)) return { error: "body must be an object" };
-  const body = req.body;
-  const allowed = new Set(["category", "audience", "title", "body", "status", "notifyChannels", "notifyOnPublish"]);
-  if (Object.keys(body).some((key) => !allowed.has(key))) return { error: "unknown field" };
-  if (!partial && (typeof body.category !== "string" || typeof body.audience !== "string" || typeof body.title !== "string" || typeof body.body !== "string")) {
-    return { error: "category, audience, title and body are required" };
-  }
-  if (body.category !== undefined && (typeof body.category !== "string" || !NOTICE_CATEGORIES.has(body.category as NoticeCategory))) return { error: "invalid category" };
-  if (body.audience !== undefined && (typeof body.audience !== "string" || !NOTICE_AUDIENCES.has(body.audience))) return { error: "invalid audience" };
-  if (body.status !== undefined && (typeof body.status !== "string" || !NOTICE_STATUSES.has(body.status as NoticeStatus))) return { error: "invalid status" };
-  if (body.title !== undefined && typeof body.title !== "string") return { error: "title must be a string" };
-  if (body.body !== undefined && typeof body.body !== "string") return { error: "body must be a string" };
-  if (body.notifyChannels !== undefined && parseNoticeChannels(body.notifyChannels) === null) return { error: "invalid notifyChannels" };
-  if (body.notifyOnPublish !== undefined && typeof body.notifyOnPublish !== "boolean") return { error: "notifyOnPublish must be boolean" };
-  if (body.notifyChannels !== undefined && body.notifyOnPublish !== undefined) return { error: "choose notifyChannels or notifyOnPublish" };
-  const channels = body.notifyChannels !== undefined
-    ? parseNoticeChannels(body.notifyChannels)!
-    : body.notifyOnPublish === true
-      ? ["WEBPUSH", "KAKAO"] as NoticeDeliveryChannel[]
-      : body.notifyOnPublish === false
-        ? []
-        : undefined;
-  const value: Record<string, unknown> = { ...body };
-  delete value.notifyOnPublish;
-  if (channels !== undefined) value.notifyChannels = channels;
-  return { value };
+  return parseNoticeMutationBody(req.body, partial);
 }
 
 function adminNoticeListItem(notice: AdminNotice): Record<string, unknown> {

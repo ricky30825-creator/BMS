@@ -104,6 +104,33 @@ describe("공지사항 영속 계약", () => {
     expect(actions).toEqual(["NOTICE_ARCHIVE", "NOTICE_UPDATE", "NOTICE_PUBLISH", "NOTICE_UPDATE", "NOTICE_CREATE"]);
   });
 
+  it("ARCHIVED 직접 생성과 실제 변경 없는 PATCH를 VALIDATION_FAILED로 거부한다", async () => {
+    await expect(store.createNotice("leelab", {
+      category: "INFO",
+      audience: "ALL",
+      title: "보관 상태로 생성",
+      body: "게시 전에 보관할 수 없다",
+      status: "ARCHIVED",
+    })).rejects.toThrow("VALIDATION_FAILED");
+
+    const draft = await store.createNotice("leelab", {
+      category: "INFO",
+      audience: "ALL",
+      title: "임시 공지",
+      body: "임시 본문",
+    });
+    const before = await store.adminNoticeById(draft.id);
+    const auditCount = (await store.audits()).filter((audit) => audit.resource === draft.id).length;
+
+    await expect(store.updateNotice("leelab", draft.id, {})).rejects.toThrow("VALIDATION_FAILED");
+    await expect(store.updateNotice("leelab", draft.id, { status: "DRAFT" })).rejects.toThrow("VALIDATION_FAILED");
+    await expect(store.updateNotice("leelab", draft.id, { title: draft.title, body: draft.body })).rejects.toThrow("VALIDATION_FAILED");
+
+    const after = await store.adminNoticeById(draft.id);
+    expect(after?.updatedAt).toBe(before?.updatedAt);
+    expect((await store.audits()).filter((audit) => audit.resource === draft.id)).toHaveLength(auditCount);
+  });
+
   it("DRAFT만 삭제할 수 있고 ADMIN 대상·보관 공지는 사용자에게 보이지 않는다", async () => {
     const draft = await store.createNotice("leelab", { category: "INFO", audience: "ALL", title: "삭제", body: "임시" });
     await store.deleteNotice("leelab", draft.id);
