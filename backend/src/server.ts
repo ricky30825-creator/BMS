@@ -28,6 +28,7 @@ import { UNSET_THRESHOLDS, type FailsafeSample, type FailsafeThresholds, type Fa
 import { db } from "./db.js";
 import { createKafkaAnomalyAlertsConsumer, type AnomalyAlertsConsumer, type AnomalyIngestResult } from "./anomalyConsumer.js";
 import { createKafkaRawMetricsConsumer, type RawMetricsConsumer, type UnassignedTelemetryEvent } from "./telemetryConsumer.js";
+import { createShutdownController } from "./runtimeLifecycle.js";
 import {
   abortDiagnosis,
   abortDiagnosisBySystem,
@@ -1479,10 +1480,17 @@ async function closeDiagnosisFor(batteryId: string, reason: "SESSION_ENDED" | "R
 let runtimeTicker: NodeJS.Timeout | undefined;
 
 function startRuntimeTicker(): void {
+  if (shuttingDown || runtimeTicker) return;
   runtimeTicker = setInterval(() => {
     void tickActiveBattery().catch((error) => { console.error("tickActiveBattery failed", error); });
     void tickActiveDiagnosis().catch((error) => { console.error("tickActiveDiagnosis failed", error); });
   }, 1000);
+}
+
+function stopRuntimeTicker(): void {
+  const ticker = runtimeTicker;
+  runtimeTicker = undefined;
+  if (ticker) clearInterval(ticker);
 }
 
 // 계약 §1628: { batteryId, batteryLabel, representativeTempC,
@@ -1668,32 +1676,35 @@ async function stopTelemetryConsumer(): Promise<void> {
   if (consumer) await consumer.stop();
 }
 
+async function closeHttpServer(): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    if (!httpServer.listening) { resolve(); return; }
+    httpServer.close((error) => error ? reject(error) : resolve());
+  });
+}
+
+const shutdownController = createShutdownController([
+  { name: "runtime ticker", run: stopRuntimeTicker },
+  { name: "outbox worker", run: stopOutboxWorker },
+  { name: "telemetry consumers", run: stopTelemetryConsumer },
+  { name: "HTTP server", run: closeHttpServer },
+  { name: "store", run: closeStore },
+]);
+
 async function shutdown(signal: string): Promise<void> {
-  if (shuttingDown) return;
-  shuttingDown = true;
-  if (runtimeTicker) clearInterval(runtimeTicker);
-  let shutdownError: unknown = null;
-  try {
-    try {
-      await stopOutboxWorker();
-    } catch (error) {
-      shutdownError = error;
+  const cleanup = shutdownController.shutdown(signal);
+  shuttingDown = shutdownController.isShuttingDown;
+  const result = await cleanup;
+  if (result.failures.length > 0) {
+    for (const failure of result.failures) {
+      console.error(`CellGuard backend ${failure.step} cleanup failed`, failure.error);
     }
-    try {
-      await stopTelemetryConsumer();
-    } catch (error) {
-      shutdownError ??= error;
-    }
-    await new Promise<void>((resolve, reject) => {
-      if (!httpServer.listening) { resolve(); return; }
-      httpServer.close((error) => error ? reject(error) : resolve());
-    });
-    await closeStore();
-    if (shutdownError) throw shutdownError;
+    console.error("CellGuard backend shutdown failed");
+    // Keep an existing startup failure code intact; cleanup errors still make
+    // a signal-triggered shutdown fail visibly without masking that code.
+    if (process.exitCode === undefined || process.exitCode === 0) process.exitCode = 1;
+  } else {
     console.log(`CellGuard backend stopped (${signal})`);
-  } catch (error) {
-    console.error("CellGuard backend shutdown failed", error);
-    process.exitCode = 1;
   }
 }
 
@@ -1714,11 +1725,5 @@ void initializeStore()
   .catch(async (error) => {
     console.error("CellGuard backend startup failed", error);
     process.exitCode = 1;
-    try {
-      await stopOutboxWorker();
-      await stopTelemetryConsumer();
-      await closeStore();
-    } catch (closeError) {
-      console.error("CellGuard backend cleanup failed", closeError);
-    }
+    await shutdown("STARTUP_FAILURE");
   });
