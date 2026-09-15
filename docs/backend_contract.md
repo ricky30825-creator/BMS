@@ -488,7 +488,10 @@ monotonic하게 전진시키며, duplicate replay는 `OFFLINE` 장치를 되살�
   `notice_delivery_intent`에 의도와 `PENDING|SENT|FAILED|BLOCKED` 상태를
   남기는 것과 실제 provider 발송을 구분한다. provider 또는 자격증명이
   없으면 성공으로 응답하지 않고 의도만 남긴다. 공지 작성·수정·게시·보관·
-  DRAFT 삭제와 조회수 transaction은 대응 `audit_log`와 원자적으로 기록한다.
+  DRAFT 삭제 같은 공지 변경은 대응 `audit_log`와 같은 transaction에서
+  원자적으로 기록한다. 반면 `notice_view` upsert와 `view_count` 증가는
+  가시성 확인·조회수 transaction에 포함하되, 조회수/`notice_view` transaction
+  자체는 `audit_log` 대상이 아니며 조회마다 감사 로그를 남기지 않는다.
 
 #### 추세 집계와 PDF
 
