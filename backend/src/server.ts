@@ -28,7 +28,7 @@ import { UNSET_THRESHOLDS, type FailsafeSample, type FailsafeThresholds, type Fa
 import { db } from "./db.js";
 import { createKafkaAnomalyAlertsConsumer, type AnomalyAlertsConsumer, type AnomalyIngestResult } from "./anomalyConsumer.js";
 import { createKafkaRawMetricsConsumer, type RawMetricsConsumer, type UnassignedTelemetryEvent } from "./telemetryConsumer.js";
-import { createShutdownController } from "./runtimeLifecycle.js";
+import { createStartupController, isStartupCancelled } from "./runtimeLifecycle.js";
 import {
   abortDiagnosis,
   abortDiagnosisBySystem,
@@ -1480,7 +1480,7 @@ async function closeDiagnosisFor(batteryId: string, reason: "SESSION_ENDED" | "R
 let runtimeTicker: NodeJS.Timeout | undefined;
 
 function startRuntimeTicker(): void {
-  if (shuttingDown || runtimeTicker) return;
+  if (runtimeLifecycle.isShuttingDown || runtimeTicker) return;
   runtimeTicker = setInterval(() => {
     void tickActiveBattery().catch((error) => { console.error("tickActiveBattery failed", error); });
     void tickActiveDiagnosis().catch((error) => { console.error("tickActiveDiagnosis failed", error); });
@@ -1552,7 +1552,6 @@ function listen(): Promise<void> {
   });
 }
 
-let shuttingDown = false;
 let telemetryConsumer: RawMetricsConsumer | null = null;
 let anomalyConsumer: AnomalyAlertsConsumer | null = null;
 let outboxWorker: OutboxWorker | null = null;
@@ -1642,6 +1641,7 @@ async function startTelemetryConsumer(): Promise<void> {
   telemetryConsumer = rawConsumer;
   try {
     await rawConsumer.start();
+    runtimeLifecycle.assertActive();
     const scoreConsumer = createKafkaAnomalyAlertsConsumer({
       db,
       brokers: kafkaConfig.brokers,
@@ -1652,8 +1652,11 @@ async function startTelemetryConsumer(): Promise<void> {
     });
     anomalyConsumer = scoreConsumer;
     await scoreConsumer.start();
+    runtimeLifecycle.assertActive();
   } catch (error) {
+    const scoreConsumer = anomalyConsumer;
     anomalyConsumer = null;
+    await scoreConsumer?.stop().catch(() => undefined);
     await rawConsumer.stop().catch(() => undefined);
     telemetryConsumer = null;
     throw error;
@@ -1683,17 +1686,16 @@ async function closeHttpServer(): Promise<void> {
   });
 }
 
-const shutdownController = createShutdownController([
-  { name: "runtime ticker", run: stopRuntimeTicker },
-  { name: "outbox worker", run: stopOutboxWorker },
-  { name: "telemetry consumers", run: stopTelemetryConsumer },
-  { name: "HTTP server", run: closeHttpServer },
-  { name: "store", run: closeStore },
-]);
+const runtimeLifecycle = createStartupController([
+  { name: "runtime ticker", start: startRuntimeTicker, stop: stopRuntimeTicker },
+  { name: "outbox worker", start: startOutboxWorker, stop: stopOutboxWorker },
+  { name: "telemetry consumers", start: startTelemetryConsumer, stop: stopTelemetryConsumer },
+  { name: "HTTP server", start: listen, stop: closeHttpServer },
+  { name: "store", start: initializeStore, stop: closeStore },
+], ["store", "outbox worker", "telemetry consumers", "runtime ticker", "HTTP server"]);
 
 async function shutdown(signal: string): Promise<void> {
-  const cleanup = shutdownController.shutdown(signal);
-  shuttingDown = shutdownController.isShuttingDown;
+  const cleanup = runtimeLifecycle.shutdown(signal);
   const result = await cleanup;
   if (result.failures.length > 0) {
     for (const failure of result.failures) {
@@ -1711,19 +1713,9 @@ async function shutdown(signal: string): Promise<void> {
 process.once("SIGTERM", () => { void shutdown("SIGTERM"); });
 process.once("SIGINT", () => { void shutdown("SIGINT"); });
 
-void initializeStore()
-  .then(() => {
-    return startOutboxWorker();
-  })
-  .then(() => {
-    return startTelemetryConsumer();
-  })
-  .then(() => {
-    startRuntimeTicker();
-    return listen();
-  })
-  .catch(async (error) => {
-    console.error("CellGuard backend startup failed", error);
-    process.exitCode = 1;
-    await shutdown("STARTUP_FAILURE");
-  });
+void runtimeLifecycle.start().catch(async (error) => {
+  if (isStartupCancelled(error)) return;
+  console.error("CellGuard backend startup failed", error);
+  process.exitCode = 1;
+  await shutdown("STARTUP_FAILURE");
+});

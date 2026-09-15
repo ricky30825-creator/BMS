@@ -1,6 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { createShutdownController } from "./runtimeLifecycle.js";
+import { createShutdownController, createStartupController, isStartupCancelled } from "./runtimeLifecycle.js";
+
+function deferred(): { promise: Promise<void>; resolve: () => void } {
+  let resolve!: () => void;
+  const promise = new Promise<void>((fulfill) => { resolve = fulfill; });
+  return { promise, resolve };
+}
 
 describe("runtime shutdown lifecycle", () => {
   afterEach(() => {
@@ -60,4 +66,44 @@ describe("runtime shutdown lifecycle", () => {
     expect(closeHttp).toHaveBeenCalledTimes(1);
     expect(closeStore).toHaveBeenCalledTimes(1);
   });
+
+  it.each(["store", "worker", "telemetry", "listen"] as const)(
+    "cancels boot during awaited %s startup before later phases and closes acquired resources once",
+    async (blockedStep) => {
+      const names = ["store", "worker", "telemetry", "listen"] as const;
+      const blockers = new Map(names.map((name) => [name, deferred()]));
+      const startedSignals = new Map(names.map((name) => [name, deferred()]));
+      const started: string[] = [];
+      const stopped: string[] = [];
+      const controller = createStartupController(names.map((name) => ({
+        name,
+        start: async () => {
+          started.push(name);
+          startedSignals.get(name)!.resolve();
+          if (name === blockedStep) await blockers.get(name)!.promise;
+        },
+        stop: async () => {
+          stopped.push(name);
+        },
+      })));
+
+      const boot = controller.start();
+      await startedSignals.get(blockedStep)!.promise;
+      const cleanup = controller.shutdown("SIGTERM");
+      blockers.get(blockedStep)!.resolve();
+
+      const [bootResult, cleanupResult] = await Promise.all([
+        boot.then(() => ({ status: "fulfilled" as const }), (error) => ({ status: "rejected" as const, error })),
+        cleanup,
+      ]);
+
+      expect(bootResult.status).toBe("rejected");
+      if (bootResult.status === "rejected") expect(isStartupCancelled(bootResult.error)).toBe(true);
+      expect(cleanupResult.failures).toEqual([]);
+      expect(started).toEqual(names.slice(0, names.indexOf(blockedStep) + 1));
+      for (const name of names) {
+        expect(stopped.filter((step) => step === name)).toHaveLength(1);
+      }
+    },
+  );
 });
