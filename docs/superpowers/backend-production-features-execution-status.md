@@ -47,14 +47,14 @@
 
 ## Task 2 — 영속 이벤트·알림 기반
 
-- 현재 상태: `IN_PROGRESS`
+- 현재 상태: `REVIEW_REQUIRED`
 - 담당 에이전트: `/root/task2_events_fix` (최초 구현 `/root/task2_events`)
 - 기준 커밋: `047bbe7`
-- 결과 커밋: `a0aacb1`
+- 결과 커밋: `a0aacb1`, 수정 `747eea9`
 - 변경 파일: `backend/migrations/010_domain_events.sql`, `backend/src/store/{types,contract,memory,postgres}.ts`, `backend/src/store.ts`, `backend/src/anomalyConsumer.ts` 및 관련 테스트
-- 구현 결과: domain event 저장/조회/ack/UTC 집계, anomaly 전이 transaction/dedupe, Fail-Safe relay/audit/domain-event/outbox 원자성 기반 구현
-- 부모 검토 결과: 결함 발견 — `AdminEventTrend`/store가 확정 API의 bucket 객체가 아니라 과거 `buckets:string[] + series` 형태를 반환함
-- 서브에이전트 테스트: backend typecheck 통과, Vitest 309 passed/1 skipped
+- 구현 결과: domain event 저장/조회/ack/UTC bucket 객체 집계, anomaly 전이 transaction/dedupe, Fail-Safe relay/audit/domain-event/outbox 원자성 기반 구현
+- 부모 검토 결과: 수정 결과 재검토 대기
+- 서브에이전트 테스트: backend typecheck 통과, 수정 후 Vitest 312 passed/1 skipped, `git diff --check` 통과
 - 부모 독립 테스트: 미실행
 - 실환경 검증 여부: 미실행
 - 남은 문제 또는 외부 차단 조건: 부모 독립 검토 필요; `TEST_DATABASE_URL` 미설정으로 실 PostgreSQL 테스트 skip
