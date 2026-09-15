@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { appendDashboardTrendPoint, rightAlignTrend } from "../dashboardTrend";
-import { trendSeriesValue } from "../pages/UserPages";
+import { trendPdfQuery, trendSeriesValue } from "../pages/UserPages";
 import type { DashboardMetrics } from "../types";
 
 describe("trendSeriesValue", () => {
@@ -17,6 +17,22 @@ describe("trendSeriesValue", () => {
     expect(trendSeriesValue("volt", 11.9)).toBe(11.9);
     expect(trendSeriesValue("temp", -3)).toBe(-3);
     expect(trendSeriesValue("soc", 78)).toBe(78);
+  });
+});
+
+describe("trend PDF query", () => {
+  it("omits batteryIds when no comparison is selected so the server uses the active session", () => {
+    const query = trendPdfQuery("7d", []);
+
+    expect(query.get("period")).toBe("7d");
+    expect(query.get("metrics")).toBe("volt,curr,temp,soc,anomaly");
+    expect(query.has("batteryIds")).toBe(false);
+  });
+
+  it("includes selected batteries for an explicit comparison", () => {
+    const query = trendPdfQuery("30d", ["b_pack_001", "b_pack_002"]);
+
+    expect(query.get("batteryIds")).toBe("b_pack_001,b_pack_002");
   });
 });
 

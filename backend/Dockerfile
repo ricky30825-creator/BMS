@@ -7,6 +7,8 @@ COPY package.json package-lock.json ./
 RUN npm ci
 COPY tsconfig.json ./
 COPY src ./src
+# Includes the OFL-licensed static TTF used by the PDF renderer; no host font
+# mount is required in the production image.
 COPY assets ./assets
 COPY migrations ./migrations
 COPY scripts ./scripts

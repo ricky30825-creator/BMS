@@ -9,7 +9,7 @@ const PAGE_WIDTH = 595.28;
 const PAGE_HEIGHT = 841.89;
 const MARGIN = 40;
 const CONTENT_WIDTH = PAGE_WIDTH - MARGIN * 2;
-const FONT_PATH = join(dirname(fileURLToPath(import.meta.url)), "../assets/fonts/NotoSansKR-Korean.woff2");
+const FONT_PATH = join(dirname(fileURLToPath(import.meta.url)), "../assets/fonts/NotoSansKR-Korean.ttf");
 
 const metricLabels: Record<TrendMetric, string> = {
   volt: "전압",
@@ -105,7 +105,7 @@ function drawSummary(doc: PDFKit.PDFDocument, report: TrendResponse, batteryIds:
     const label = report.series.find((series) => series.batteryId === batteryId)?.batteryLabel ?? batteryId;
     doc.roundedRect(x, cardY, cellWidth - 8, 72, 6).fillColor("#f8fafc").fillAndStroke("#f8fafc", "#e2e8f0");
     doc.fontSize(9).fillColor("#0f172a");
-    addText(doc, label, x + 10, cardY + 9, { width: cellWidth - 28, lineBreak: false });
+    addText(doc, label, x + 10, cardY + 9, { width: cellWidth - 28, lineBreak: false, ellipsis: true });
     doc.fontSize(8).fillColor("#475569");
     metrics.slice(0, 3).forEach((metric, metricIndex) => {
       const values = valuesFor(seriesFor(report, batteryId, metric));
@@ -131,7 +131,7 @@ function drawBatteryTable(doc: PDFKit.PDFDocument, report: TrendResponse, batter
   const batteryLabel = report.series.find((series) => series.batteryId === batteryId)?.batteryLabel ?? batteryId;
   drawHeader(doc, report, generatedAt);
   doc.fontSize(13).fillColor("#0f172a");
-  addText(doc, `배터리: ${batteryLabel}`, MARGIN, 128, { width: CONTENT_WIDTH, lineBreak: false });
+  addText(doc, `배터리: ${batteryLabel}`, MARGIN, 128, { width: CONTENT_WIDTH, lineBreak: false, ellipsis: true });
   drawLegend(doc, metrics, 151);
 
   const tableTop = 176;

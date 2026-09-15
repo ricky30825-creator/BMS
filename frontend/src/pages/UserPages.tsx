@@ -198,13 +198,19 @@ function eventGrade(event: BatteryEvent): Grade { return event.severity === "CUT
 function EventRow({ event, onClick }: { event: BatteryEvent; onClick?: () => void }) { return <button className="event-row" onClick={onClick}><span className="event-time mono">{formatTime(event.occurredAt)}</span><span className="event-main"><strong>{eventTypeLabel(event.type)}</strong><small>{event.batteryLabel ?? "배터리 미지정"} · {event.source}</small></span><StatusBadge grade={eventGrade(event)} score={event.score} compact /></button>; }
 function eventTypeLabel(type: string): string { return ({ RELAY_AUTO_CUT: "릴레이 자동 차단", TEMP_THRESHOLD_EXCEEDED: "온도 임계값 초과", CURRENT_CHANGE_SPIKE: "전류 변화량 급상승", ANOMALY_GRADE_CHANGED: "이상점수 등급 전이", DEVICE_HEARTBEAT_MISSED: "디바이스 하트비트 미수신" } as Record<string, string>)[type] ?? type; }
 
+export function trendPdfQuery(period: "24h" | "7d" | "30d", batteryIds: readonly string[]): URLSearchParams {
+  const params = new URLSearchParams({ period, metrics: "volt,curr,temp,soc,anomaly" });
+  if (batteryIds.length) params.set("batteryIds", batteryIds.join(","));
+  return params;
+}
+
 export function TrendPage({ me }: { me: MeResponse }) {
   const batteries = useBatteries(); const [period, setPeriod] = useState<"24h" | "7d" | "30d">("7d"); const [selected, setSelected] = useState<string[]>(me.activeSession?.batteryId ? [me.activeSession.batteryId] : []); const [compareOpen, setCompareOpen] = useState(false); const [exportMessage, setExportMessage] = useState<string | null>(null); const query = new URLSearchParams({ period }); if (selected.length) query.set("batteryIds", selected.join(",")); const trend = useTrends(query);
   const exportFile = async (kind: "csv" | "pdf") => {
     setExportMessage(null);
     try {
       const params = kind === "pdf"
-        ? new URLSearchParams({ period, batteryIds: selected.join(","), metrics: "volt,curr,temp,soc,anomaly" })
+        ? trendPdfQuery(period, selected)
         : new URLSearchParams({ batteryId: me.activeSession?.batteryId ?? "", sessionId: me.activeSession?.id ?? "", from: new Date(Date.now() - 3_600_000).toISOString(), to: new Date().toISOString() });
       const blob = await api.download(kind === "csv" ? "/api/metrics/export.csv" : "/api/trends/export.pdf", params);
       const href = URL.createObjectURL(blob);
