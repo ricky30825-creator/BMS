@@ -33,27 +33,27 @@
 
 ## Task 1 — 공통 데이터 모델과 계약 확정
 
-- 현재 상태: `REVIEW_REQUIRED`
+- 현재 상태: `COMPLETE`
 - 담당 에이전트: `/root/task1_contract_fix` (최초 구현 `/root/task1_contract_retry`; 이전 `/root/task1_contract`는 사용량 제한으로 변경 없이 종료)
 - 기준 커밋: `34da606`
 - 결과 커밋: `f47a154`, 수정 `a59aafd`
 - 변경 파일: `PLAN.md`, `docs/backend_contract.md`, `docs/product_contract.md`, `docs/implementation_status.md`, `docs/verification_matrix.md`, `docs/hardware/mode1_backend_spec.md`, `docs/hardware/mode2_powerbank_diagnosis_spec.md`
 - 구현 결과: 영속 이벤트 원천·severity·dedupe, 공지 상태/audience/조회 dedupe/발송 의도, 공통 추세/PDF 집계, 프로필별 Fail-Safe 센서·실측 게이트, migration `010`~`012`와 store 확장 범위를 문서에 확정; 압력 0 sentinel과 공지 감사 범위 결함 수정
-- 부모 검토 결과: 수정 결과 재검토 대기
+- 부모 검토 결과: 통과 — 전체 계약 diff와 수정 2건을 코드 현실·사용자 요구·하드웨어 정본에 대조함
 - 서브에이전트 테스트: 양 커밋 모두 `git diff --check` 통과, 제품 계약 lint 위반 0건, contract lint 단위 테스트 20건 통과, 상대 링크 대상 확인 통과
-- 부모 독립 테스트: 미실행
-- 실환경 검증 여부: 미실행
-- 남은 문제 또는 외부 차단 조건: 부모가 실제 diff·정본 충돌·코드 구현 가능성을 독립 검토해야 함; 첫 에이전트는 사용량 제한으로 변경 없이 종료됨
+- 부모 독립 테스트: 전체 `git diff --check` 통과, 제품 계약 lint 위반 0건, contract lint 단위 테스트 20건 통과, 상대 링크 누락 0건
+- 실환경 검증 여부: 문서/정적 계약 검증 완료; 실환경 대상 아님
+- 남은 문제 또는 외부 차단 조건: 없음; 첫 에이전트는 사용량 제한으로 변경 없이 종료됐으나 새 구현·수정 에이전트 결과를 부모가 검증함
 
 ## Task 2 — 영속 이벤트·알림 기반
 
-- 현재 상태: `PENDING`
-- 담당 에이전트: 미배정
-- 기준 커밋: 미정
+- 현재 상태: `IN_PROGRESS`
+- 담당 에이전트: `/root/task2_events`
+- 기준 커밋: `047bbe7`
 - 결과 커밋: 미정
 - 변경 파일: 미정
-- 구현 결과: 미착수
-- 부모 검토 결과: 미착수
+- 구현 결과: 영속 이벤트·알림 기반 구현 진행 중
+- 부모 검토 결과: 대기
 - 서브에이전트 테스트: 미실행
 - 부모 독립 테스트: 미실행
 - 실환경 검증 여부: 미실행
