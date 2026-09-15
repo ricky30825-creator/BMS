@@ -47,17 +47,17 @@
 
 ## Task 2 — 영속 이벤트·알림 기반
 
-- 현재 상태: `IN_PROGRESS`
+- 현재 상태: `REVIEW_REQUIRED`
 - 담당 에이전트: `/root/task2_events`
 - 기준 커밋: `047bbe7`
-- 결과 커밋: 미정
-- 변경 파일: 미정
-- 구현 결과: 영속 이벤트·알림 기반 구현 진행 중
-- 부모 검토 결과: 대기
-- 서브에이전트 테스트: 미실행
+- 결과 커밋: `a0aacb1`
+- 변경 파일: `backend/migrations/010_domain_events.sql`, `backend/src/store/{types,contract,memory,postgres}.ts`, `backend/src/store.ts`, `backend/src/anomalyConsumer.ts` 및 관련 테스트
+- 구현 결과: domain event 저장/조회/ack/UTC 집계, anomaly 전이 transaction/dedupe, Fail-Safe relay/audit/domain-event/outbox 원자성 기반 구현
+- 부모 검토 결과: 검토 대기
+- 서브에이전트 테스트: backend typecheck 통과, Vitest 309 passed/1 skipped
 - 부모 독립 테스트: 미실행
 - 실환경 검증 여부: 미실행
-- 남은 문제 또는 외부 차단 조건: 실제 PostgreSQL 실행 환경 여부 확인 필요
+- 남은 문제 또는 외부 차단 조건: 부모 독립 검토 필요; `TEST_DATABASE_URL` 미설정으로 실 PostgreSQL 테스트 skip
 
 ## Task 3 — 공지사항 실제 구현
 
