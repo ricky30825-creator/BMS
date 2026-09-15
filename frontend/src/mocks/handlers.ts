@@ -1,5 +1,6 @@
 import { http, HttpResponse } from "msw";
 import type { AdminBatteryDetail, AdminBatteryListItem, AdminNotice, AlertChannels, AlertSettings, Battery, Diagnosis, DiagnosisListItem, Grade, MeResponse, NoticeAudience, NoticeCategory, NoticeDeliveryChannel, NoticeDeliveryIntent, NoticeStatus, NoticeSummary, Relay } from "../types";
+import type { AdminEventTrendPeriod } from "../types";
 import { measurementPhaseFor } from "../measurementState";
 
 const now = () => new Date().toISOString();
@@ -32,6 +33,35 @@ const completedCapacityDiagnosis: Diagnosis = { id: "dg_pack_004_001", batteryId
 const diagnosisHistory: Record<string, Diagnosis[]> = { b_pack_004: [completedCapacityDiagnosis] };
 let relay: Relay = { batteryId: "b_pack_001", state: "CLOSED", changedAt: now(), changedBy: { type: "SYSTEM", systemCode: "SYSTEM" }, interlock: { engaged: false, condition: null, canRestore: true } };
 const page = <T>(items: T[]) => ({ items, page: { number: 1, size: items.length || 20, total: items.length, totalPages: items.length ? 1 : 0 } });
+// Test-only MSW fixture. Production event trends are aggregated from PostgreSQL.
+const mockAdminEventTrendPeriods: readonly AdminEventTrendPeriod[] = ["24h", "7d", "30d"];
+const mockAdminEventTrend = (period: AdminEventTrendPeriod) => {
+  const hourMs = 60 * 60 * 1_000;
+  const dayMs = 24 * hourMs;
+  const bucketCount = period === "24h" ? 25 : period === "7d" ? 7 : 30;
+  const stepMs = period === "24h" ? hourMs : dayMs;
+  const nowDate = new Date();
+  const endMs = period === "24h"
+    ? Math.floor(nowDate.getTime() / hourMs) * hourMs
+    : Date.UTC(nowDate.getUTCFullYear(), nowDate.getUTCMonth(), nowDate.getUTCDate());
+  const buckets = Array.from({ length: bucketCount }, (_, index) => {
+    const peak = Math.max(0, bucketCount - (period === "24h" ? 4 : 2));
+    return {
+      at: new Date(endMs - (bucketCount - 1 - index) * stepMs).toISOString(),
+      caution: index === peak ? 2 : index % 5 === 0 ? 1 : 0,
+      warning: index === peak ? 1 : index % 7 === 0 ? 1 : 0,
+      danger: index === peak ? 2 : index === bucketCount - 2 ? 1 : 0,
+    };
+  });
+  const total = buckets.reduce((sum, bucket) => sum + bucket.caution + bucket.warning + bucket.danger, 0);
+  const dangerTotal = buckets.reduce((sum, bucket) => sum + bucket.danger, 0);
+  const peak = buckets.reduce((current, bucket) => {
+    const bucketTotal = bucket.caution + bucket.warning + bucket.danger;
+    const currentTotal = current.caution + current.warning + current.danger;
+    return bucketTotal > currentTotal ? bucket : current;
+  }, buckets[0]);
+  return { period, buckets, summary: { total, dangerTotal, peakAt: peak?.at ?? null, peakTotal: peak ? peak.caution + peak.warning + peak.danger : 0 } };
+};
 const currentBattery = () => batteries.find((item) => item.id === session?.batteryId) ?? batteries[0];
 const sessionForResponse = () => session ? { ...session, measurementPhase: measurementPhaseFor(session.startedAt, currentBattery().latest?.measuredAt) } : null;
 const connectedBatteryId = () => sessionForResponse()?.measurementPhase === "MEASURING" ? session?.batteryId : null;
@@ -222,7 +252,13 @@ export const handlers = [
   http.get("/api/batteries/:id/diagnoses", ({ params }) => { const items = (diagnosisHistory[String(params.id)] ?? []).map(diagnosisListItem); return HttpResponse.json(page(items)); }),
   http.get("/api/diagnoses/:id", ({ params }) => { const diagnosis = allDiagnoses().find((item) => item.id === String(params.id)) ?? (activeDiagnosis?.id === String(params.id) ? activeDiagnosis : undefined); return diagnosis ? HttpResponse.json(diagnosis) : bad(404, "NOT_FOUND"); }),
   http.get("/api/admin/overview", () => HttpResponse.json({ users: 3, batteries: batteries.length, activeSessions: session ? 1 : 0, blockedBatteries: 0, relayOpen: relay.state === "OPEN" ? 1 : 0, recentNotices: publicNotices().slice(0, 3) })),
-  http.get("/api/admin/event-trend", () => HttpResponse.json({ buckets: ["월", "화", "수", "목", "금", "토", "일"], series: [{ grade: "CAUTION", values: [2, 3, 1, 4, 2, 1, 3] }, { grade: "WARNING", values: [1, 2, 1, 2, 1, 0, 2] }, { grade: "DANGER", values: [0, 1, 0, 1, 0, 0, 1] }] })),
+  http.get("/api/admin/event-trend", ({ request }) => {
+    const query = new URL(request.url).searchParams;
+    const values = query.getAll("period");
+    const period = values.length === 1 ? values[0] : values.length === 0 ? "7d" : null;
+    if (!period || !mockAdminEventTrendPeriods.includes(period as AdminEventTrendPeriod)) return bad(400, "VALIDATION_FAILED");
+    return HttpResponse.json(mockAdminEventTrend(period as AdminEventTrendPeriod));
+  }),
   http.get("/api/admin/users", () => hasTestFault("admin-users") ? bad(503, "RUNTIME_NOT_READY") : HttpResponse.json(page(users.map((user) => ({ ...user, batteryCount: user.id === "u_hong" ? 2 : 0 }))))),
   http.patch("/api/admin/users/:id", async ({ params, request }) => { const body = await request.json() as { status: "ACTIVE" | "SUSPENDED" }; const user = users.find((item) => item.id === params.id); if (!user) return bad(404, "NOT_FOUND"); user.status = body.status; return HttpResponse.json(user); }),
   http.get("/api/admin/batteries", ({ request }) => { const query = new URL(request.url).searchParams; const q = query.get("q")?.normalize("NFKC").trim().toLocaleLowerCase() ?? ""; const opsStatus = query.get("opsStatus"); const items = batteries.filter((battery) => { const owner = batteryOwner(battery); return (!q || battery.label.toLocaleLowerCase().includes(q) || owner.name.toLocaleLowerCase().includes(q)) && (!opsStatus || battery.opsStatus === opsStatus); }).map(adminBatteryListItem); return HttpResponse.json(page(items)); }),

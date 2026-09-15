@@ -265,6 +265,13 @@ export type TrendResponse = {
   series: Array<{ batteryId: string; batteryLabel: string; metric: "volt" | "curr" | "temp" | "soc"; unit: string; points: Array<number | null> }>;
 };
 
+export type AdminEventTrendPeriod = "24h" | "7d" | "30d";
+export type AdminEventTrend = {
+  period: AdminEventTrendPeriod;
+  buckets: Array<{ at: string; caution: number; warning: number; danger: number }>;
+  summary: { total: number; dangerTotal: number; peakAt: string | null; peakTotal: number };
+};
+
 export type Diagnosis = {
   id: string;
   batteryId: string;

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { normalizeAdminInput } from "../mocks/handlers";
 import { reconcileDraft } from "../api/adminDraft";
+import { adminEventTrendBucketLabel } from "../pages/AdminPages";
 
 describe("admin battery input contract", () => {
   it("normalizes NFKC and trims status reasons and memos", () => {
@@ -29,5 +30,18 @@ describe("admin detail draft reconciliation", () => {
 
   it("keeps a dirty draft without a false conflict when the server is unchanged", () => {
     expect(reconcileDraft("my edit", "old", "old")).toEqual({ draft: "my edit", baseline: "old", conflict: false });
+  });
+});
+
+describe("admin event trend labels", () => {
+  it("formats API UTC buckets in the browser locale", () => {
+    const bucket = "2026-09-15T12:34:00.000Z";
+    expect(adminEventTrendBucketLabel(bucket, "24h", "en-US")).toContain("12:34");
+    expect(adminEventTrendBucketLabel(bucket, "7d", "ko-KR")).toContain("화");
+    expect(adminEventTrendBucketLabel(bucket, "30d", "en-US")).toContain("9/15");
+  });
+
+  it("does not turn malformed timestamps into a misleading date", () => {
+    expect(adminEventTrendBucketLabel("not-a-date", "7d", "en-US")).toBe("—");
   });
 });

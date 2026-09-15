@@ -1,27 +1,97 @@
 import { useEffect, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { Activity, AlertOctagon, ArrowUpRight, Battery, FileClock, Megaphone, RefreshCw, Search, ShieldCheck, UserRound, Users } from "lucide-react";
-import { api, ApiError } from "../api/client";
+import { ApiError } from "../api/client";
 import { reconcileDraft } from "../api/adminDraft";
-import { useAdminBatteries, useAdminBattery, useAdminNotice, useAdminNotices, useAdminOverview, useAdminUsers, useArchiveNotice, useAudits, useCreateNotice, useDeleteNotice, useSaveAdminMemo, useUpdateAdminStatus, useUpdateNotice, useUpdateUserStatus } from "../api/hooks";
-import type { AdminBatteryDetail, AdminNotice, ApiUser, AuditEntry, NoticeAudience, NoticeCategory, NoticeStatus, OpsStatus } from "../types";
+import { useAdminBatteries, useAdminBattery, useAdminEventTrend, useAdminNotice, useAdminNotices, useAdminOverview, useAdminUsers, useArchiveNotice, useAudits, useCreateNotice, useDeleteNotice, useSaveAdminMemo, useUpdateAdminStatus, useUpdateNotice, useUpdateUserStatus } from "../api/hooks";
+import type { AdminBatteryDetail, AdminEventTrend, AdminEventTrendPeriod, AdminNotice, ApiUser, AuditEntry, NoticeAudience, NoticeCategory, NoticeStatus, OpsStatus } from "../types";
 import { Button, Card, EmptyState, Field, Modal, PageHeading, Pagination, StatusBadge, TableState, formatDateTime, relativeTime, score100 } from "../components/ui";
 import { Bar, BarChart, CartesianGrid, Cell, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 
 function adminError(error: unknown): string { if (!(error instanceof ApiError)) return "요청을 처리하지 못했습니다."; return error.code === "REASON_REQUIRED" ? "상태 변경 사유를 입력하세요." : error.code === "NO_STATUS_CHANGE" ? "현재와 같은 상태입니다." : error.code === "VERSION_CONFLICT" ? "다른 관리자가 먼저 변경했습니다." : error.code === "NOTICE_NOT_DELETABLE" ? "게시된 공지는 삭제할 수 없고 보관만 할 수 있습니다." : "관리자 요청을 처리하지 못했습니다."; }
 
+const adminEventTrendPeriods: Array<{ value: AdminEventTrendPeriod; label: string }> = [
+  { value: "24h", label: "24시간" },
+  { value: "7d", label: "7일" },
+  { value: "30d", label: "30일" },
+];
+
+/** Convert the API's UTC ISO bucket into a locale-aware label in the browser. */
+export function adminEventTrendBucketLabel(at: string, period: AdminEventTrendPeriod, locale?: string): string {
+  const date = new Date(at);
+  if (Number.isNaN(date.getTime())) return "—";
+  const resolvedLocale = locale ?? (typeof navigator !== "undefined" && navigator.language ? navigator.language : "ko-KR");
+  const options: Intl.DateTimeFormatOptions = period === "24h"
+    ? { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "UTC" }
+    : period === "7d"
+      ? { month: "numeric", day: "numeric", weekday: "short", timeZone: "UTC" }
+      : { month: "numeric", day: "numeric", timeZone: "UTC" };
+  return new Intl.DateTimeFormat(resolvedLocale, options).format(date);
+}
+
+function AdminEventTrendSection({
+  trend,
+  period,
+  onPeriodChange,
+  isPending,
+  isError,
+  compact = false,
+}: {
+  trend: AdminEventTrend | undefined;
+  period: AdminEventTrendPeriod;
+  onPeriodChange: (period: AdminEventTrendPeriod) => void;
+  isPending: boolean;
+  isError: boolean;
+  compact?: boolean;
+}) {
+  const chart = trend?.buckets.map((bucket) => ({ ...bucket, label: adminEventTrendBucketLabel(bucket.at, period) })) ?? [];
+  return <>
+    <div className="event-trend-toolbar">
+      <div>
+        <h2>{compact ? "이상 이벤트 추이" : "이벤트 추이"}</h2>
+        <span className="field-hint">PostgreSQL 집계 · UTC bucket</span>
+      </div>
+      <div className="segmented" role="tablist" aria-label="이벤트 추이 조회 기간">
+        {adminEventTrendPeriods.map((item) => <button key={item.value} role="tab" aria-selected={period === item.value} className={period === item.value ? "active" : ""} onClick={() => onPeriodChange(item.value)}>{item.label}</button>)}
+      </div>
+    </div>
+    {isPending ? <TableState state="loading" /> : isError ? <TableState state="error" message="관리자 이벤트 추이 API를 불러오지 못했습니다." /> : trend ? <>
+      <div className="event-trend-summary" aria-label="이벤트 추이 요약">
+        <div><span>전체 이벤트</span><strong className="mono">{trend.summary.total}</strong><small>건</small></div>
+        <div><span>위험 이벤트</span><strong className="mono">{trend.summary.dangerTotal}</strong><small>건</small></div>
+        <div><span>최다 발생</span><strong>{trend.summary.peakAt ? adminEventTrendBucketLabel(trend.summary.peakAt, period) : "—"}</strong><small>{trend.summary.peakTotal}건</small></div>
+      </div>
+      <ResponsiveContainer width="100%" height={compact ? 260 : 360}>
+        <BarChart data={chart} margin={{ top: 8, right: 12, left: 0, bottom: 4 }}>
+          <CartesianGrid vertical={false} stroke="var(--border)" />
+          <XAxis dataKey="label" tickLine={false} axisLine={false} minTickGap={compact ? 24 : 16} />
+          <YAxis allowDecimals={false} tickLine={false} axisLine={false} />
+          <Tooltip labelFormatter={(label) => String(label)} contentStyle={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 8 }} />
+          <Bar dataKey="caution" name="주의" stackId="risk" fill="var(--grade-caution)" />
+          <Bar dataKey="warning" name="경고" stackId="risk" fill="var(--grade-warning)" />
+          <Bar dataKey="danger" name="위험" stackId="risk" fill="var(--grade-danger)" />
+        </BarChart>
+      </ResponsiveContainer>
+      <div className="event-trend-legend" aria-label="이벤트 등급 설명">
+        <span><i className="event-trend-legend-dot caution" />주의</span>
+        <span><i className="event-trend-legend-dot warning" />경고</span>
+        <span><i className="event-trend-legend-dot danger" />위험</span>
+      </div>
+    </> : <TableState state="empty" message="관리자 이벤트 추이 데이터가 없습니다." />}
+  </>;
+}
+
 export function AdminOverviewPage() {
   const overview = useAdminOverview();
-  const trend = useQuery({ queryKey: ["admin-event-trend"], queryFn: () => api.get<{ buckets: string[]; series: Array<{ grade: string; values: number[] }> }>("/api/admin/event-trend"), retry: false });
+  const [trendPeriod, setTrendPeriod] = useState<AdminEventTrendPeriod>("7d");
+  const trend = useAdminEventTrend(trendPeriod);
   const [, tick] = useState(0);
   useEffect(() => { const timer = window.setInterval(() => tick((value) => value + 1), 1000); return () => window.clearInterval(timer); }, []);
   const data = overview.data;
-  const chart = trend.data?.buckets.map((bucket, index) => ({ bucket, ...(Object.fromEntries((trend.data?.series ?? []).map((series) => [series.grade, series.values[index] ?? 0]))) })) ?? [];
   const refresh = () => { if (!overview.isFetching) void overview.refetch(); };
   if (overview.isPending) return <TableState state="loading" />;
   if (overview.isError) return <Card><TableState state="error" message="관리자 현황 API를 불러오지 못했습니다." /></Card>;
-  return <div className="page-stack"><PageHeading eyebrow="ADMIN OPERATIONS" title="관리자 대시보드" description="전체 운영 현황을 60초 주기로 갱신합니다." actions={<button type="button" className="field-hint admin-refresh" onClick={refresh} disabled={overview.isFetching} aria-label="관리자 현황 새로고침" title="관리자 현황 새로고침"><RefreshCw size={14} className={overview.isFetching ? "spin" : ""} /> {overview.dataUpdatedAt ? relativeTime(new Date(overview.dataUpdatedAt).toISOString()) : "갱신 대기"}</button>} /><div className="kpi-grid admin-kpis"><Card><Users size={18} /><span>전체 유저</span><strong className="mono">{data?.users ?? "—"}</strong></Card><Card><Battery size={18} /><span>전체 배터리</span><strong className="mono">{data?.batteries ?? "—"}</strong></Card><Card><Activity size={18} /><span>활성 세션</span><strong className="mono">{data?.activeSessions ?? "—"}</strong></Card><Card><AlertOctagon size={18} /><span>BLOCKED 배터리</span><strong className="mono">{data?.blockedBatteries ?? "—"}</strong></Card></div><div className="two-column-layout"><Card><div className="card-title-row"><h2>최근 7일 이상 이벤트 추이</h2><span className="field-hint">서버 집계</span></div>{trend.isError ? <TableState state="error" message="관리자 이벤트 추이 API를 불러오지 못했습니다." /> : <ResponsiveContainer width="100%" height={260}><BarChart data={chart}><CartesianGrid vertical={false} stroke="var(--border)" /><XAxis dataKey="bucket" tickLine={false} axisLine={false} /><YAxis allowDecimals={false} tickLine={false} axisLine={false} /><Tooltip contentStyle={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 8 }} /><Bar dataKey="CAUTION" stackId="risk" fill="var(--grade-caution)" /><Bar dataKey="WARNING" stackId="risk" fill="var(--grade-warning)" /><Bar dataKey="DANGER" stackId="risk" fill="var(--grade-danger)" /></BarChart></ResponsiveContainer>}</Card><Card><div className="card-title-row"><h2>운영 바로가기</h2></div><div className="admin-link-list"><Link to="/adminUsers"><UserRound size={18} /><span><strong>유저 계정 관리</strong><small>정지·해제와 계정 상태</small></span><ArrowUpRight size={16} /></Link><Link to="/adminBattery"><Battery size={18} /><span><strong>배터리 운영 관리</strong><small>상태 사유와 관리자 메모</small></span><ArrowUpRight size={16} /></Link><Link to="/adminAudit"><FileClock size={18} /><span><strong>감사 로그</strong><small>변경 기록은 수정·삭제 불가</small></span><ArrowUpRight size={16} /></Link></div><div className="admin-edit-block"><div className="card-title-row"><h2>최근 공지</h2><Link className="text-button" to="/adminNotice">전체 보기 →</Link></div>{data?.recentNotices?.length ? <div className="admin-link-list">{data.recentNotices.map((notice) => <Link key={notice.id} to="/adminNotice"><span><strong>{notice.title}</strong><small>{noticeCategoryLabels[notice.category]} · {formatDateTime(notice.publishedAt)}</small></span><ArrowUpRight size={16} /></Link>)}</div> : <TableState state="empty" message="게시된 공지가 없습니다." />}</div></Card></div></div>;
+  return <div className="page-stack"><PageHeading eyebrow="ADMIN OPERATIONS" title="관리자 대시보드" description="전체 운영 현황을 60초 주기로 갱신합니다." actions={<button type="button" className="field-hint admin-refresh" onClick={refresh} disabled={overview.isFetching} aria-label="관리자 현황 새로고침" title="관리자 현황 새로고침"><RefreshCw size={14} className={overview.isFetching ? "spin" : ""} /> {overview.dataUpdatedAt ? relativeTime(new Date(overview.dataUpdatedAt).toISOString()) : "갱신 대기"}</button>} /><div className="kpi-grid admin-kpis"><Card><Users size={18} /><span>전체 유저</span><strong className="mono">{data?.users ?? "—"}</strong></Card><Card><Battery size={18} /><span>전체 배터리</span><strong className="mono">{data?.batteries ?? "—"}</strong></Card><Card><Activity size={18} /><span>활성 세션</span><strong className="mono">{data?.activeSessions ?? "—"}</strong></Card><Card><AlertOctagon size={18} /><span>BLOCKED 배터리</span><strong className="mono">{data?.blockedBatteries ?? "—"}</strong></Card></div><div className="two-column-layout"><Card><AdminEventTrendSection trend={trend.data} period={trendPeriod} onPeriodChange={setTrendPeriod} isPending={trend.isPending} isError={trend.isError} compact /></Card><Card><div className="card-title-row"><h2>운영 바로가기</h2></div><div className="admin-link-list"><Link to="/adminUsers"><UserRound size={18} /><span><strong>유저 계정 관리</strong><small>정지·해제와 계정 상태</small></span><ArrowUpRight size={16} /></Link><Link to="/adminBattery"><Battery size={18} /><span><strong>배터리 운영 관리</strong><small>상태 사유와 관리자 메모</small></span><ArrowUpRight size={16} /></Link><Link to="/adminAudit"><FileClock size={18} /><span><strong>감사 로그</strong><small>변경 기록은 수정·삭제 불가</small></span><ArrowUpRight size={16} /></Link></div><div className="admin-edit-block"><div className="card-title-row"><h2>최근 공지</h2><Link className="text-button" to="/adminNotice">전체 보기 →</Link></div>{data?.recentNotices?.length ? <div className="admin-link-list">{data.recentNotices.map((notice) => <Link key={notice.id} to="/adminNotice"><span><strong>{notice.title}</strong><small>{noticeCategoryLabels[notice.category]} · {formatDateTime(notice.publishedAt)}</small></span><ArrowUpRight size={16} /></Link>)}</div> : <TableState state="empty" message="게시된 공지가 없습니다." />}</div></Card></div></div>;
 }
 
 export function AdminUsersPage() {
@@ -102,4 +172,8 @@ function NoticeEditor({ noticeId, onClose }: { noticeId?: string; onClose: () =>
 export function AdminAuditPage() { const audits = useAudits(); return <div className="page-stack"><PageHeading eyebrow="ADMIN · AUDIT LOG" title="감사 로그" description="관리자 조작과 안전 제어 기록은 수정·삭제할 수 없습니다." /><Card>{audits.isPending ? <TableState state="loading" /> : audits.isError ? <TableState state="error" message="감사 로그 API를 불러오지 못했습니다." /> : audits.data?.items.length ? <div className="data-table-wrap"><table className="data-table"><thead><tr><th>시간</th><th>관리자</th><th>행위</th><th>대상</th><th>결과</th><th>사유</th></tr></thead><tbody>{audits.data.items.map((entry: AuditEntry) => <tr key={entry.id}><td className="mono">{formatDateTime(entry.at, true)}</td><td>{entry.actorName ?? entry.actorId ?? "시스템"}</td><td>{auditLabel(entry.action)}</td><td className="mono">{entry.resource}</td><td>{entry.result}</td><td>{entry.reason ?? "—"}</td></tr>)}</tbody></table></div> : <TableState state="empty" message="감사 로그가 없습니다." />}</Card></div>; }
 function auditLabel(action: string): string { return ({ BATTERY_OPS_STATUS_CHANGE: "배터리 상태 변경", BATTERY_MEMO_UPDATE: "관리자 메모 변경", USER_SUSPEND: "계정 정지", USER_RESTORE: "계정 복구", NOTICE_CREATE: "공지 작성", NOTICE_PUBLISH: "공지 게시", NOTICE_UPDATE: "공지 수정", NOTICE_ARCHIVE: "공지 보관", NOTICE_DELETE: "공지 삭제", RELAY_CUT: "릴레이 차단", RELAY_RESTORE: "릴레이 복구", RELAY_AUTO_CUT: "Fail-Safe 자동 차단", ADMIN_ACCESS_DENIED: "관리자 페이지 접근 실패" } as Record<string, string>)[action] ?? action; }
 
-export function AdminEventTrendPage() { const query = useQuery({ queryKey: ["admin-event-trend-page"], queryFn: () => api.get<{ buckets: string[]; series: Array<{ grade: string; values: number[] }> }>("/api/admin/event-trend"), retry: false }); const data = query.data?.buckets.map((bucket, index) => ({ bucket, ...Object.fromEntries((query.data?.series ?? []).map((series) => [series.grade, series.values[index] ?? 0])) })); return <div className="page-stack"><PageHeading eyebrow="ADMIN · EVENT TRENDS" title="이벤트 추이" description="기간별 이상 이벤트 발생량을 확인합니다." />{query.isPending ? <Card><TableState state="loading" /></Card> : query.isError ? <Card><TableState state="error" message="관리자 이벤트 추이 API를 불러오지 못했습니다." /></Card> : <Card><ResponsiveContainer width="100%" height={360}><BarChart data={data}><CartesianGrid vertical={false} stroke="var(--border)" /><XAxis dataKey="bucket" tickLine={false} axisLine={false} /><YAxis allowDecimals={false} tickLine={false} axisLine={false} /><Tooltip contentStyle={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 8 }} /><Bar dataKey="CAUTION" stackId="risk" fill="var(--grade-caution)" /><Bar dataKey="WARNING" stackId="risk" fill="var(--grade-warning)" /><Bar dataKey="DANGER" stackId="risk" fill="var(--grade-danger)" /></BarChart></ResponsiveContainer></Card>}</div>; }
+export function AdminEventTrendPage() {
+  const [period, setPeriod] = useState<AdminEventTrendPeriod>("7d");
+  const query = useAdminEventTrend(period);
+  return <div className="page-stack"><PageHeading eyebrow="ADMIN · EVENT TRENDS" title="이벤트 추이" description="기간별 이상 이벤트 발생량을 확인합니다." /><Card><AdminEventTrendSection trend={query.data} period={period} onPeriodChange={setPeriod} isPending={query.isPending} isError={query.isError} /></Card></div>;
+}

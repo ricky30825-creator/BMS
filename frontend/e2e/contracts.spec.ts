@@ -99,6 +99,33 @@ test.describe("CellGuard contract flows (MSW)", () => {
     ]));
   });
 
+  test("renders PostgreSQL-shaped event trends and switches period buckets", async ({ page }) => {
+    const trendPeriods: string[] = [];
+    page.on("request", (request) => {
+      const url = new URL(request.url());
+      if (url.pathname === "/api/admin/event-trend") trendPeriods.push(url.searchParams.get("period") ?? "");
+    });
+
+    await signIn(page, "lee@lab.io");
+    await expect(page.getByText("전체 이벤트", { exact: true })).toBeVisible();
+    await expect(page.getByText("위험 이벤트", { exact: true })).toBeVisible();
+    await expect(page.getByRole("tab", { name: "7일", exact: true })).toHaveAttribute("aria-selected", "true");
+    await expect.poll(() => trendPeriods).toContain("7d");
+
+    await page.getByRole("tab", { name: "24시간", exact: true }).click();
+    await expect(page.getByRole("tab", { name: "24시간", exact: true })).toHaveAttribute("aria-selected", "true");
+    await expect.poll(() => trendPeriods).toContain("24h");
+
+    await page.locator("aside").getByRole("button", { name: "이벤트 추이", exact: true }).click();
+    await expect(page).toHaveURL(/\/adminEventTrend$/);
+    await expect(page.getByRole("heading", { name: "이벤트 추이", exact: true }).first()).toBeVisible();
+    await expect(page.getByText("최다 발생", { exact: true })).toBeVisible();
+
+    await page.getByRole("tab", { name: "30일", exact: true }).click();
+    await expect(page.getByRole("tab", { name: "30일", exact: true })).toHaveAttribute("aria-selected", "true");
+    await expect.poll(() => trendPeriods).toContain("30d");
+  });
+
   test("keeps admin status and memo saves as separate controls", async ({ page }) => {
     await signIn(page, "lee@lab.io");
     await page.locator("aside").getByRole("button", { name: "관리자 대시보드" }).click();

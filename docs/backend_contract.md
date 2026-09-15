@@ -1350,7 +1350,7 @@ v3 실측 구성: KPI 카드 4개 → 이벤트 추이 차트 + 배터리 상태
 
 #### `GET /api/admin/event-trend` — 이벤트 추이 (F20) `[REQ-WEB-107/108]`
 
-쿼리: `period=24h|7d|30d`
+쿼리: `period=24h|7d|30d` (생략 시 `7d`)
 
 ```json
 {
@@ -1368,6 +1368,8 @@ v3 실측 구성: KPI 카드 4개 → 이벤트 추이 차트 + 배터리 상태
 `30d=30개 UTC 일`이다. `total`은 세 bucket의 합, `dangerTotal`은 danger
 bucket의 합, `peakAt`은 합계가 가장 큰 bucket의 시각이다. 빈 기간이면
 `total=0`, `dangerTotal=0`, `peakAt=null`, `peakTotal=0`으로 반환한다.
+`period`를 명시한 경우 빈 문자열·지원하지 않는 값·중복 query 값은
+`400 VALIDATION_FAILED`로 거부한다.
 집계 대상은 §3.8의 영속 `ANOMALY_GRADE_CHANGED` event 중
 `severity=CAUTION|WARNING|DANGER`만이며, `CUT`·`NORMAL`·기타 event type은
 제외한다. 동일 event dedupe와 서버 UTC 처리는 저장소 계약을 따른다.

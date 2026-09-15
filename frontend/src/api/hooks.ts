@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, idempotencyKey } from "./client";
 import { normalizeBattery, normalizeDashboard, type DashboardMetricParam } from "./normalize";
-import type { AdminBatteryDetail, AdminBatteryListItem, AdminMemoMutationResponse, AdminNotice, AdminStatusMutationResponse, Alert, AnomalySummary, ApiUser, AuditEntry, Battery, BatteryEvent, Dashboard, Diagnosis, DiagnosisListItem, Evidence, MeResponse, NoticeSummary, Relay, RelayHistory, TrendResponse } from "../types";
+import type { AdminBatteryDetail, AdminBatteryListItem, AdminEventTrend, AdminEventTrendPeriod, AdminMemoMutationResponse, AdminNotice, AdminStatusMutationResponse, Alert, AnomalySummary, ApiUser, AuditEntry, Battery, BatteryEvent, Dashboard, Diagnosis, DiagnosisListItem, Evidence, MeResponse, NoticeSummary, Relay, RelayHistory, TrendResponse } from "../types";
 
 const keys = {
   me: ["me"] as const,
@@ -17,6 +17,7 @@ const keys = {
   notices: ["notices"] as const,
   adminNotices: (query: string) => ["admin-notices", query] as const,
   adminOverview: ["admin-overview"] as const,
+  adminEventTrend: (period: AdminEventTrendPeriod) => ["admin-event-trend", period] as const,
   adminUsers: (query: string) => ["admin-users", query] as const,
   adminBatteries: (query: string) => ["admin-batteries", query] as const,
   adminBattery: (id: string) => ["admin-battery", id] as const,
@@ -44,6 +45,7 @@ export function useNotices(query?: URLSearchParams, enabled = true) { const stri
 export function useAdminNotices(query: URLSearchParams = new URLSearchParams(), enabled = true) { return useQuery({ queryKey: keys.adminNotices(query.toString()), queryFn: () => api.get<{ items: Array<Pick<AdminNotice, "id" | "category" | "audience" | "title" | "summary" | "status" | "viewCount" | "publishedAt" | "archivedAt">>; page: { number: number; size: number; total: number; totalPages: number }; counts?: Record<AdminNotice["status"], number> }>("/api/admin/notices", query), enabled, retry: false }); }
 export function useAdminNotice(id: string | undefined, enabled = true) { return useQuery({ queryKey: id ? ["admin-notice", id] : ["admin-notice", "none"], queryFn: () => api.get<AdminNotice>(`/api/admin/notices/${id}`), enabled: Boolean(id) && enabled, retry: false }); }
 export function useAdminOverview(enabled = true) { return useQuery({ queryKey: keys.adminOverview, queryFn: () => api.get<import("../types").AdminOverview>("/api/admin/overview"), enabled, refetchInterval: 60_000 }); }
+export function useAdminEventTrend(period: AdminEventTrendPeriod, enabled = true) { return useQuery({ queryKey: keys.adminEventTrend(period), queryFn: () => api.get<AdminEventTrend>("/api/admin/event-trend", { period }), enabled, retry: false, refetchInterval: 60_000 }); }
 export function useAdminUsers(query: URLSearchParams, enabled = true) { return useQuery({ queryKey: keys.adminUsers(query.toString()), queryFn: () => api.get<{ items: ApiUser[]; page: { number: number; size: number; total: number; totalPages: number } }>("/api/admin/users", query), enabled }); }
 export function useAdminBatteries(query: URLSearchParams, enabled = true) { return useQuery({ queryKey: keys.adminBatteries(query.toString()), queryFn: () => api.get<{ items: AdminBatteryListItem[]; page: { number: number; size: number; total: number; totalPages: number } }>("/api/admin/batteries", query), enabled }); }
 export function useAdminBattery(id: string | undefined, enabled = true) { return useQuery({ queryKey: id ? keys.adminBattery(id) : ["admin-battery", "none"], queryFn: () => api.get<AdminBatteryDetail>(`/api/admin/batteries/${id}`), enabled: Boolean(id) && enabled }); }

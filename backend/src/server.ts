@@ -30,6 +30,7 @@ import { createKafkaAnomalyAlertsConsumer, type AnomalyAlertsConsumer, type Anom
 import { createKafkaRawMetricsConsumer, type RawMetricsConsumer, type UnassignedTelemetryEvent } from "./telemetryConsumer.js";
 import { createStartupController, isStartupCancelled } from "./runtimeLifecycle.js";
 import { NOTICE_AUDIENCES, NOTICE_CATEGORIES, NOTICE_STATUSES, parseNoticeMutationBody } from "./noticePayload.js";
+import { parseAdminEventTrendPeriod } from "./adminEventTrend.js";
 import {
   abortDiagnosis,
   abortDiagnosisBySystem,
@@ -48,6 +49,7 @@ import {
   diagnosisById,
   diagnosesForBattery,
   engageFailsafe,
+  getAdminEventTrend,
   idempotent,
   latestAnomaly,
   anomalyScoresForBattery,
@@ -874,9 +876,14 @@ app.get("/api/notices/:id", requireSession, asyncRoute(async (req, res) => {
   res.json({ id: notice.id, category: notice.category, title: notice.title, body: notice.body, publishedAt: notice.publishedAt });
 }));
 
-app.get("/api/admin/event-trend", requireRole("ADMIN"), (_req, res) => {
-  res.json({ buckets: ["월", "화", "수", "목", "금", "토", "일"], series: [{ grade: "CAUTION", values: [0, 0, 0, 0, 0, 0, 0] }, { grade: "WARNING", values: [0, 0, 0, 0, 0, 0, 0] }, { grade: "DANGER", values: [0, 0, 0, 0, 0, 0, 0] }] });
-});
+app.get("/api/admin/event-trend", requireRole("ADMIN"), asyncRoute(async (req, res) => {
+  const period = parseAdminEventTrendPeriod(req.query.period);
+  if (!period) {
+    apiError(res, 400, "VALIDATION_FAILED", "period must be one of 24h, 7d, or 30d.");
+    return;
+  }
+  res.json(await getAdminEventTrend(period));
+}));
 
 app.get("/api/admin/notices", requireRole("ADMIN"), asyncRoute(async (req, res) => {
   const query = parseNoticeListQuery(req, true);
