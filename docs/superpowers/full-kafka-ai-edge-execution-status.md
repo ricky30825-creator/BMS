@@ -81,11 +81,11 @@
 
 ## Task 8 — 부모 최종 통합 검증
 
-- 현재 상태: `IN_PROGRESS`
+- 현재 상태: `COMPLETE`
 - 담당 에이전트: 부모 세션
 - 기준 커밋: `4d46b17`
-- 결과 커밋: 미정
-- 부모 리뷰 결과: 추가 보완 필요 — `fba566d`가 listen 실패의 중복 cleanup은 해결했으나 SIGTERM이 DB/worker/consumer startup await 도중 오면 cleanup 이후 기존 startup chain이 다음 단계 또는 listen을 재개할 수 있는 경합이 남음
-- 실행한 테스트와 결과: 1차 부모 독립 실행 — 전체 자동 테스트·typecheck·build·계약 린트·Compose 정적 검증 통과. memory 실제 기동은 샌드박스 `listen EPERM`에서 lifecycle 중복 종료 결함 발견
-- 실환경 검증 여부: 대기
-- 남은 문제 또는 외부 차단 조건: 대기
+- 결과 커밋: lifecycle 보완 `fba566d5164a6d9eed1329a6068097d4239bf9d7`, startup signal 경합 보완 `b5921b3e7ba28ee7b8068de2a80d6d80d13a569f`
+- 부모 리뷰 결과: 통과 — Task 1~7 전체 commit/diff, Kafka/DB/AI/edge 경계, 공통 idempotent cleanup과 startup cancellation controller를 직접 검토. listen 실패의 ticker·pool 이중 종료와 signal 중 startup 재개 경합을 새 에이전트 보완 후 재검증함
+- 실행한 테스트와 결과: 부모 최종 독립 실행 — backend typecheck/build 통과, 전체 304 passed/1 skipped, frontend typecheck/build 통과 및 77 passed, 계약 린트 위반 0·tools 48 passed, AI 20 passed, edge 21 passed, replay/outbox/lifecycle 집중 backend 67 passed, edge/AI replay 집중 19 passed, Compose YAML·migration JS·Python compile·migration 000~009 순서·`git diff --check` 통과. memory `/health`=`{status:ok,auth:demo,data:memory}`와 SIGINT exit 0, Kafka 플래그가 켜진 memory 모드의 broker 비연결 기동, PostgreSQL 연결 거부 시 fallback/listen 없이 exit 1, sandbox listen EPERM cleanup exit 1을 실제 확인
+- 실환경 검증 여부: 부분 검증 — memory backend HTTP는 실제 검증. Docker/Kafka/TimescaleDB/AI artifact/Raspberry Pi GPIO는 환경 부재로 미검증
+- 남은 문제 또는 외부 차단 조건: Task 5 외부 모델 bundle/adapter 및 실 추론, Docker Compose pull/up과 Timescale/Kafka roundtrip, Pi GPIO·릴레이·manual gate 실물 인수. 민감정보/private LAN 추가·tracked `.env`·tracked model artifact 없음
