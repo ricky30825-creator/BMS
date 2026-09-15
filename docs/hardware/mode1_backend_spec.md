@@ -696,6 +696,53 @@ CH3이 열린 상태에서 `0x55` 미응답을 센서 오류로 쏘면 알림이
 
 > **셀 보호회로(PCM)가 끊길 때도 같은 증상이 난다** — 전압이 0으로 떨어지고 `0x55`가 사라진다. CH3이 닫혀 있는데 이 현상이 나오면 PCM 동작을 의심한다. 회로에 퓨즈가 없어 PCM이 유일한 과전류 보호다.
 
+### 8-7. `battery-events` 명령 Consumer
+
+라즈베리파이 명령 프로세스(`edge/commands/`)는 백엔드가 발행한 네 가지
+version-1 payload만 받는다. JSON에는 문구나 임의의 ID를 넣지 않는다.
+
+| 항목 | 규칙 |
+|---|---|
+| 토픽 | `battery-events` 고정 |
+| JSON | `SESSION_STARTED`, `SESSION_ENDED`, `RELAY_CUT`, `RELAY_RESTORE`만 허용 |
+| 버전 | `version: 1`만 허용. 누락·다른 버전·추가 필드는 거절 |
+| Kafka key | `params.batteryId`와 같은 UTF-8 `batteryId` |
+| durable ID | `x-cellguard-event-id` header를 정확히 하나 요구. JSON body에는 넣지 않음 |
+| offset | payload·key·header 검증, 물리 명령 적용, 로컬 성공 기록이 모두 끝난 뒤에만 다음 offset을 commit |
+
+durable ID와 성공 상태는 라즈베리파이의 명시적 SQLite 파일(`EDGE_IDEMPOTENCY_DB`)
+에 기록한다. 프로덕션에서 `:memory:`를 사용하지 않는다. 같은 ID·같은 payload가
+다시 오면 adapter를 재호출하지 않고 commit만 허용한다. 실행 중(`PROCESSING`)인
+ID가 재시작 뒤 보이면 물리 동작이 애매한 상태이므로 자동 재실행하지 않고
+`EDGE_EVENT_IN_FLIGHT`로 멈춘다. 실패한 명령은 `SUCCEEDED`로 기록하지 않으며
+Kafka offset도 남기지 않는다. 따라서 실제 릴레이를 확인하지 않은 상태를 성공으로
+주장하지 않는다.
+
+프로덕션은 `RPi.GPIO` adapter만 사용한다. GPIO 도구가 없거나
+`EDGE_HARDWARE_PROFILE`이 `MODE1_EXTERNAL_CELL_V1` 또는
+`COMBINED_EXISTING_PARTS_V1`이 아니면 Kafka 연결 전에 기동을 거절한다.
+테스트 fake는 `edge/commands/testing.py`에만 있으며 프로덕션 fallback이 아니다.
+기동 시 BCM 5/6/13/19를 모두 active-LOW의 HIGH(차단)로 설정한다. CH1·CH2가
+동시에 LOW인 상태와 프로필 상태표 밖의 조합은 거절한다.
+
+`COMBINED_EXISTING_PARTS_V1`의 모드 전환·복구에는 세 수동 게이트가 모두
+필요하다. 각 파일은 서비스가 만들거나 지우지 않으며, 작업자가 확인 후
+`<battery_id>:<target_mode>` 한 줄을 기록한다.
+
+| 환경변수 | 수동으로 확인할 조건 |
+|---|---|
+| `EDGE_SOURCE_GATE_FILE` | 이전 전원을 물리적으로 분리·절연하고 `SOURCE_P`에 다음 모드 양극 한 가닥만 체결 |
+| `EDGE_CURRENT_GATE_FILE` | CH1·CH2를 HIGH로 연 뒤 `|current_a| ≤ 0.02A` |
+| `EDGE_OVF_GATE_FILE` | INA226 Mask/Enable bit 2의 `OVF = 0` |
+
+파일이 없거나 token이 다르면 해당 게이트를 통과하지 못한다. 소프트웨어가
+`SOURCE_P` 연결, 전류, OVF를 추정해 대신 승인하지 않는다. 모드 전환의 릴레이
+순서는 **CH1·CH2 HIGH → 50ms 이상 대기 → CH3 HIGH → 50ms 이상 대기 →
+수동 게이트 확인 후 CH4 선택**이며, CH4 선택 뒤에도 50ms 이상 기다린다.
+CH3을 다시 LOW으로 닫기 전에는 current/OVF 게이트를 다시 확인한다. 차단은
+항상 **CH1·CH2 HIGH → CH3 HIGH** 순서다. 한 번 Fail-Safe interlock이 걸리면
+Kafka `RELAY_RESTORE`가 이를 해제할 수 없고, 별도 현장 재인증만 허용한다.
+
 ---
 
 ## 9. `battery-raw-metrics` 매핑 (모드 1)
