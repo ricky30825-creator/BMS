@@ -89,17 +89,17 @@
 
 ## Task 5 — 추세 PDF
 
-- 현재 상태: `IN_PROGRESS`
+- 현재 상태: `REVIEW_REQUIRED`
 - 담당 에이전트: `/root/task5_pdf`
 - 기준 커밋: `c1817f1`
-- 결과 커밋: 미정
-- 변경 파일: 미정
-- 구현 결과: 구현 진행 중
-- 부모 검토 결과: 미착수
-- 서브에이전트 테스트: 미실행
+- 결과 커밋: `f0a770b`
+- 변경 파일: backend trend aggregate/query/PDF/store/server/tests, PDFKit dependency/lockfile, Noto Sans KR font/license, Dockerfile/README/status docs, frontend trend download/MSW/E2E
+- 구현 결과: 공용 PostgreSQL 집계 추세와 PDFKit 기반 한글 PDF 다운로드, 입력·소유권 검증, 프론트 다운로드 연결 구현
+- 부모 검토 결과: 검토 대기
+- 서브에이전트 테스트: backend typecheck/build 및 Vitest 339 passed/1 skipped, frontend typecheck/build 및 Vitest 79 passed, Playwright 29 passed, pdfinfo/pdftotext/pdftoppm 및 memory runtime 응답 통과
 - 부모 독립 테스트: 미실행
 - 실환경 검증 여부: 미실행
-- 남은 문제 또는 외부 차단 조건: 한국어 글꼴과 Node/Docker 호환 PDF 도구 비교 및 실제 PDF 파싱·렌더링 검증 필요
+- 남은 문제 또는 외부 차단 조건: 부모 독립 검토 필요; Docker CLI와 `TEST_DATABASE_URL` 부재로 실제 Docker/PostgreSQL roundtrip 미검증
 
 ## Task 6 — Fail-Safe 설정 및 비실물 통합
 
