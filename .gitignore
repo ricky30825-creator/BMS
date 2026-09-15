@@ -28,6 +28,7 @@ fp-info-cache
 edge/bw150/__pycache__/
 # Trained model bundles are supplied out-of-band and must never be committed.
 ai/artifacts/
+ai/external/
 ai/models/
 ai/checkpoints/
 ai/**/*.pt

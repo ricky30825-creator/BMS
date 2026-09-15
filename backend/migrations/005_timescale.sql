@@ -1,8 +1,8 @@
 -- 005_timescale.sql — TimescaleDB 전환. Q3 + Q5를 한 번에 닫는다.
 -- 결정일 2026-08-28. **컬럼 추가(003·004)가 모두 끝난 뒤에 적용한다.**
 --
--- 전제: 호스트에 TimescaleDB 확장이 설치돼 있어야 한다. 없으면 이 파일만 실패하고
---       앞의 004까지는 그대로 유효하다(평범한 PostgreSQL 테이블로 동작한다).
+-- 전제: 반드시 TimescaleDB 배포판/확장이 있어야 한다. 이 파일이 실패하면
+--       PostgreSQL 모드를 열지 않는다. 평범한 PostgreSQL 테이블로 대체하지 않는다.
 
 create extension if not exists timescaledb;
 
@@ -19,8 +19,8 @@ create extension if not exists timescaledb;
 --    중복 방지 키가 여기서 같이 닫힌다 — Consumer는 `on conflict do nothing`으로
 --    적재하면 재처리가 멱등해진다.
 --
---    id를 버려도 안전하다: backend/src 전체에 telemetry_metric을 참조하는 코드가
---    0건이다(저장소 구현체가 아직 없다). 지금이 버릴 수 있는 마지막 시점이다.
+--    id를 버려도 안전하다: 현재 저장소 구현체는 telemetry_metric의 자연키
+--    (device_id, measured_at)를 사용하며 대리키 id를 참조하지 않는다.
 -- ─────────────────────────────────────────────────────────────────────────────
 alter table telemetry_metric drop constraint if exists telemetry_metric_pkey;
 alter table telemetry_metric drop column if exists id;

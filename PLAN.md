@@ -620,7 +620,7 @@ ADS1115          LAN          battery-anomaly-alerts ◀─ alerts 발행 ─┤
 > | 5 | `docs/handover/schema-open-questions.md` | **과거 미결정 6건의 결정 기록.** 해당 DDL은 `backend/migrations/002`~`005`에 반영됐고, Consumer 착수 시 실제 컬럼·제약과 함께 확인한다 |
 > | 6 | `docs/verification_matrix.md` | 무엇을 어떻게 검증하면 끝난 것으로 치는지. 백엔드 typecheck·빌드·`/health`·테스트 명령이 여기 있다 |
 >
-> ✅ **DB는 `npm run db:migrate` 하나로 올라간다(2026-08-28).** `backend/migrations/000`~`009`가 파일명 순서대로 적용된다. 예전에 `psql -f 001_app_auth.sql`이 첫 구문에서 멈추던 문제(`"user"` 테이블 DDL 부재)는 `000_identity.sql`이 해결했다. **`psql -f`로 001만 직접 돌리지 마라** — 순서가 있는 10개 파일이다. `npm run auth:generate`·`auth:migrate`는 CLI 패키지가 없어 실패하니 부르지 않는다(Better Auth는 지금 미사용).
+> ✅ **DB는 `npm run db:migrate` 하나로 올라간다(2026-08-28).** `backend/migrations/000`~`009`가 연속된 파일명 순서로 적용된다. 실행기는 advisory lock, TimescaleDB 가용성 사전 확인, 완료 후 두 hypertable 확인을 수행한다. 예전에 `psql -f 001_app_auth.sql`이 첫 구문에서 멈추던 문제(`"user"` 테이블 DDL 부재)는 `000_identity.sql`이 해결했다. **`psql -f`로 001만 직접 돌리지 마라** — 순서가 있는 10개 파일이다. plain PostgreSQL로 강등하지 않는다. `npm run auth:generate`·`auth:migrate`는 CLI 패키지가 없어 실패하니 부르지 않는다(Better Auth는 지금 미사용).
 >
 > 세부 계약이 필요해지면 — 에러 코드는 `docs/backend_contract.md` §1.10, 원자성 요구는 §3.4, 에지 프레임 정의와 `battery-events`의 code+params는 `docs/hardware/mode1_backend_spec.md` §9·§11이다.
 >
@@ -630,9 +630,9 @@ ADS1115          LAN          battery-anomaly-alerts ◀─ alerts 발행 ─┤
 
 > **로컬 단일 PC 구성으로 변경(2026-08-25).** EC2 프로비저닝·보안그룹·TLS/SASL 항목은 삭제했다.
 
-- [ ] 호스트 PC에 Kafka 설치·토픽 3개 생성, LAN 한정 PLAINTEXT 구성 (S-BYYPVQ) — `advertised.listeners`를 호스트 LAN IP로 잡아야 에지가 붙는다
-- [ ] 브로커·DB 포트를 방화벽에서 LAN으로 제한
-- [ ] PostgreSQL + TimescaleDB **설치** (S-NFEETD) — 설치만 남았다. ⚠️ **스키마를 새로 설계하지 않는다.** `backend/migrations/`의 8개 파일이 테이블 14개와 진단 progress 스냅샷·텔레메트리 raw payload 컬럼을 정의하고 `npm run db:migrate`가 적용한다. 하이퍼테이블 전환·보존정책(60일)은 `005_timescale.sql`에 이미 들어 있고, PK를 `(device_id, measured_at)`로 바꿔 `create_hypertable` 거부 문제도 해결됐다. 압축 정책은 재처리 창과 충돌해 **일부러 걸지 않았다**(되살리는 두 줄이 `005` 주석에 있다). 결정 근거는 `docs/handover/schema-open-questions.md`
+- [ ] 호스트 PC에 Kafka 설치·토픽 3개 생성, LAN 한정 PLAINTEXT 구성 (S-BYYPVQ) — `docker-compose.local.yml`에 KRaft·세 토픽·INTERNAL/LOCALHOST/LAN listener 구성을 추가했다. 실제 호스트 실행과 `advertised.listeners` LAN 주소 적용은 인수에서 수행한다
+- [ ] 브로커·DB 포트를 방화벽에서 LAN으로 제한 — Compose는 DB/localhost listener/backend를 loopback에 bind하고 LAN listener는 방화벽 제한이 필요하다
+- [ ] PostgreSQL + TimescaleDB **설치** (S-NFEETD) — `docker-compose.local.yml`의 pinned TimescaleDB 이미지와 fail-closed migration/backend 검사를 추가했다. 실제 설치·hypertable 적재 인수는 남았다. ⚠️ **스키마를 새로 설계하지 않는다.** `backend/migrations/000`~`009`가 테이블·진단 progress·raw payload·outbox delivery를 정의하고 `npm run db:migrate`가 적용한다. 하이퍼테이블 전환·보존정책(60일)은 `005_timescale.sql`에 있다. 압축 정책은 재처리 창과 충돌해 **일부러 걸지 않았다**(되살리는 두 줄이 `005` 주석에 있다). 결정 근거는 `docs/handover/schema-open-questions.md`
 - [x] 백엔드 프로젝트 초기화 (Node.js + TypeScript + Express)
 - [x] Better Auth 기반 사용자 인증 골격 구현 (R-HBLCDS — F-SDSVND, F-TFJKKF, F-HUYIXC)
 - [ ] ~~Better Auth 실인증 전환~~ — **보류(2026-08-25 결정).** 코드는 그대로 두고 `AUTH_MODE=demo`로 꺼둔다. 나중에 환경변수만 바꿔 켠다. 데모 계정에 ADMIN이 있어 RBAC·감사로그 시연에는 지장이 없다
@@ -693,8 +693,8 @@ ADS1115          LAN          battery-anomaly-alerts ◀─ alerts 발행 ─┤
 - [ ] 이상 시나리오 주입 테스트 (오탐/미탐 검증)
 - [ ] KPI 측정 및 성능 튜닝
 - [ ] 프론트엔드 production 빌드 → 백엔드가 정적 서빙 (단일 오리진으로 CORS·쿠키 설정 제거)
-- [ ] 프로세스 자동 시작·재시작 구성 (Kafka·PostgreSQL·추론·백엔드) — 시연 중 크래시나 PC 재부팅에서 복구
-- [ ] `.env` 템플릿과 시드 데이터 정리 — 다른 PC에서도 같은 절차로 뜨는지 확인
+- [ ] 프로세스 자동 시작·재시작 구성 (Kafka·PostgreSQL·추론·백엔드) — Compose healthcheck/restart 정책과 수동 recovery 절차를 추가했으며, 실제 PC 재부팅·크래시 복구 리허설은 남았다
+- [ ] `.env` 템플릿과 시드 데이터 정리 — root/edge/ai `.env.example`과 Compose seed 경로를 추가했으며, 다른 PC 재현은 실제 인수에서 확인한다
 - [ ] 시연 시나리오 리허설 (`docs/final_month_strategy.md` 기준)
 
 ---

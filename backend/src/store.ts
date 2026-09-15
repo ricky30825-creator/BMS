@@ -30,6 +30,15 @@ const REQUIRED_POSTGRES_TABLES = [
 // 시작하지 않는다.
 export async function initializeStore(): Promise<void> {
   if (env.DATA_MODE !== "postgres") return;
+  const extension = await db.query<{ extversion: string }>(`
+    select extversion
+    from pg_extension
+    where extname = 'timescaledb'
+  `);
+  if (!extension.rows[0]?.extversion) {
+    throw new Error("TIMESCALEDB_REQUIRED: PostgreSQL mode requires the TimescaleDB extension");
+  }
+
   const result = await db.query<{
     table_count: number;
     progress_snapshot: string | null;
@@ -81,6 +90,17 @@ export async function initializeStore(): Promise<void> {
   const schema = result.rows[0];
   if (!schema || Number(schema.table_count) !== REQUIRED_POSTGRES_TABLES.length || !schema.progress_snapshot || !schema.raw_payload || !schema.outbox_event_id || !schema.outbox_dedupe_key || !schema.outbox_next_attempt_at || !schema.outbox_claim_token || !schema.outbox_lease_until || !schema.outbox_dead_at) {
     throw new Error("PostgreSQL schema is not ready; run npm run db:migrate (including 009_outbox_delivery.sql)");
+  }
+
+  const hypertables = await db.query<{ hypertable_name: string }>(`
+    select hypertable_name
+    from timescaledb_information.hypertables
+    where hypertable_schema = 'public'
+      and hypertable_name = any($1::text[])
+  `, [["telemetry_metric", "anomaly_score"]]);
+  const names = new Set(hypertables.rows.map((row) => row.hypertable_name));
+  if (!names.has("telemetry_metric") || !names.has("anomaly_score")) {
+    throw new Error("TIMESCALEDB_REQUIRED: telemetry_metric and anomaly_score must be TimescaleDB hypertables");
   }
 }
 

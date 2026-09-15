@@ -67,7 +67,7 @@ DB를 초기화해 실행한다. 현재 실행 환경에는 이 변수가 없어
 | 백엔드 DB 도메인 provider·Consumer·TimescaleDB | `backend/migrations/000_identity.sql`~`009_outbox_delivery.sql`, `postgres.ts`, `telemetryConsumer.ts`, `anomalyConsumer.ts`, `outboxWorker.ts`. Raw Consumer는 session tagging·raw payload·단조 latest·수동 offset commit·프레임별 Fail-Safe hook을, Anomaly Consumer는 device 기준 ACTIVE session tagging·anomaly 이력·단조 score latest·replay-safe 이벤트·수동 offset commit을, Outbox Worker는 durable command의 배터리별 순서·lease·retry를 구현했다. `TEST_DATABASE_URL`이 없으면 실 DB 계약 테스트는 skip한다. Kafka/Timescale 실측 부하는 별도이며 `AUTH_MODE=betterauth`의 WS 인증은 여전히 보류되고, WS upgrade가 `DATA_MODE`를 별도로 검사하지 않는 갭은 남아 있다 | **Raw/Anomaly/Outbox 구현 / 실 Kafka·DB 인수 검증 대기** |
 | 알림 발송 (카카오·SMS·메일) | 채널 ON/OFF 토글과 policy 응답만 있고(`server.ts:405`·`:409`), **실제로 메시지를 보내는 코드는 `backend/src`에 없다** | **보류(의도적)** — 토글 현행 유지, 추가 작업 없음 |
 | AI 로컬 추론 프로세스 | `ai/`에 v1 raw/anomaly 계약 validator, fail-closed bundle loader, 외부 adapter/broker 경계, raw timestamp 기반 결정적 replay identity, 수동 offset lifecycle과 표준 테스트가 있다. 실제 checkpoint·scaler·권위 feature metadata와 외부 모델 adapter는 없다 | **외부 차단(`EXTERNALLY_BLOCKED`)** — 실제 추론·점수 품질을 주장하지 않음 (`docs/ai_inference.md`) |
-| 로컬 실행 패키징 | **C8 완료(2026-08-25)** — 단일 오리진(`:3005`), `start-local.bat`(Windows, 수동 실행), `docs/local_run.md`. memory 모드 한정(Kafka·PostgreSQL·추론은 별도) | 완료 (memory 모드) |
+| 로컬 실행 패키징 | **C8 완료(2026-08-25)** — 단일 오리진(`:3005`), `start-local.bat`(Windows, 수동 실행), `docs/local_run.md`. **Task 7 구성 추가** — pinned TimescaleDB/Kafka Compose, ordered migration/topic bootstrap, backend healthcheck, localhost/LAN listener 분리, 선택 AI profile | memory 경로 완료 / Compose 실기동·Kafka·Timescale 인수 검증 대기 |
 | 에지 소프트웨어 | `edge/commands/`에 version-1 `battery-events` 명령 Consumer, durable SQLite 멱등성, `RPi.GPIO` fail-closed 릴레이 adapter가 있고 `edge/bw150/`에는 BW150 HID 로거·탐지·BLE 프로브가 있다 | **Task 6 명령 경계·단위 테스트 구현 완료 / 실제 Raspberry Pi GPIO·Kafka broker 인수 검증 대기** |
 | AI 소프트웨어 | `ai/contracts.py`, `ai/bundle.py`, `ai/inference.py`, `ai/runtime.py`, `ai/kafka.py`에 계약·번들 검증·외부 adapter·Kafka lifecycle 골격과 테스트가 있다. 학습 코드·모델 binary·실 adapter는 저장하지 않는다 | **안전 경계 구현 / 외부 artifact·adapter 차단** |
 | 프론트엔드 | [`frontend/src/`](../frontend/src/)의 Vite + React + TypeScript strict 앱, v3 사용자 15·관리자 6 라우트, 계약형 API/WS 계층, MSW 시나리오, `npm run dev:real` 데모 경로. WS 이벤트 11종 핸들러 중 **9종이 서버 발신을 실제로 수신**(C1 8종 + B3의 `relay.autoCut`), 잔여 `diagnosis.*` 2종은 F21이 fail-closed라 도달 불가 | 부분 구현 / production WS 인증 미착수 |
@@ -113,7 +113,7 @@ mode에서는 migrations `000_identity.sql`·`002_domain_gaps.sql`에 있다 —
 
 ### 2026-08-06 계약 동기화 주의
 
-v3 프로토타입과 정본 문서에는 모드 1/2, 대표 온도 최댓값, signed 전류, 모드 2 상대 SOC, F21 `0=미설정` fail-closed, 서버 승인 릴레이, Raw CSV, WS envelope, 관리자 상태·메모·계정 사유 게이트가 반영됐다. 데모 provider의 REST/WS와 실제 Chromium 클릭 검증은 완료했지만, 실제 PostgreSQL transaction provider·Kafka/Timescale 적재·물리 Fail-Safe 판정·하드웨어 릴레이는 아직 구현/실측 전이다. `DATA_MODE=postgres`(과거 `DEMO_MODE=false`)는 이 provider가 생길 때까지 `RUNTIME_NOT_READY`로 닫힌다.
+v3 프로토타입과 정본 문서에는 모드 1/2, 대표 온도 최댓값, signed 전류, 모드 2 상대 SOC, F21 `0=미설정` fail-closed, 서버 승인 릴레이, Raw CSV, WS envelope, 관리자 상태·메모·계정 사유 게이트가 반영됐다. 데모 provider의 REST/WS와 실제 Chromium 클릭 검증은 완료했고, PostgreSQL transaction provider·Kafka/Timescale Consumer·물리 Fail-Safe 판정·하드웨어 릴레이는 각각 구현 또는 경계가 있지만 실제 DB/Kafka/하드웨어 인수는 남아 있다. `DATA_MODE=postgres`는 migration `000`~`009`와 TimescaleDB extension/hypertable 검사가 통과할 때만 열리고, 실패하면 `RUNTIME_NOT_READY`/`TIMESCALEDB_REQUIRED`로 닫힌다.
 
 `backend/dist/`는 TypeScript 빌드 산출물이며 소스 구현의 근거로 세지 않는다. `PLAN.md`의 예정 폴더 구조도 실제 디렉터리 존재를 의미하지 않는다.
 
@@ -125,7 +125,7 @@ v3 프로토타입과 정본 문서에는 모드 1/2, 대표 온도 최댓값, s
 
 | 단계 | PLAN 기준 | 현재 판단 |
 |---|---|---|
-| Phase 1 인프라·백엔드 기반 | 백엔드 초기화·인증 골격만 완료 | 부분 구현. 로컬 Kafka·PostgreSQL/TimescaleDB 미착수. **EC2 항목은 삭제**(로컬 구성), **Better Auth 실인증은 보류** |
+| Phase 1 인프라·백엔드 기반 | 백엔드 초기화·인증 골격과 Task 7 로컬 Compose 구성 | 부분 구현. pinned Kafka/TimescaleDB/migration/backend 구성은 있으나 실제 host 인수 대기. **EC2 항목은 삭제**(로컬 구성), **Better Auth 실인증은 보류** |
 | Phase 2 에지 수집 | 센서·100ms 폴링·릴레이·음성·프로듀서 | 미착수 (BW150 도구만 존재) |
 | Phase 3 스트리밍 | Consumer·세션 태깅·적재·오프셋 | Raw/Anomaly Consumer·세션 태깅·적재·오프셋 구현 / 실 Kafka·Timescale 인수 대기 |
 | Phase 4 AI | 데이터셋·특징·AE·Informer·추론 | 계약·fail-closed 실행 경계만 구현. checkpoint·scaler·feature metadata·외부 adapter가 제공될 때까지 **실 추론은 외부 차단** |
@@ -373,12 +373,13 @@ Timescale 적재, 물리 Fail-Safe는 여전히 별도 범위다.
 - **테스트**: `frontend/src/test/trend-charts.test.ts` 3건(부호 제거, null 보존, 다른 지표는 그대로).
 - **실측**: 배터리 상세 → 추세 차트에서 전류 Y축이 `0 – 2.4`(음수 없음)로 렌더링됨을 브라우저로 확인.
 
-### C8. 로컬 실행 패키징 (구 Phase 7 배포) — **완료(2026-08-25), 실측 범위는 memory 모드 한정**
+### C8. 로컬 실행 패키징 (구 Phase 7 배포) — **memory 경로 완료(2026-08-25), Task 7 Compose 구성은 실측 대기**
 
 정본은 `docs/local_run.md`. AWS 배포는 삭제됐고, 기본 시연은
 `AUTH_MODE=demo DATA_MODE=memory`로 한다. PostgreSQL provider와 Raw Kafka
-Consumer는 구현됐지만, DB/Kafka 실측 인수와 AI 추론 프로세스는 별도 인수
-환경·담당자 몫이다.
+Consumer는 구현됐고 `docker-compose.local.yml`에 TimescaleDB/Kafka/migration/
+backend 통합 구성을 추가했지만, DB/Kafka 실측 인수와 AI 추론 프로세스는
+별도 인수 환경·담당자 몫이다.
 
 - **호스트 PC는 Windows로 확인됐다(2026-08-25)** — 이 사실을 CLAUDE.md와 개인 메모리에 남겼다. 이하 전부 Windows 기준.
 - **단일 오리진**: `backend/src/server.ts`에 `/api/*` 명시적 JSON 404(기존엔 Express 기본 HTML 404로 새고 있었음) + `express.static(frontend/dist)` + SPA 폴백(`index.html`)을 추가. `frontend/dist`가 없으면(백엔드 단독 dev 세션) 조용히 스킵된다.
@@ -386,11 +387,11 @@ Consumer는 구현됐지만, DB/Kafka 실측 인수와 AI 추론 프로세스는
 - **`frontend/.env.production`(신규)**: `npm run build`가 자동으로 읽어 `VITE_API_BASE=`(동일 오리진)·`VITE_DEMO_MODE=true`·`VITE_USE_MOCKS=false`를 굽는다.
 - **Windows 배치 스크립트**: `start-local.bat` — `.env` 확인 → 최초 1회만 `npm install` → 매번 프론트 재빌드 → `npm run start:local`(`tsx src/server.ts`, backend/package.json에 신규 추가)로 백엔드 기동. **작업 스케줄러 등록 등 영구 자동시작은 설치하지 않는다** — 사용자가 명시적으로 이 옵션을 거절했다(재부팅 후 수동 실행).
 - **시드 데이터**: memory mode는 `backend/src/store/memory.ts`에 내장된 데모 데이터, PostgreSQL mode는 migrations `000`·`002`의 사용자/프로필 seed를 사용한다. 배터리 자산은 PostgreSQL에서 등록 또는 테스트 fixture 준비가 필요하다.
-- **`.env` 템플릿**: `backend/.env.example`·`frontend/.env.example`에 주석 보강(왜 `DATABASE_URL`이 memory 모드에서도 필요한지, `.env.production`이 별도 파일인 이유).
+- **`.env` 템플릿**: `backend/.env.example`·`frontend/.env.example`에 주석 보강(왜 `DATABASE_URL`이 memory 모드에서도 필요한지, `.env.production`이 별도 파일인 이유). Task 7에서 root/edge/ai `.env.example`과 Compose listener·secret 경계를 추가했다.
 - **실측(이 세션, macOS에서 실제 프로덕션 빌드로 검증)**: `npm run build` → 백엔드 기동 → `curl`로 `/`·`/dashboard`(200 HTML)·`/api/does-not-exist`(404 JSON, HTML로 새지 않음) 확인. 브라우저로 `localhost:3005` 접속 → 데모 로그인 자동 진행 → 배터리 연결 → 대시보드·설정(C4 음성 안내 탭)·`?metric=` 배선(C6)·전류 abs() 추세(C7)까지 전부 단일 오리진에서 재확인. 콘솔 에러 없음.
 - **Playwright**: 기존 `e2e/production-bundle.spec.ts`(실서비스 빌드에 데모 자격증명이 새지 않는지 검증하는 기존 테스트)에 대칭 테스트 1건 추가 — `VITE_DEMO_MODE=true` 빌드에는 데모 로그인 트랜스포트가 **반드시 포함**돼야 함을 검증. 29건 전체 통과.
 - ⚠️ **Windows `.bat` 자체는 실제 Windows PC에서 실행해 검증하지 못했다** — macOS 세션에서 작성만 했다. 처음 돌릴 때 문제가 있으면 알려달라고 `docs/local_run.md`에 남겨뒀다.
-- **완료 판정 재확인**: "PC 재부팅 후 `localhost:3005` 하나로 전체 시나리오 동작"은 memory 모드 기준으로 today 성립한다. Kafka/PostgreSQL/추론이 붙는 순간(B1 이후) 이 문서·스크립트는 다시 봐야 한다.
+- **완료 판정 재확인**: "PC 재부팅 후 `localhost:3005` 하나로 전체 시나리오 동작"은 memory 모드 기준으로 today 성립한다. Compose 경로는 healthcheck/restart/recovery 문서와 fail-closed gate까지 구성했지만, 실제 Docker/Kafka/Timescale 기동·재부팅 인수는 별도다.
 
 ## 5. D군 — 404지만 정상 (착각 방지)
 

@@ -21,9 +21,18 @@ npm run dev
 
 `db:migrate` needs a reachable `DATABASE_URL`. It is required before
 `DATA_MODE=postgres`; the `DATA_MODE=memory` demo path runs without it.
-`005_timescale.sql` needs the TimescaleDB extension. Without it the migration
-runner stops at `005`, so later migrations are not applied and PostgreSQL mode remains
-closed until the extension is installed and migrations are rerun.
+`005_timescale.sql` requires the TimescaleDB extension. The migration runner
+checks extension availability before applying files, uses an advisory lock for
+one runner at a time, and verifies both hypertables after the run. Missing
+TimescaleDB or a plain PostgreSQL server is a visible `TIMESCALEDB_REQUIRED`
+failure; it never degrades to a plain table or memory data.
+
+For the complete local integration path (pinned TimescaleDB/Kafka images,
+three-topic initialization, backend healthcheck, LAN listener, lifecycle and
+recovery commands), use [`../docker-compose.local.yml`](../docker-compose.local.yml)
+and [`../docs/local_run.md`](../docs/local_run.md). The standalone commands in
+this README remain useful when a developer supplies an already running
+TimescaleDB server.
 
 Do **not** run `npm run auth:generate` here. It is not part of first-run setup
 and the CLI it needs is not a repository dependency — see below.
@@ -89,7 +98,9 @@ The PostgreSQL runtime can opt into the embedded `battery-raw-metrics` Consumer:
 DATA_MODE=postgres
 KAFKA_ENABLED=true
 KAFKA_CONSUMER_ENABLED=true
-KAFKA_BROKERS=192.168.0.10:9092
+# Host process: use the localhost listener. A Raspberry Pi uses the separate
+# LAN listener documented in docs/local_run.md.
+KAFKA_BROKERS=127.0.0.1:9092
 KAFKA_GROUP_ID=cellguard-backend
 ```
 

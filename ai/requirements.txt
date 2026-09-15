@@ -1,3 +1,3 @@
 # Optional production transport. Contract, bundle, and lifecycle tests use
 # only the Python standard library and do not require this package.
-kafka-python>=2.0.2,<3
+kafka-python==2.0.2

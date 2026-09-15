@@ -66,7 +66,7 @@ runStoreContractTests("postgres", async () => createPostgresStore(testPool));
 | 단계 | 하는 일 | 상태 |
 |---|---|---|
 | 1 | PostgreSQL **+ TimescaleDB 확장** 설치, DB·계정 생성, `backend/.env`의 `DATABASE_URL` 설정 | ✅ 문서만으로 됨 (`backend/.env.example`) |
-| 2 | `npm run db:migrate` — `migrations/*.sql`을 파일명 순서대로 적용 | ✅ 실행기 있음 (`backend/scripts/migrate.mjs`) |
+| 2 | `npm run db:migrate` — `migrations/*.sql`을 연속된 번호 순서대로 적용 | ✅ 실행기 있음 (`backend/scripts/migrate.mjs`); advisory lock·TimescaleDB 사전/사후 확인 포함 |
 | 3 | `psql`로 테이블 생성 확인 | ✅ 마이그레이션 적용 확인 수단 |
 | 4 | `backend/src/store/postgres.ts` 구현 (§1) | ✅ 구현 완료(2026-09-14) |
 | 5 | `DATA_MODE` 게이트 열기 (§9) | ✅ 구현 완료(2026-09-14) |
@@ -87,10 +87,11 @@ runStoreContractTests("postgres", async () => createPostgresStore(testPool));
 | `008_outbox_identity.sql` | outbox durable `event_id`, replay `dedupe_key`와 유일성 제약 |
 | `009_outbox_delivery.sql` | outbox lease·retry 시각·claim token·poison `dead_at` |
 
-> **`005`가 실패하면 004까지는 유효하다** — TimescaleDB 확장이 없으면
-> `telemetry_metric`이 평범한 PostgreSQL 테이블로 남지만, 현재 실행기는 순서상
-> 이후 migration까지 진행하지 않는다. 따라서 `DATA_MODE=postgres`를 열려면
-> TimescaleDB를 설치한 뒤 `npm run db:migrate`가 `008`까지 완료돼야 한다.
+> **TimescaleDB는 필수다.** `005` 또는 migration runner의 extension/hypertable
+> 확인이 실패하면 `TIMESCALEDB_REQUIRED`로 전체 PostgreSQL 경로를 닫는다.
+> `telemetry_metric`을 평범한 PostgreSQL 테이블로 사용하거나 memory 데이터로
+> 대체하지 않는다. `DATA_MODE=postgres`를 열려면 TimescaleDB를 설치한 뒤
+> `npm run db:migrate`가 `009`까지 완료되고 두 hypertable 확인을 통과해야 한다.
 
 **예전에 2단계를 막던 것과, 어떻게 풀었는지:**
 

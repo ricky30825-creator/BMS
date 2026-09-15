@@ -35,6 +35,20 @@
 | 인증·권한 | Better Auth 마이그레이션/세션으로 `/api/auth/*`, `/api/me`, `/api/admin/*` 확인 | 세션 검증과 `ADMIN` 재검증이 서버에서 동작 |
 | API 계약 변경 | [`docs/backend_contract.md`](backend_contract.md) 해당 절과 요청/응답·에러 코드 비교 | 계약서의 도메인 불변식·소유권·감사 로그를 만족 |
 
+## 로컬 통합 실행 구성 (Task 7)
+
+| 변경 범위 | 명령·방법 | 통과 기준 | 실패·중단 |
+|---|---|---|---|
+| Compose/YAML 정적 구성 | Docker가 있는 환경에서 `docker compose -f docker-compose.local.yml config --quiet`; Docker가 없으면 YAML parser와 파일-level inspection | pinned TimescaleDB/Kafka/Node/Python images, healthchecks, dependency completion gates, loopback/LAN listener 분리, no private address/secret | Compose config 오류, unpinned `latest`, localhost를 LAN advertised listener로 사용, private secret/address commit |
+| Topic bootstrap | `kafka-init` service 또는 Kafka CLI로 목록 확인 | `battery-raw-metrics`, `battery-anomaly-alerts`, `battery-events` 3개가 모두 존재 | 하나라도 없으면 backend/edge 인수를 진행하지 않는다 |
+| Migration fail-closed | `npm --prefix backend run db:migrate` against TimescaleDB | ordered `000`~`009`, advisory lock, per-file transaction, extension availability와 두 hypertable post-check 통과 | plain PostgreSQL/extension/hypertable 누락은 `TIMESCALEDB_REQUIRED`, memory fallback 금지 |
+| Runtime health | `docker compose ... up -d backend`, `curl http://localhost:3005/health` | `status=ok`, `data=postgres`; backend starts only after migration/topic completion | DB/Kafka/migration failure 전에 HTTP listen하면 안 된다 |
+| Optional AI profile | `docker compose ... --profile ai up ai` with external bundle/adapter | bundle loader와 explicit adapter가 통과한 뒤에만 Kafka 연결·anomaly publish | bundle/adapter 미설정은 `AI_MODEL_BUNDLE_*`/`AI_INFERENCE_ADAPTER_*`로 종료, fake/memory fallback 금지 |
+| Lifecycle/recovery | `logs`, `stop`, `start`, `restart`, migration/topic rerun commands in [`docs/local_run.md`](local_run.md) | operator can inspect health/logs and rerun deterministic one-shot services without deleting named volumes | `down -v` 또는 수동 offset skip을 recovery 절차로 제시하지 않는다 |
+
+현재 호스트에는 Docker/Podman, `psql`, `kafka-topics` CLI가 없어 이 표의 실제
+Compose 기동·health·토픽·Timescale 적재·Kafka roundtrip 항목은 **미검증**이다.
+
 현재 데모 런타임에는 발급 토큰 인증, 자산/세션/계약형 대시보드, 핵심 사용자·관리자 REST, 관리자 상태·메모·계정 사유 게이트, F21 fail-closed, 릴레이 승인·멱등성, Raw CSV, 세션 스코프 WS가 있다. `DATA_MODE=postgres`는 기동 전에 migrations `000`~`009` 핵심 스키마를 확인한 뒤 실제 PostgreSQL domain provider를 사용하며, 초기화 실패 시 memory 데이터로 대체하지 않는다. Raw/Anomaly Consumer와 Outbox Worker unit 경로 및 수동 offset/재처리/lease 규칙은 구현됐지만 실제 Kafka·Timescale 부하 인수는 별도다. 프론트는 `npm --prefix frontend run dev:real`로 실제 REST/WS를 확인할 수 있고, 기본 `npm run e2e`는 MSW fixture 검증이다. PDF aggregate export는 아직 범위 밖이다.
 
 ## 에지 명령 Consumer (Task 6)

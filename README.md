@@ -12,14 +12,15 @@ LSTM-AutoEncoder(현재 진단)와 Informer(미래 예측)가 이상을 탐지�
 
 ## ⚠️ 지금 실제로 도는 것 / 안 도는 것
 
-위 아키텍처 전부가 이 저장소에 들어 있지는 않다. 이걸 모르면 "왜 안 되지"에 시간을 버린다.
+코드·계약·로컬 통합 구성이 함께 들어 있지만, 외부 모델과 실물 에지는
+저장소 밖 의존성이다. 실행 경로를 섞지 않도록 아래 상태를 먼저 확인한다.
 
 | | 상태 |
 |---|---|
 | 백엔드(Express) + 프론트(React) | ✅ 돈다. 단일 포트 `localhost:3005` |
 | 데이터 | ⚠️ **인메모리 데모 데이터**(`backend/src/store/memory.ts`). 별도 시드 절차가 없다 — 이게 시드다 |
-| PostgreSQL + TimescaleDB | ⚠️ 스키마·마이그레이션은 있으나 **저장소 구현체(`backend/src/store/postgres.ts`)가 없다** → 아래 참조 |
-| Kafka | ❌ 저장소에 없다 |
+| PostgreSQL + TimescaleDB | ✅ `backend/src/store/postgres.ts` + `migrations/000..009`; Compose 통합 경로는 `docker-compose.local.yml` |
+| Kafka | ✅ KafkaJS raw/anomaly/outbox 경계 + Compose KRaft broker/topic 초기화 구성; 실 broker roundtrip은 별도 인수 |
 | 추론 프로세스(LSTM-AE·Informer) | ⚠️ `ai/`에 계약·번들 검증·offset lifecycle 경계만 있다. 실제 artifact·외부 adapter가 없어 실추론은 `EXTERNALLY_BLOCKED` (`docs/ai_inference.md`) |
 | 라즈베리파이 에지 | ❌ 실물 미연결. 진단 계측값은 시뮬레이터가 만든다(`dataSource: "SIMULATED"`) |
 
@@ -46,25 +47,25 @@ npm --prefix backend run start:local
 `http://localhost:3005` → 데모 계정으로 자동 로그인된다. 자세한 내용과 재부팅 후 절차는
 [`docs/local_run.md`](docs/local_run.md).
 
-### B. PostgreSQL을 붙인다
+### B. PostgreSQL + Kafka 통합 경로를 붙인다
 
 ```bash
-cd backend
-npm install
-cp .env.example .env          # DATABASE_URL을 실제 DB로
-npm run db:migrate            # migrations/000..005 적용, schema_migrations에 기록
+cp .env.example .env
+docker compose -f docker-compose.local.yml config --quiet
+docker compose -f docker-compose.local.yml up -d --build backend
+curl.exe -fsS http://localhost:3005/health
 ```
 
-> ⚠️ **`docs/local_run.md`는 A 경로(데모) 전용이라 `db:migrate`가 없다.** B를 하려면 이
-> 절을 따른다.
+Compose가 TimescaleDB → Kafka/3개 토픽 → `npm run db:migrate` → PostgreSQL
+백엔드 순으로 올린다. 자세한 start/stop/log/restart/recovery와 LAN listener
+설정은 [`docs/local_run.md`](docs/local_run.md)를 따른다.
 
-> ⚠️ **`DATA_MODE=postgres`로 띄우면 `/api/*`가 `503 RUNTIME_NOT_READY`를 낸다. 고장이
-> 아니라 의도된 fail-closed다** — `backend/src/store/postgres.ts`가 아직 없어서, 게이트를
-> 열면 "실 DB" 라벨을 달고 인메모리 데모 데이터가 나간다. 이 구현이 곧 아래 **DB·인프라
-> 담당**의 과제다.
+`DATA_MODE=postgres`는 실제 PostgreSQL provider만 사용한다. migration 또는
+TimescaleDB extension/hypertable 확인이 실패하면 listen하지 않으며 memory
+데이터로 대체하지 않는다.
 
-`005_timescale.sql`은 TimescaleDB 확장이 있어야 통과한다. 없으면 `005`만 실패하고
-`telemetry_metric`이 평범한 테이블로 남는다.
+`005_timescale.sql`은 TimescaleDB가 필수다. plain PostgreSQL, extension 누락,
+hypertable 전환 누락은 `TIMESCALEDB_REQUIRED`로 명시적으로 중단된다.
 
 ---
 
