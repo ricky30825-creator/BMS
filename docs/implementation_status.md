@@ -47,6 +47,29 @@ PostgreSQL 계약·동시성 테스트는 `TEST_DATABASE_URL`이 설정된 경�
 DB를 초기화해 실행한다. 현재 실행 환경에는 이 변수가 없어 명확한 skip 1건을
 남기고, DB 연결 없이 unit/메모리 테스트를 통과했다.
 
+## 2026-09-15 Task 1 공통 생산 계약 결정
+
+`docs/backend_contract.md` §3.8과 `PLAN.md`의 계약을 기준으로 다음 구현 경계를
+고정했다. 이 절은 구현 완료를 뜻하지 않으며, 각 기능은 실제 코드·migration·
+테스트가 반영될 때까지 미구현/검토 상태다.
+
+- 관리자 이벤트 추이 원천은 PostgreSQL `domain_event`의
+  `ANOMALY_GRADE_CHANGED`이며, 목적지 `CAUTION|WARNING|DANGER`만 F20에
+  집계한다. `audit_log`, `RELAY_AUTO_CUT`, `UNASSIGNED_DATA`는 별도 축이다.
+- 공지는 `DRAFT|PUBLISHED|ARCHIVED`, 대상은 `ALL|USER|ADMIN`으로 고정한다.
+  사용자에게는 게시된 ALL/USER만 노출하고, 조회수는 `notice_view`의 사용자별
+  24시간 dedupe로 상세 조회에서만 증가시킨다. 외부 알림은 delivery intent와
+  provider 성공을 구분한다.
+- `/api/trends`와 `/api/trends/export.pdf`는 하나의 aggregate service를
+  공유하고, PDF 지표는 `volt|curr|temp|soc|anomaly`(기본 전체), 집계는
+  `temp/anomaly=max`, `volt/curr/soc=avg`, 결측은 `null`이다.
+- Fail-Safe는 AI와 독립이며 하드웨어 프로필 가용 센서만 판정한다. 문턱은
+  배포 `config/env`의 `0=미설정 sentinel`이고, mode1 압력은 baseline 수집 중
+  비활성·baseline 500 미만 부착불량 처리다. 실측·승인 전 수치 활성화는 금지한다.
+- 다음 schema/store 변경을 예약했다: `010_domain_events.sql`,
+  `011_notices.sql`, 필요 시 기존 profile CHECK를 확장하는
+  `012_device_profile_mode2_full.sql`. 수치 문턱은 DB migration에 넣지 않는다.
+
 ## 읽는 법
 
 - **구현됨**: 저장소에서 실행 가능한 코드나 검증 가능한 산출물을 확인할 수 있다.
@@ -64,7 +87,7 @@ DB를 초기화해 실행한다. 현재 실행 환경에는 이 변수가 없어
 | 백엔드 도메인 데이터 저장 | `backend/src/store/contract.ts`의 `CellGuardStore`, `memory.ts` 참조 구현, `postgres.ts` PostgreSQL 구현, `store.ts`의 `DATA_MODE` 분기. PostgreSQL은 자산 최신값·릴레이·진단·건강 집계·텔레메트리 CSV를 읽고, 상태+감사 변경을 트랜잭션으로 처리한다 | **구현 완료 / TEST_DATABASE_URL 설정 시 실 DB 계약 검증** |
 | 백엔드 실시간 스트림 (WS 발신) | **C1 완료(2026-08-25).** 프론트가 처리하는 11종 중 `metrics.tick`·`anomaly.score`·`anomaly.gradeChanged`·`relay.changed`·`alert.created`·`event.created`·`session.ended`·`resync.required` 8종이 실제로 발신되고, `subscribe`/`resume`이 1만 건 링버퍼로 실제 재전송을 수행한다. memory 모드의 정적 `metrics.tick`·`anomaly.score`는 기존 데모 동작을 유지하며, PostgreSQL 모드의 anomaly 이벤트는 새로 커밋된 `anomaly_score` 결과에서만 발신한다. `relay.autoCut`은 **구현됨(문턱 미설정이라 휴면)**(B3 완료, §4 C1 참조), `diagnosis.progress`/`.done`/`.aborted`는 여전히 미발신 | **구현됨(부분 휴면)** — 잔여 `diagnosis.*`(→ F21 안전 프로필) |
 | 에지 명령 경로 | `backend/src/device/port.ts`(`DeviceCommandPort` 인터페이스, 메서드 4개) + `backend/src/device/logging.ts`(memory 전용 로깅 스텁) + `backend/src/kafka.ts`(version 1 wire contract·Zod 검증·파티션 키) + `backend/src/device/kafka.ts`(실 producer) + `backend/src/outboxWorker.ts`(lease/claim/retry worker). PostgreSQL 상태·감사·outbox 원자성은 `store/postgres.ts`와 `008_outbox_identity.sql`에 구현됐고, `SESSION_ENDED`도 `batteryId`를 payload·파티션 키에 포함한다. `009_outbox_delivery.sql`은 만료 claim 복구·poison quarantine을 제공한다 | **구현 완료 / 실 Kafka·edge relay 인수 검증 대기** (→ B4) |
-| 백엔드 DB 도메인 provider·Consumer·TimescaleDB | `backend/migrations/000_identity.sql`~`009_outbox_delivery.sql`, `postgres.ts`, `telemetryConsumer.ts`, `anomalyConsumer.ts`, `outboxWorker.ts`. Raw Consumer는 session tagging·raw payload·단조 latest·수동 offset commit·프레임별 Fail-Safe hook을, Anomaly Consumer는 device 기준 ACTIVE session tagging·anomaly 이력·단조 score latest·replay-safe 이벤트·수동 offset commit을, Outbox Worker는 durable command의 배터리별 순서·lease·retry를 구현했다. `TEST_DATABASE_URL`이 없으면 실 DB 계약 테스트는 skip한다. Kafka/Timescale 실측 부하는 별도이며 `AUTH_MODE=betterauth`의 WS 인증은 여전히 보류되고, WS upgrade가 `DATA_MODE`를 별도로 검사하지 않는 갭은 남아 있다 | **Raw/Anomaly/Outbox 구현 / 실 Kafka·DB 인수 검증 대기** |
+| 백엔드 DB 도메인 provider·Consumer·TimescaleDB | 현재 migration `000_identity.sql`~`009_outbox_delivery.sql`, `postgres.ts`, `telemetryConsumer.ts`, `anomalyConsumer.ts`, `outboxWorker.ts`. Raw/Anomaly Consumer와 Outbox Worker의 기존 경계는 유지하며, Task 2의 `010_domain_events.sql`·Task 3의 `011_notices.sql`과 관련 store/API는 아직 미구현이다. `TEST_DATABASE_URL`이 없으면 실 DB 계약 테스트는 skip한다. Kafka/Timescale 실측 부하는 별도이며 `AUTH_MODE=betterauth`의 WS 인증은 여전히 보류되고, WS upgrade가 `DATA_MODE`를 별도로 검사하지 않는 갭은 남아 있다 | **기존 Raw/Anomaly/Outbox 구현 / Task 2~5 추가 구현·실 Kafka·DB 인수 대기** |
 | 알림 발송 (카카오·SMS·메일) | 채널 ON/OFF 토글과 policy 응답만 있고(`server.ts:405`·`:409`), **실제로 메시지를 보내는 코드는 `backend/src`에 없다** | **보류(의도적)** — 토글 현행 유지, 추가 작업 없음 |
 | AI 로컬 추론 프로세스 | `ai/`에 v1 raw/anomaly 계약 validator, fail-closed bundle loader, 외부 adapter/broker 경계, raw timestamp 기반 결정적 replay identity, 수동 offset lifecycle과 표준 테스트가 있다. 실제 checkpoint·scaler·권위 feature metadata와 외부 모델 adapter는 없다 | **외부 차단(`EXTERNALLY_BLOCKED`)** — 실제 추론·점수 품질을 주장하지 않음 (`docs/ai_inference.md`) |
 | 로컬 실행 패키징 | **C8 완료(2026-08-25)** — 단일 오리진(`:3005`), `start-local.bat`(Windows, 수동 실행), `docs/local_run.md`. **Task 7 구성 추가** — pinned TimescaleDB/Kafka Compose, ordered migration/topic bootstrap, backend healthcheck, localhost/LAN listener 분리, 선택 AI profile | memory 경로 완료 / Compose 실기동·Kafka·Timescale 인수 검증 대기 |
@@ -72,7 +95,7 @@ DB를 초기화해 실행한다. 현재 실행 환경에는 이 변수가 없어
 | AI 소프트웨어 | `ai/contracts.py`, `ai/bundle.py`, `ai/inference.py`, `ai/runtime.py`, `ai/kafka.py`에 계약·번들 검증·외부 adapter·Kafka lifecycle 골격과 테스트가 있다. 학습 코드·모델 binary·실 adapter는 저장하지 않는다 | **안전 경계 구현 / 외부 artifact·adapter 차단** |
 | 프론트엔드 | [`frontend/src/`](../frontend/src/)의 Vite + React + TypeScript strict 앱, v3 사용자 15·관리자 6 라우트, 계약형 API/WS 계층, MSW 시나리오, `npm run dev:real` 데모 경로. WS 이벤트 11종 핸들러 중 **9종이 서버 발신을 실제로 수신**(C1 8종 + B3의 `relay.autoCut`), 잔여 `diagnosis.*` 2종은 F21이 fail-closed라 도달 불가 | 부분 구현 / production WS 인증 미착수 |
 | 프론트엔드 실행 기반 | `frontend/package.json`, React Router, Query, RHF/Zod, 토큰 CSS, 공용 UI, Vitest/RTL/Playwright. **Vitest 44건·Playwright 28건·`tsc --noEmit` 통과**(2026-08-25 실행) | 구현됨 |
-| 미구현 REST·화면 | **C3 완료(2026-08-25)**: `POST /api/account/email-availability`, `POST /api/exports`+`GET /api/exports/{id}`+`GET /api/exports/{id}/download`(QUEUED→READY 비동기 잡, 서명·시한부 다운로드 URL, 멱등성·소유권 검증까지 실측 완료). **C4 완료(2026-08-25)**: `GET`/`PATCH /api/settings/voice-alert` + 설정 화면 새 탭. 남은 것은 `GET /api/trends/export.pdf`(503 스텁 — PDF 생성에 새 의존성이 필요해 이번 라운드는 범위 밖으로 확정) | 부분 구현 — 잔여 `export.pdf`(범위 밖 확정) |
+| 미구현 REST·화면 | **C3 완료(2026-08-25)**: `POST /api/account/email-availability`, `POST /api/exports`+`GET /api/exports/{id}`+`GET /api/exports/{id}/download`(QUEUED→READY 비동기 잡, 서명·시한부 다운로드 URL, 멱등성·소유권 검증까지 실측 완료). **C4 완료(2026-08-25)**: `GET`/`PATCH /api/settings/voice-alert` + 설정 화면 새 탭. `GET /api/trends/export.pdf`는 현재 503 스텁이며 Task 5에서 실제 집계 PDF로 교체한다. 공지·관리자 이벤트 추이도 현재 데모 배열/고정 응답으로 Task 3~4 구현 대상이다 | **부분 구현 — Task 2~5 구현·브라우저/실 DB 검증 대기** |
 | 모드 1 하드웨어 | KiCad 회로 파일, [`docs/hardware/mode1_backend_spec.md`](hardware/mode1_backend_spec.md), 조립 안내서 | 문서·설계 있음, 실물 검증 전 |
 | 모드 2 하드웨어 | [`docs/hardware/mode2_powerbank_diagnosis_spec.md`](hardware/mode2_powerbank_diagnosis_spec.md) | 설계 계약 있음, 구현 전 |
 | 디자인·목업 | [`design-system/cellguard/MASTER.md`](../design-system/cellguard/MASTER.md), [`web/cellguard_mockup_v4.html`](../web/cellguard_mockup_v4.html) | 참고 산출물 있음 |
@@ -117,7 +140,7 @@ v3 프로토타입과 정본 문서에는 모드 1/2, 대표 온도 최댓값, s
 
 `backend/dist/`는 TypeScript 빌드 산출물이며 소스 구현의 근거로 세지 않는다. `PLAN.md`의 예정 폴더 구조도 실제 디렉터리 존재를 의미하지 않는다.
 
-같은 날짜에 프론트엔드 실행 기반과 v3 도달 화면을 추가했다. `/api/me` 부트, 자산·세션 게이트, 대시보드 snapshot/WS 재연결, 릴레이 서버 승인, F21 fail-closed, 관리자 상태·메모 분리 UI를 계약형 클라이언트와 MSW로 연결했다. 2026-08-11에는 명시적 `dev:real` 경로를 추가하고 데모 로그인 토큰을 REST·다운로드·WS에만 전달하도록 연결했다. Better Auth 경로와 production/cookie 경로에는 Demo 헤더·쿼리 토큰을 넣지 않는다. 알림 설정은 GET canonical 조회와 `{ channels: { KAKAO, EMAIL, SMS, WEBPUSH } }` PATCH 응답 반영·실패 rollback을 사용하며, 비밀번호 변경은 현재/새/새 확인 입력을 검증한 뒤 확인 필드를 제외하고 POST한다. F21은 기본 `SAFETY_PROFILE_NOT_READY` 자산을 계속 잠그고, capability=true 모드 2는 MSW 전용 검증 시나리오에서만 요청·진행·중단·이력·상세를 확인한다. PDF aggregate export와 production domain provider는 아직 준비되지 않아 UI/API가 사용 불가 상태를 명시한다.
+같은 날짜에 프론트엔드 실행 기반과 v3 도달 화면을 추가했다. `/api/me` 부트, 자산·세션 게이트, 대시보드 snapshot/WS 재연결, 릴레이 서버 승인, F21 fail-closed, 관리자 상태·메모 분리 UI를 계약형 클라이언트와 MSW로 연결했다. 2026-08-11에는 명시적 `dev:real` 경로를 추가하고 데모 로그인 토큰을 REST·다운로드·WS에만 전달하도록 연결했다. Better Auth 경로와 production/cookie 경로에는 Demo 헤더·쿼리 토큰을 넣지 않는다. 알림 설정은 GET canonical 조회와 `{ channels: { KAKAO, EMAIL, SMS, WEBPUSH } }` PATCH 응답 반영·실패 rollback을 사용하며, 비밀번호 변경은 현재/새/새 확인 입력을 검증한 뒤 확인 필드를 제외하고 POST한다. 이 문단의 F21 잠금·PDF 미구현 서술은 당시 브라우저/구현 스냅샷이며, 2026-09-15 Task 1에서 F21 실행 capability와 Fail-Safe 문턱, 추세 PDF 계약을 분리해 갱신했다. 현재 domain event·공지·PDF는 구현 대기이며 production provider 인수도 남아 있다.
 
 2026-08-06 프론트엔드 계약 회귀: WebSocket 클라이언트 메시지는 `{ v: 1, type, payload }` 봉투를 사용하고, 일반 재연결은 마지막 cursor/eventId로 resume하며 snapshot을 재조회하지 않는다. `resync.required`/`4410`에서만 `/api/me`, dashboard, alert summary, relay, active diagnosis를 다시 조회한다. Vitest/RTL/MSW 계약 테스트는 이 동작과 알림·비밀번호·F21 요청 shape 및 안전 profile 시나리오를 검증한다.
 
@@ -206,9 +229,9 @@ Timescale 적재, 물리 Fail-Safe는 여전히 별도 범위다.
 
 > **✅ Raw A2/A5·Anomaly A4·Outbox A5 구현에 필요한 스키마가 반영됐다** — 추론 결과 적재 테이블, `age_ms`·`temp_points`·`mode`·`soc_basis`, TimescaleDB 하이퍼테이블, 진단기(`device`) 테이블, 중복 방지 키, `battery_asset.memo`, `diagnosis.progress_snapshot`, `telemetry_metric.raw_payload`가 `backend/migrations/002`~`007`에 있고, transactional outbox identity·dedupe 컬럼은 `008`, lease·retry·claim·poison 컬럼은 `009`에 있다. 실 Kafka·PostgreSQL/Timescale 인수 검증은 남아 있으며, 결정 기록은 [`docs/handover/schema-open-questions.md`](handover/schema-open-questions.md)다.
 
-> ✅ **마이그레이션 실행 선행 문제는 해소됐다** — `000_identity.sql`이 `"user"` 테이블과 데모 seed를 먼저 만들고, `001`~`009`가 파일명 순서대로 적용된다. 실행기는 [`docs/handover/infra-implementations.md` §3-1·§4](handover/infra-implementations.md)를 따른다.
+> ✅ **마이그레이션 실행 선행 문제는 해소됐다** — `000_identity.sql`이 `"user"` 테이블과 데모 seed를 먼저 만들고, 현재 `001`~`009`가 파일명 순서대로 적용된다. Task 2~3에서 `010_domain_events.sql`·`011_notices.sql`, 필요 시 Task 6에서 `012_device_profile_mode2_full.sql`을 같은 실행기에 추가한다. 실행기는 [`docs/handover/infra-implementations.md` §3-1·§4](handover/infra-implementations.md)를 따른다.
 
-> 스키마의 정본은 `backend/migrations/000_identity.sql`~`009_outbox_delivery.sql`이다. `001`의 기존 8개 테이블과 `002`~`009`의 추가 테이블·컬럼은 `store.ts` 타입과 완전한 1:1이 아니므로, **스키마를 바꾸면 `store.ts` 타입도 같이 바꾸고 반드시 합의 후 변경한다.**
+> 현재 스키마의 정본은 `backend/migrations/000_identity.sql`~`009_outbox_delivery.sql`이며, Task 1에서 `010`~`012`의 범위만 예약했다. `001`의 기존 8개 테이블과 `002`~`009`의 추가 테이블·컬럼은 `store.ts` 타입과 완전한 1:1이 아니므로, **스키마를 바꾸면 `store.ts` 타입도 같이 바꾸고 반드시 합의 후 변경한다.**
 
 ### A-2. AI 담당
 
@@ -257,7 +280,7 @@ Timescale 적재, 물리 Fail-Safe는 여전히 별도 범위다.
 
 ### B3. Fail-Safe 판정 주체 — **판정 엔진·구독 배선 완료(2026-09-14) / 문턱 실측 대기**
 
-- **완료된 것(백엔드)**: 순수 판정 함수 `judgeFailsafe`(`backend/src/failsafe.ts`) — 절대온도(IR·접촉) → 가스 → 압력 상대상승률 → 온도 상승률 순으로 검사하고, 하드웨어 프로필(`MODE1_EXTERNAL_CELL_V1`/`COMBINED_EXISTING_PARTS_V1`)별로 실재하는 센서만 활성화한다. 이걸 저장소·에지·WS에 잇는 `evaluateFailsafe`(`backend/src/failsafeRunner.ts`) — 인터락 중복 방지(이미 걸려 있으면 재차단 안 함) → `engageFailsafe`(PostgreSQL에서는 릴레이 전이+`RELAY_AUTO_CUT` 감사+outbox 원자적 기록, memory에서는 logging port) → `OutboxWorker`/logging port 에지 통보 → `broadcastAutoCut`(WS `relay.autoCut` 푸시) 순서로 실행하며, `backend/src/server.ts`가 `runFailsafe(batteryId, profile, sample, thresholds)`로 이 전체를 노출한다.
+- **완료된 것(백엔드)**: 순수 판정 함수 `judgeFailsafe`(`backend/src/failsafe.ts`) — 절대온도(IR·접촉) → 가스 → 압력 상대상승률 → 온도 상승률 순으로 검사하고, 현재 구현 프로필(`MODE1_EXTERNAL_CELL_V1`/`COMBINED_EXISTING_PARTS_V1`)의 실재 센서만 활성화한다. Task 1 계약은 `MODE2_FULL`을 추가 목표로 고정했으며 Task 6에서 구현한다. 이걸 저장소·에지·WS에 잇는 `evaluateFailsafe`(`backend/src/failsafeRunner.ts`) — 인터락 중복 방지(이미 걸려 있으면 재차단 안 함) → `engageFailsafe`(PostgreSQL에서는 릴레이 전이+`RELAY_AUTO_CUT` 감사+outbox 원자적 기록, memory에서는 logging port) → `OutboxWorker`/logging port 에지 통보 → `broadcastAutoCut`(WS `relay.autoCut` 푸시) 순서로 실행하며, `backend/src/server.ts`가 `runFailsafe(batteryId, profile, sample, thresholds)`로 이 전체를 노출한다. 프로필별 수치 문턱은 배포 `config/env`에서만 공급한다.
 - **⚠️ 문턱값이 전부 `0`이라 현재 어떤 계층도 차단하지 않는다.** `failsafe.ts`의 `UNSET_THRESHOLDS`가 미설정 sentinel이며, `judgeFailsafe`는 `threshold > 0`일 때만 그 계층을 활성화한다. 하드웨어 실측(`mode1_backend_spec.md` §13 H8, `mode2_powerbank_diagnosis_spec.md` §8 H2) 전까지 의도된 휴면 상태다.
 - **구독 배선**: PostgreSQL + `KAFKA_CONSUMER_ENABLED=true`일 때 Consumer가 frame별 `runFailsafe` hook을 호출한다. 배터리별 Promise queue로 TOCTOU 경합을 직렬화하고, `relay.autoCut` WS broadcast 실패는 로그로 남긴다. memory/test 모드에서는 Kafka 연결을 만들지 않는다.
 - **완료 판정**: 문턱값 설정 후 — 조건 충족 시 모달이 뜨고, 릴레이가 `OPEN`으로 남고, 재인증·사유 없이는 복구되지 않음(자동 복구 없음).
@@ -291,7 +314,7 @@ Timescale 적재, 물리 Fail-Safe는 여전히 별도 범위다.
 | `resync.required` | `:309` | `:1638` | ✓ |
 
 - **`relay.autoCut`은 2026-08-25 시점에는 시도하지 않았으나, B3(Fail-Safe 판정 로직)가 2026-08-27에 완료돼 지금은 배선돼 있다.** `judgeFailsafe`·`evaluateFailsafe`·`runFailsafe`(§3 B3 참조)가 조건 충족 시 이 이벤트를 실제로 발신한다. 단 **문턱값이 전부 `0`(미설정)이라 실행 경로는 있어도 실제로 트리거되지는 않는 휴면 상태**다 — Raw Consumer 구독 배선은 완료됐고 하드웨어 실측 문턱값이 갖춰져야 관찰 가능하다.
-- **`diagnosis.progress`/`.done`/`.aborted`도 시도하지 않았다** — `store.ts`의 `F21_THRESHOLDS.configured`가 하드코딩 `false`라 `startDiagnosis`가 항상 `409 SAFETY_PROFILE_NOT_READY`를 던지고, 진단 진행을 시뮬레이션할 도달 가능한 코드 경로가 없다. 이 플래그를 켜는 작업(§8 H2 등 안전 문턱 확정)이 선행돼야 한다.
+- **`diagnosis.progress`/`.done`/`.aborted`도 시도하지 않았다** — 당시 `store.ts`의 `F21_THRESHOLDS.configured`가 하드코딩 `false`라 `startDiagnosis`가 `409 SAFETY_PROFILE_NOT_READY`를 던지던 구현 스냅샷이다. Task 1 계약에서는 F21 실행 capability와 별개로 Fail-Safe 프로필 문턱을 배포 설정으로 분리했으며, 이 이벤트 경로는 후속 구현 대상이다.
 - **`metrics.tick`은 100ms 원본을 그대로 흘리지 않는다.** 서버가 **1초 단위로 다운샘플링**해 푸시한다(`:1643`). 페이로드는 `GET /api/dashboard`의 `metrics`와 **동일 구조**(각 지표 `{ value, status }` + `measuredAt`).
 - **`relay.autoCut`을 `relay.changed`에 섞지 않는다**(`:1646`) — 사용자 차단과 구분이 안 된다.
 - **`anomaly.gradeChanged`는 등급 전이에서만**(`:1647`), **`diagnosis.progress`는 단계 전환에서만**(`:1648`) 보낸다.
@@ -334,13 +357,13 @@ Timescale 적재, 물리 Fail-Safe는 여전히 별도 범위다.
 - Phase 1 인증 보류 결정에 따라 **지금 하지 않는다.** C2에서 `AUTH_MODE`로 분기만 정리해두고, 나중에 인증을 켤 때 이 분기를 실제 구독 경로로 연결한다.
 - **위 C2의 "새로 발견된 실제 갭"(WS가 `DATA_MODE`를 안 봄)을 되살릴 때 같이 처리하는 것을 권장한다** — 둘 다 WS upgrade 핸들러의 같은 분기 지점을 고치는 작업이라 따로 하면 두 번 건드리게 된다.
 
-### C3. REST 미구현 — **완료(2026-08-25), 잔여 1건은 범위 밖 확정**
+### C3. REST 미구현 — **부분 구현(2026-08-25), Task 1 생산 범위 갱신(2026-09-15)**
 
 | 엔드포인트 | 계약 | 현재 |
 |---|---|---|
 | `POST /api/account/email-availability` | `backend_contract.md:467` | **✓ 구현·실측 완료** — 회원가입 이메일 중복확인 |
 | `POST /api/exports` + `GET /api/exports/{id}` + `GET /api/exports/{id}/download` | `:904`·`:905` | **✓ 구현·실측 완료** — QUEUED→READY 비동기 잡 전체 생애주기를 서명·시한부 다운로드 URL과 함께 구현. 멱등성·소유권 검증까지 end-to-end 실측 |
-| `GET /api/trends/export.pdf` | `:907` | 503 스텁 (`server.ts:832`), **변경 없음** — PDF 생성이 새 의존성을 요구해 이번 라운드는 명시적으로 범위 밖 |
+| `GET /api/trends/export.pdf` | `backend_contract.md` §4.7 | 503 스텁(`server.ts`), Task 5에서 같은 aggregate service 기반 실제 PDF로 교체 |
 
 ### C4. 음성 안내 설정 `/api/settings/voice-alert` — **완료(2026-08-25)**
 
@@ -412,7 +435,7 @@ backend 통합 구성을 추가했지만, DB/Kafka 실측 인수와 AI 추론 �
 3. ~~**C2 `AUTH_MODE`/`DATA_MODE` 분리**~~ — **완료(2026-08-25), PostgreSQL provider 배선 보강(2026-09-14).** WS upgrade가 `DATA_MODE`를 별도로 보지 않는 갭은 남아 있다.
 4. ~~**B1 리포지토리 교체**~~ — **구현 완료(2026-09-14).** `TEST_DATABASE_URL`을 가진 DB에서 migrations `000`~`009` 적용 후 계약·동시성·재시작 인수 검증을 남겼다.
 5. **B3·B4 안전 경로** — A2/A4가 데이터를 주기 시작한 뒤. B3이 끝나면 C1의 `relay.autoCut`도 같이 닫힌다.
-6. ~~**C3 REST 미구현**~~ — **완료(2026-08-25).** `email-availability`·`exports` 계열 구현·실측 완료. `export.pdf`는 범위 밖 확정으로 남김.
+6. **C3 REST 미구현** — `email-availability`·`exports` 계열은 구현·실측 완료. `export.pdf`는 Task 1에서 생산 범위로 확정했으며 Task 5의 PDF 구현·렌더링/E2E 검증이 남았다.
 7. ~~**C8 로컬 실행 패키징**~~ — **완료(2026-08-25).** memory 모드 한정, Windows 배치 스크립트는 실제 Windows PC에서 미검증.
 8. ~~**C4 음성 안내 설정**~~ · ~~**C6 `?metric=` 배선**~~ · ~~**C7 전류 부호 표기**~~ · ~~**C8 로컬 실행 패키징**~~ — **모두 완료(2026-08-25).** 남은 것: WS의 `DATA_MODE` 인지(C2 갭)뿐. (C2b·C5는 보류)
 

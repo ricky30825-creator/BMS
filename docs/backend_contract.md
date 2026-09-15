@@ -6,7 +6,7 @@
 
 | 항목 | 값 |
 |---|---|
-| 작성일 / 최종 검증일 | 2026-08-06 |
+| 작성일 / 최종 검증일 | 2026-09-15 (Task 1 계약 갱신) |
 | 근거 기준 | `설계 산출물/셀가드 프로토타입_v3.html`, `docs/feature_definition.md`(REQ-WEB-001~073, 069 결번), `docs/admin_feature_definition.md`(REQ-WEB-101~136), `PLAN.md` |
 | 검증 방법 | v3 번들 소스 복원·정적 대조 + 로컬 HTTP 실행 + **Codex 인앱 브라우저 직접 입력·선택·모달·화면 전환 검증**(2026-08-06) |
 | 검증 대상 SHA-256 | `454a4104cee628b47425b11f4cf9cc7b5f75d6947a43b30a8f4a2a98786ce3e2` (`설계 산출물/셀가드 프로토타입_v3.html`) |
@@ -354,7 +354,7 @@ const locked = gated && r !== 'battery';
 *"Fail-Safe 인터락은 사용자 조작보다 우선합니다."* `[v3: T.failsafeNote]`
 
 - **자동 차단은 서버가 확정한 Fail-Safe 이벤트만** 발생시킨다. AI 점수·등급, 카드 색상, 프론트 온도 비교는 자동 차단·자동 차단 모달을 열 수 없다.
-- 현재 지원 trigger code는 `FAILSAFE_TEMP_CONTACT_OVER_CAP`, `FAILSAFE_TEMP_IR_OVER_CAP`, `FAILSAFE_TEMP_RISE_RATE`, `FAILSAFE_GAS_OVER_THRESHOLD`, `FAILSAFE_PRESSURE_RISE`, `FAILSAFE_ACOUSTIC_OVER_THRESHOLD`다. 해당 센서가 없는 하드웨어 프로필의 코드는 발생시키지 않는다.
+- 현재 지원 trigger code는 `FAILSAFE_TEMP_CONTACT_OVER_CAP`, `FAILSAFE_TEMP_IR_OVER_CAP`, `FAILSAFE_TEMP_RISE_RATE`, `FAILSAFE_GAS_OVER_THRESHOLD`, `FAILSAFE_PRESSURE_RISE`다. 해당 센서가 없는 하드웨어 프로필의 코드는 발생시키지 않으며, 음향 센서는 도입하지 않으므로 `FAILSAFE_ACOUSTIC_OVER_THRESHOLD`는 계약에 없다.
 - 가스·압력·음향 임계 초과 또는 온도 상한/상승률 초과 시, **AI 판정과 무관하게** 즉시 릴레이 차단한다. `[PLAN]`
 - 인터락이 걸린 상태에서 사용자의 릴레이 복구 요청은 `409 INTERLOCK_LOCKED`.
 - 자동 차단이 발생하면 `relay.autoCut`을 즉시 푸시한다. 프론트는 **이 타입을 수신했을 때만** trigger code와 대표 온도를 포함한 자동 차단 모달을 띄운다.
@@ -434,6 +434,122 @@ transaction에서 PostgreSQL `clock_timestamp()`를 사용해 `last_seen_at`을
 monotonic하게 전진시키며, duplicate replay는 `OFFLINE` 장치를 되살리거나
 시각을 갱신하지 않는다. 미등록 device는 row를 만들지 않고 telemetry를
 미배정으로 보존한다.
+
+### 3.8 Task 1 공통 생산 계약 결정 (2026-09-15)
+
+이 절은 이번 생산 기능의 구현 경계를 고정한다. 아래의 `domain_event`·`notice`
+·추세 집계 계약은 데모 배열이나 화면 목업보다 우선하며, 실제 구현 전까지
+`REVIEW_REQUIRED`로 본다.
+
+#### 영속 이벤트 원천과 등급 분류
+
+- 관리자 이벤트 추이의 정본 원천은 PostgreSQL `domain_event`다. `audit_log`는
+  관리자 보안·변경 감사의 정본이고, `anomaly_score`는 원시 AI 결과의 정본이다.
+  F20은 `event_type = 'ANOMALY_GRADE_CHANGED'`인 domain event만 집계하며,
+  `RELAY_AUTO_CUT`·`UNASSIGNED_DATA`·관리자 조작·정상 상태 이벤트를 섞지 않는다.
+- `ANOMALY_GRADE_CHANGED`는 새 `(device_id, evaluated_at)` anomaly 결과를
+  저장하는 PostgreSQL transaction 안에서 실제 등급이 바뀔 때만 기록한다.
+  `occurred_at`은 수신 시각이 아니라 anomaly의 `evaluated_at`이며, 동일
+  `event_type + device_id + evaluated_at` dedupe key는 unique다. Kafka replay는
+  기존 결과와 이벤트를 다시 만들지 않는다. `battery_id`·`session_id`는
+  적재 시점의 귀속값을 넣고, 미귀속이면 `null`을 보존한다.
+- 점수 `s`는 반드시 `0 <= s <= 1`이어야 한다. 등급은 단일 규칙으로
+  `NORMAL: [0,0.3)`, `CAUTION: [0.3,0.6)`, `WARNING: [0.6,0.8)`,
+  `DANGER: [0.8,1]`를 사용한다. 전이 event의 `severity`는 목적지 등급이다.
+  모든 실제 전이를 저장하되 F20은 `CAUTION|WARNING|DANGER`만 세고,
+  `NORMAL`로의 해소 전이는 저장만 하고 세지 않는다. 따라서 하향 전이도
+  목적지가 위험 3등급이면 해당 bucket에 반영된다.
+- domain event에는 최소 `id`, `event_type`, `severity`, `source`, `device_id`,
+  `battery_id`, `session_id`, `occurred_at timestamptz`, `score`, `params jsonb`,
+  `acknowledged_at`, `acknowledged_by`, `dedupe_key unique`, `created_at`을 둔다.
+  Ack는 해당 row만 원자적으로 갱신하며 과거 추세 집계를 소급 변경하지 않는다.
+  `CUT`은 이벤트 심각도에는 허용하지만 F20의 세 등급 bucket에는 포함하지 않는다.
+
+#### 공지 상태·노출·조회수
+
+- 공지 상태는 `DRAFT`·`PUBLISHED`·`ARCHIVED` 세 값이다. 전이는
+  `DRAFT -> DRAFT`(임시저장), `DRAFT -> PUBLISHED`(게시),
+  `PUBLISHED -> PUBLISHED`(수정), `PUBLISHED -> ARCHIVED`(보관)만 허용한다.
+  `ARCHIVED`는 terminal이고 게시를 다시 임시저장으로 되돌리거나 보관을
+  해제하지 않는다. `published_at`은 최초 게시 시 고정하고 `archived_at`은
+  보관 시 기록한다. 삭제는 `DRAFT`에만 허용한다.
+- `audience`는 `ALL`·`USER`·`ADMIN`이다. 일반 사용자 목록·상세는
+  `status=PUBLISHED`이면서 `audience in (ALL, USER)`인 공지만 반환하고,
+  `ADMIN` 공지는 관리자 API에서만 반환한다. 관리자 목록은 모든 상태와
+  대상을 반환한다. 목록은 `summary`(정규화한 본문의 앞 120 Unicode 문자),
+  상세는 본문 전체를 반환한다.
+- 상세 조회는 가시성 검증 후 PostgreSQL transaction에서
+  `notice_view(notice_id, viewer_user_id, last_viewed_at)`를 upsert한다.
+  같은 인증 사용자가 마지막 유효 조회 후 24시간 이내 다시 읽으면
+  `view_count`를 올리지 않고, 24시간이 지나거나 다른 사용자이면 한 번만
+  증가시킨다. 목록 조회는 증가시키지 않는다. 즉 여러 기기·세션의 같은
+  사용자 조회도 하나로 dedupe한다.
+- 게시 시 선택한 `KAKAO`·`WEBPUSH` 등의 외부 발송은
+  `notice_delivery_intent`에 의도와 `PENDING|SENT|FAILED|BLOCKED` 상태를
+  남기는 것과 실제 provider 발송을 구분한다. provider 또는 자격증명이
+  없으면 성공으로 응답하지 않고 의도만 남긴다. 공지 작성·수정·게시·보관·
+  DRAFT 삭제와 조회수 transaction은 대응 `audit_log`와 원자적으로 기록한다.
+
+#### 추세 집계와 PDF
+
+- `GET /api/trends`와 `GET /api/trends/export.pdf`는 같은
+  `aggregateTrend` 서비스와 소유권 검증을 사용한다. CSV의 100ms Raw 조회는
+  별도 경로이며 PDF가 Raw 행을 그대로 담지 않는다. 비교 `batteryIds`는
+  콤마 구분 최대 5개이고, 생략 시 기존 계약처럼 활성 세션의 배터리를 쓴다.
+  알 수 없는 ID·타인 소유·중복·5개 초과는 검증 오류로 거부한다.
+- `GET /api/trends`는 지표 선택 파라미터 없이 `volt|curr|temp|soc` 네 지표를
+  항상 반환한다. PDF만 `metrics=volt,curr,temp,soc,anomaly`(중복 없는 부분집합,
+  기본값은 다섯 지표)를 받아 보고서 지표를 선택한다. `sessionIds`와
+  `from/to`는 PDF 계약에 포함하지 않으며, `from/to`는 CSV 전용이다.
+- bucket은 모든 서버·DB 계산에서 UTC `timestamptz`를 사용하고 범위는
+  `[from,to)`다. `24h`는 정시 기준 25개 시간 bucket, `7d`는 UTC 일 기준
+  7개, `30d`는 UTC 일 기준 30개를 반환한다. bucket timestamp는 ISO 8601
+  문자열 하나만 내려주며 요일·한국어 표시 문자열은 서버가 만들지 않는다.
+  데이터가 없으면 `null`이고 0으로 채우지 않는다.
+- `volt`, `curr`, `soc`는 bucket 내 유효값의 `avg`, `temp`는 각 raw frame의
+  유효한 접촉/IR 대표 온도(둘 중 큰 값)의 `max`, `anomaly`는 anomaly score의
+  `max`다. SOC 미지원 모드의 값은 `null`이다. PDF에는 기간·생성 시각(UTC)·
+  배터리·지표·bucket 표와 배터리/지표별 요약을 담고, 빈 결과도 유효한 PDF로
+  내려준다. 배터리 라벨은 안전한 파일명·텍스트로 escape/wrap한다.
+
+#### Fail-Safe 프로필·문턱 출처
+
+Fail-Safe는 AI score/checkpoint가 없어도 독립 실행한다. 물리 차단 문턱은
+사용자·관리자 설정이 아니라 배포 시 하드웨어 프로필별 `config/env` 값이며,
+`tempContactCapC`, `tempIrCapC`, `tempRiseRateCPerMin`, `pressureRisePct`,
+`gasRaw`의 숫자 `0`은 **미설정 sentinel**이다. 0인 계층만 비활성화하며 다른
+계층은 계속 판정한다. 화면 표시용 `WARN|CRIT` 배지는 물리 차단 문턱이 아니다.
+
+| hardware profile | Fail-Safe에서 사용 가능한 센서 | 금지된 센서·산식 |
+|---|---|---|
+| `MODE1_EXTERNAL_CELL_V1` | DS18B20 접촉 온도, MLX90614 IR 온도, 온도 상승률, FSR 압력 상대 상승률 | MQ-2 가스·음향은 트리거하지 않음 |
+| `MODE2_FULL` | MLX90614 IR 온도, 온도 상승률, MQ-2 가스 raw | 접촉 온도·압력·음향은 `null` |
+| `COMBINED_EXISTING_PARTS_V1` | 실제 배선의 MLX90614 IR 온도와 상승률만 | MQ-2·접촉 온도·압력·음향은 `null`; F21 실물 게이트는 별도 |
+
+모드 1 압력은 세션별 10초 baseline 중앙값 대비 상대 상승률이며 baseline
+수집 중에는 차단하지 않는다. baseline이 500 미만이면 부착 불량으로 보고
+압력 계층을 비활성화한다. 숫자 문턱은 `mode1_backend_spec.md` §13 H8과
+실측 기록·승인 없이는 활성화하지 않으며, 모드 2 온도·상승률·가스는
+`mode2_powerbank_diagnosis_spec.md` §8의 H2/H3/H6/H11/H15 실측이 출처다.
+실측 전 값·AI 추정값·인터넷 일반값을 production 문턱으로 넣지 않는다.
+
+#### migration·`CellGuardStore` 범위
+
+- 신규 migration은 `010_domain_events.sql`(domain event·dedupe·ack·집계 인덱스),
+  `011_notices.sql`(공지·조회 dedupe·delivery intent)로 예약한다. 기존
+  `device.hardware_profile` CHECK에 `MODE2_FULL`을 추가해야 하면 기존 파일을
+  수정하지 말고 `012_device_profile_mode2_full.sql`에서 별도로 변경한다.
+  수치 문턱은 DB migration/공지 UI에 넣지 않는다.
+- `CellGuardStore`에는 idempotent `recordDomainEvent`, event list/ack 및
+  `getAdminEventTrend`, 소유권 범위를 받는 `aggregateTrend`(REST와 PDF 공용),
+  사용자/관리자 공지 목록·상세, 공지 create/update/publish/archive/delete,
+  24시간 조건부 조회수 기록, delivery intent 기록 메서드를 추가한다.
+  `recordAudit`는 별도 감사 정본으로 유지한다.
+- `engageFailsafe`와 센서 적재 경로는 relay interlock 상태·domain event·
+  `audit_log`·outbox를 하나의 PostgreSQL transaction으로 성공/실패시킨다.
+  이미 interlock인 배터리는 새 차단 event/outbox를 만들지 않는다. memory
+  provider는 테스트·데모 계약을 유지할 수 있지만 `DATA_MODE=postgres`의
+  production 경로에는 `demoNotices`나 고정 event/trend 배열을 사용하지 않는다.
 
 ## 4. REST API
 
@@ -896,10 +1012,10 @@ v3가 표시하는 4개 특징: `dT/dt(온도 상승률)`, `I_smooth(전류 변�
 | 이름 | 값 | 근거 |
 |---|---|---|
 | `period` | `24h` \| `7d` \| `30d` | `[v3: periodCfg]` `[REQ-WEB-046]` |
-| `batteryIds` | 콤마 구분, 최대 N개 | `[v3: comparePacks]` `[REQ-WEB-048]` |
-| `sessionIds` | 콤마 구분 (배터리 대신 세션 비교) | `[제안]` |
+| `batteryIds` | 콤마 구분, 최대 5개 | `[v3: comparePacks]` `[REQ-WEB-048]` |
+| `sessionIds` | 지원하지 않음 — 추세·PDF는 배터리만 비교 | `[Task 1 결정]` |
 
-> `sessionIds`는 **v3에 UI가 없다.** 패널 제목만 `다중 배터리 / 세션 비교`이고 실제 비교 드롭다운은 배터리 5개만 고른다(`compareItems: ['PACK-001' … 'PACK-005']`) `[v3 실측]`. 세션 비교가 필요 없으면 이 파라미터를 뺀다.
+> `sessionIds`는 **v3에 UI가 없고 생산 계약에서도 지원하지 않는다.** 패널 제목만 `다중 배터리 / 세션 비교`였지만 실제 비교 드롭다운은 배터리 5개만 고른다(`compareItems: ['PACK-001' … 'PACK-005']`) `[v3 실측]`.
 
 **`metrics` 파라미터는 없다.** v3 추세 화면은 전압·전류·온도·SOC **4개 차트를 항상 동시에** 렌더링한다. 지표 선택 UI가 없으므로 응답은 항상 4지표 전부를 담는다 `[v3 실측]`. (`REQ-WEB-047`이 말하는 "표시 지표 선택"은 **대시보드**의 지표 버튼이며, 추세 화면의 기능이 아니다.)
 
@@ -931,10 +1047,11 @@ v3가 표시하는 4개 특징: `dT/dt(온도 상승률)`, `I_smooth(전류 변�
 
 | 지표 | 집계 | 이유 |
 |---|---|---|
-| `temp`, 이상점수 | `max` | 피크를 평균으로 뭉개면 열폭주 전조가 사라진다 |
+| `temp` | `max` | 피크를 평균으로 뭉개면 열폭주 전조가 사라진다 |
 | `volt`, `curr`, `soc` | `avg` | 추세 파악이 목적이고 순간 스파이크는 노이즈다 |
+| `anomaly` | `max` (PDF 보고서만) | AI 점수 피크를 평균으로 뭉개지 않는다 |
 
-#### Raw CSV / 추세 PDF 내보내기 `[REQ-WEB-054/055]` `[확정 2026-08-05]`
+#### Raw CSV / 추세 PDF 내보내기 `[REQ-WEB-054/055]` `[확정 2026-09-15]`
 
 CSV·PDF 버튼은 **추세 화면 상단, 기간 탭 옆**에 있다 `[v3 실측]`.
 
@@ -945,7 +1062,8 @@ CSV는 집계 추세가 아니라 **100ms 센서 Raw 행**만 내보낸다. PDF�
 - 1시간 초과는 `POST /api/exports` `{ "kind":"RAW_METRICS_CSV", "sessionId":"...", "from":"...", "to":"..." }`로 작업을 만들고 `202 { id,status:"QUEUED" }`를 반환한다.
 - `GET /api/exports/{id}`는 `QUEUED|RUNNING|READY|FAILED|EXPIRED`와, `READY`일 때 단기 서명 `downloadUrl`, `expiresAt`, `sha256`, `rowCount`를 반환한다. `export.ready` WS 이벤트로 완료를 알린다.
 - 같은 사용자·같은 범위·같은 종류는 `Idempotency-Key`로 중복 작업을 방지한다. 사용자는 본인 소유 세션만 내보낼 수 있다.
-- `GET /api/trends/export.pdf`만 집계 버킷 PDF를 동기 다운로드한다. `format=csv|pdf` 혼합 엔드포인트는 폐기한다.
+- `GET /api/trends/export.pdf?period=24h|7d|30d&batteryIds=b1,b2&metrics=volt,curr,temp,soc,anomaly`만 집계 버킷 PDF를 동기 다운로드한다. `period`는 필수이며 `batteryIds`는 최대 5개, `metrics`는 유효한 지표의 중복 없는 부분집합(생략 시 다섯 지표)이다. 이 요청에도 기존 `/api/trends`와 같은 소유권·활성 세션 기본값·UTC bucket을 적용한다. `sessionId`·`from`·`to`는 PDF에서 거부한다.
+- 응답은 `200 application/pdf`와 안전한 `Content-Disposition: attachment; filename="cellguard-trend-<period>-<safe-id>.pdf"`를 보낸다. PDF에는 기간·생성 시각·배터리·선택 지표·집계 표/차트·요약을 담고, 빈 데이터도 `no data` 표기가 있는 유효한 문서로 반환한다. 배터리 라벨·쿼리 문자열은 파일명이나 PDF 명령으로 해석되지 않도록 escape/wrap한다. `format=csv|pdf` 혼합 엔드포인트는 폐기한다.
 
 ### 4.8 알림 센터 (F11)
 
@@ -1038,9 +1156,9 @@ v3 알림 센터 상단에 **"오늘의 알림 요약 — 확인이 필요한 �
 }
 ```
 
-- 사용자 엔드포인트는 `PUBLISHED`만 반환한다. `DRAFT`/`ARCHIVED`는 관리자 전용.
+- 사용자 엔드포인트는 `PUBLISHED`이면서 `audience=ALL|USER`인 공지만 반환한다. `ADMIN` 대상과 `DRAFT`/`ARCHIVED`는 관리자 전용이다.
 - **목록은 `summary`(본문 앞 120자), 상세는 `GET /api/notices/{id}`가 `body` 전문** `[확정]`. v3는 목록 클릭 시 추가 요청 없이 모달을 열지만 `[v3]`, 본문 길이에 상한이 없으므로 목록에 전문을 싣지 않는다. 프론트는 항목 클릭 시 상세를 한 번 더 호출한다.
-- **`viewCount`는 상세 조회 시 +1** `[확정]`. 같은 사용자의 24시간 내 재조회는 세지 않는다. 목록 조회로는 오르지 않는다.
+- **`viewCount`는 상세 조회 시 +1** `[확정]`. 같은 인증 사용자의 마지막 유효 조회 후 24시간 내 재조회는 기기·세션이 달라도 세지 않는다. 목록 조회로는 오르지 않으며, 가시성 확인과 조건부 upsert는 하나의 PostgreSQL transaction에서 처리한다.
 
 **`GET /api/notices/{id}`** — 상세
 
@@ -1229,14 +1347,22 @@ v3 실측 구성: KPI 카드 4개 → 이벤트 추이 차트 + 배터리 상태
 ```json
 {
   "period": "7d",
-  "buckets": [{ "at": "2026-07-16", "caution": 8, "warning": 3, "danger": 1 }],
-  "summary": { "total": 66, "dangerTotal": 12, "peakAt": "2026-07-21", "peakTotal": 24 }
+  "buckets": [{ "at": "2026-07-16T00:00:00.000Z", "caution": 8, "warning": 3, "danger": 1 }],
+  "summary": { "total": 66, "dangerTotal": 12, "peakAt": "2026-07-21T00:00:00.000Z", "peakTotal": 24 }
 }
 ```
 
 `summary` 3개 지표는 v3 화면에 존재 `[v3: evT.total/peak/danger]`.
 
 > **요일·시각 라벨은 서버가 만들지 않는다** (§1.10). v3는 `wk: [L('월','Mon'), …]`로 프론트가 ko/en 분기한다 `[v3]`. 서버는 `at`(ISO)만 주고 프론트가 `period`에 맞춰 `월`/`Mon`/`00:00`으로 포맷한다. `peakBucket` 대신 `peakAt`.
+
+`buckets`의 `at`은 UTC ISO 시각이며 `24h=25개 시간`, `7d=7개 UTC 일`,
+`30d=30개 UTC 일`이다. `total`은 세 bucket의 합, `dangerTotal`은 danger
+bucket의 합, `peakAt`은 합계가 가장 큰 bucket의 시각이다. 빈 기간이면
+`total=0`, `dangerTotal=0`, `peakAt=null`, `peakTotal=0`으로 반환한다.
+집계 대상은 §3.8의 영속 `ANOMALY_GRADE_CHANGED` event 중
+`severity=CAUTION|WARNING|DANGER`만이며, `CUT`·`NORMAL`·기타 event type은
+제외한다. 동일 event dedupe와 서버 UTC 처리는 저장소 계약을 따른다.
 
 #### 유저 계정 관리 (F16)
 
@@ -1400,7 +1526,8 @@ Q38 기본값은 다음과 같다: `reason` 최대 500자, `memo` 최대 2,000�
   - **v3는 채널별 선택이 아니라 `게시와 동시에 웹푸시·카카오 알림 발송` 체크박스 하나다** `[v3]`. 배열로 받는 것은 `[제안]`이며, 체크박스 하나로 유지하려면 `notifyOnPublish: boolean`으로 바꾼다.
 - `audience` — v3 `노출 대상` select의 옵션은 `전체 사용자 / 일반 사용자 / 관리자` **3종이다** `[v3]`. enum: `ALL` \| `USER` \| `ADMIN`.
 - 관리자 목록에는 `viewCount`가 표시된다 `[v3: views '1,204']`. **상세 조회 시 +1, 동일 사용자 24시간 내 중복 제외, 목록 조회로는 오르지 않음** `[확정]`.
-- **삭제는 `DRAFT`만.** 게시된 공지는 `archive`만 가능 `[v3]`.
+- 상태 전이는 `DRAFT -> PUBLISHED -> ARCHIVED`(중간에 `DRAFT`로 되돌리지 않음)이며, 같은 상태의 DRAFT 저장·PUBLISHED 수정만 허용한다. `ARCHIVED`는 terminal이다. `publishedAt`은 최초 게시 시각을 유지하고 `archivedAt`을 보관 시 기록한다.
+- **삭제는 `DRAFT`만.** 게시된 공지는 `archive`만 가능 `[v3]`. 사용자 API에는 `PUBLISHED`이면서 `audience=ALL|USER`인 공지만 노출하고 `ADMIN` 공지는 관리자 API에만 노출한다.
 
 #### 감사 로그 (F19) `[REQ-WEB-133/134/136]`
 
@@ -1783,7 +1910,7 @@ F21 화면이 실행 전에 잠금 사유를 알 수 있도록 `GET /api/batteri
 
 ## 9. 미결정 항목
 
-**38건 모두 결정됨.** 아래 결정은 현재 API 골격과 v3 화면에 반영했다. **2026-09-01 갱신** — F21 실행 잠금은 모드 2 전체로 열렸다. 하드웨어 실측으로 안전 문턱값을 얻기 전까지도 진단은 실행되지만, 결과는 `dataSource: "SIMULATED"`이고 미실측 문턱에 해당하는 안전 계층은 비활성화된다 — fail-closed가 아니라 **출처 표시 + 부분 fail-open**이다.
+**기존 38건은 결정됨.** 아래 결정은 현재 API 골격과 v3 화면에 반영했다. **2026-09-15 Task 1 생산 계약은 §3.8이 정본이며, 기존 Q8/Q9/Q10/Q17/Q18의 표현을 보완한다.** **2026-09-01 갱신** — F21 실행 잠금은 모드 2 전체로 열렸다. 하드웨어 실측으로 안전 문턱값을 얻기 전까지도 진단은 실행되지만, 결과는 `dataSource: "SIMULATED"`이고 미실측 문턱에 해당하는 안전 계층은 비활성화된다 — fail-closed가 아니라 **출처 표시 + 부분 fail-open**이다.
 
 | # | 항목 | 상태 |
 |---|---|---|
@@ -1805,9 +1932,9 @@ F21 화면이 실행 전에 잠금 사유를 알 수 있도록 `GET /api/batteri
 | Q4 | `label` 유일성 | 중복 허용 (`PLAN.md:123,131`) |
 | Q5 | 감사 로그 보존 | **무기한.** 삭제·아카이브 배치 없음 |
 | Q7 | 진단기 대수 | **계정당 1대.** `deviceId` 파라미터 없음, 서버 자동 선택 |
-| Q8 | 온도 상한 설정 | 임계치 설정 기능 제거로 소멸 |
-| Q9 | CSV/PDF | **CSV=100ms Raw.** 1시간 이하는 동기 스트리밍, 초과는 비동기 export job. PDF만 집계 추세 동기 다운로드 |
-| Q10 | 추세 집계 | 24h=1시간/7d=1일/30d=1일. 온도·점수 `max`, 전압·전류·SOC `avg` |
+| Q8 | 온도 상한 설정 | 사용자·관리자 설정 기능은 제거. 물리 Fail-Safe 문턱은 하드웨어 프로필별 배포 `config/env`에서만 운영하며 실측·승인 전에는 `0` sentinel |
+| Q9 | CSV/PDF | **CSV=100ms Raw.** 1시간 이하는 동기 스트리밍, 초과는 비동기 export job. PDF만 동일 집계 서비스의 추세를 동기 다운로드하고 `metrics`·최대 5개 비교 배터리를 검증 |
+| Q10 | 추세 집계 | 24h=UTC 1시간 25개/7d=UTC 1일 7개/30d=UTC 1일 30개. `temp`·PDF 전용 `anomaly`는 `max`, 전압·전류·SOC는 `avg`; `/api/trends`는 4지표 고정 |
 | Q11 | 공지 `body` | 목록은 `summary`(120자), 상세는 `GET /{id}` |
 | Q12 | 릴레이 자동 복구 | **없음. 수동 복구만** (재인증·사유 필수) |
 | Q13 | 릴레이 경로 | `POST /api/relay/cut`으로 통일. 기존 `/kill-switch/confirm` 스텁 교체 |

@@ -29,7 +29,11 @@
 | Raw Kafka Consumer unit | `npm --prefix backend test -- src/telemetryConsumer.test.ts` | fake Kafka/PG로 valid·registered-device server-clock liveness·out-of-order 신규 frame·OFFLINE duplicate no-revive·rollback·unknown device·no session/transition audit·audit `created_at` event time·mode mismatch·malformed poison explicit commit·replay·out-of-order safety·DB/safety failure no commit·serialization·shutdown 통과 |
 | Anomaly Kafka Consumer unit | `npm --prefix backend test -- src/anomalyConsumer.test.ts` | fake Kafka/PG로 v1 계약·device/ACTIVE-session attribution·null attribution·모든 AI 필드 보존·`(device_id,evaluated_at)` replay·세션 변경 replay 보존·`battery_latest` 단조성·poison explicit commit·DB/콜백 실패 no commit·중복 이벤트 방지·manual commit/shutdown 통과 |
 | DeviceCommand outbox worker unit | `npm --prefix backend test -- src/outboxWorker.test.ts src/device/kafka.test.ts` | fake PostgreSQL/Kafka로 `FOR UPDATE SKIP LOCKED` claim 경쟁·배터리별 선행 row ordering·성공 ACK 후 `sent_at`·publish 실패 retry/backoff·만료 lease/restart recovery·invalid payload poison quarantine·producer header/key·lifecycle 통과 |
-| PostgreSQL 저장소 계약 | `TEST_DATABASE_URL=... npm --prefix backend test` (migrations `000`~`009` 적용 DB) | memory 계약 스위트·전역 active-session 경합·outbox 순서/rollback/replay unit 테스트 통과. URL이 없으면 실제 연결 없이 명시적 skip |
+| PostgreSQL 저장소 계약 | `TEST_DATABASE_URL=... npm --prefix backend test` (현재 `000`~`009`, Task 2~3 완료 후 `010`~`011`, 필요 시 `012` 적용 DB) | memory 계약 스위트·전역 active-session 경합·outbox 순서/rollback/replay unit 테스트와 domain event/공지/조회수 동시성 계약 통과. URL이 없으면 실제 연결 없이 명시적 skip |
+| 영속 domain event·관리자 추이 | `npm --prefix backend test -- src/*event*.test.ts` 및 `GET /api/admin/event-trend?period=24h|7d|30d` | 새 anomaly 등급 전이만 `domain_event`에 dedupe 저장되고, UTC 25/7/30 bucket·caution/warning/danger·total/dangerTotal/peak 요약과 빈 기간 `null/0`이 계약과 일치. `CUT`·`NORMAL`·관리자 감사는 제외 |
+| 공지 DB·조회수 | 공지 작성→게시→사용자 목록/상세→보관 및 동시 상세 조회 테스트 | `PUBLISHED`/`DRAFT`/`ARCHIVED` 전이, `ALL`/`USER`/`ADMIN` 노출, summary 120자·상세 본문, 사용자별 24시간 조회 dedupe, audit 원자성이 PostgreSQL 재시작 후에도 유지 |
+| 추세 집계·PDF | `GET /api/trends`와 `GET /api/trends/export.pdf`를 같은 DB fixture로 호출하고 PDF parse/render | 두 경로가 동일 bucket·소유권 검증을 사용하고 PDF가 `application/pdf`, 안전한 다운로드 파일명, 기간·지표·비교 배터리·요약·표/차트·빈 데이터·한글 글꼴을 충족. PDF는 Raw CSV와 분리 |
+| Fail-Safe 설정 경계 | synthetic raw frame→PostgreSQL→Fail-Safe→interlock→audit/outbox→Kafka/WS fake roundtrip | AI/checkpoint 없이 프로필별 센서만 판정, 0 sentinel은 해당 계층만 비활성화, mode1 baseline 수집/500 미만 처리, 반복 차단 없음, 상태·감사·outbox 원자성 확인 |
 | Consumer runtime gate | `DATA_MODE=memory KAFKA_CONSUMER_ENABLED=true ...` 및 `DATA_MODE=postgres KAFKA_CONSUMER_ENABLED=true KAFKA_ENABLED=false ...` | memory/test에서는 Kafka 연결 없음, PostgreSQL enabled 상태에서 invalid config는 HTTP listen 전에 fail-closed |
 | 런타임 기본 상태 | 환경변수·DB 준비 후 `npm --prefix backend run dev`, `curl http://localhost:3005/health` | `{"status":"ok"}` 응답 |
 | 인증·권한 | Better Auth 마이그레이션/세션으로 `/api/auth/*`, `/api/me`, `/api/admin/*` 확인 | 세션 검증과 `ADMIN` 재검증이 서버에서 동작 |
@@ -41,7 +45,7 @@
 |---|---|---|---|
 | Compose/YAML 정적 구성 | Docker가 있는 환경에서 `docker compose -f docker-compose.local.yml config --quiet`; Docker가 없으면 YAML parser와 파일-level inspection | pinned TimescaleDB/Kafka/Node/Python images, healthchecks, dependency completion gates, loopback/LAN listener 분리, no private address/secret | Compose config 오류, unpinned `latest`, localhost를 LAN advertised listener로 사용, private secret/address commit |
 | Topic bootstrap | `kafka-init` service 또는 Kafka CLI로 목록 확인 | `battery-raw-metrics`, `battery-anomaly-alerts`, `battery-events` 3개가 모두 존재 | 하나라도 없으면 backend/edge 인수를 진행하지 않는다 |
-| Migration fail-closed | `npm --prefix backend run db:migrate` against TimescaleDB | ordered `000`~`009`, advisory lock, per-file transaction, extension availability와 두 hypertable post-check 통과 | plain PostgreSQL/extension/hypertable 누락은 `TIMESCALEDB_REQUIRED`, memory fallback 금지 |
+| Migration fail-closed | `npm --prefix backend run db:migrate` against TimescaleDB | ordered `000`~`009`와 Task 2~6에서 추가한 `010`~`012`(해당 시), advisory lock, per-file transaction, extension availability와 두 hypertable post-check 통과 | plain PostgreSQL/extension/hypertable 누락은 `TIMESCALEDB_REQUIRED`, memory fallback 금지 |
 | Runtime health | `docker compose ... up -d backend`, `curl http://localhost:3005/health` | `status=ok`, `data=postgres`; backend starts only after migration/topic completion | DB/Kafka/migration failure 전에 HTTP listen하면 안 된다 |
 | Optional AI profile | `docker compose ... --profile ai up ai` with external bundle/adapter | bundle loader와 explicit adapter가 통과한 뒤에만 Kafka 연결·anomaly publish | bundle/adapter 미설정은 `AI_MODEL_BUNDLE_*`/`AI_INFERENCE_ADAPTER_*`로 종료, fake/memory fallback 금지 |
 | Lifecycle/recovery | `logs`, `stop`, `start`, `restart`, migration/topic rerun commands in [`docs/local_run.md`](local_run.md) | operator can inspect health/logs and rerun deterministic one-shot services without deleting named volumes | `down -v` 또는 수동 offset skip을 recovery 절차로 제시하지 않는다 |
@@ -49,7 +53,7 @@
 현재 호스트에는 Docker/Podman, `psql`, `kafka-topics` CLI가 없어 이 표의 실제
 Compose 기동·health·토픽·Timescale 적재·Kafka roundtrip 항목은 **미검증**이다.
 
-현재 데모 런타임에는 발급 토큰 인증, 자산/세션/계약형 대시보드, 핵심 사용자·관리자 REST, 관리자 상태·메모·계정 사유 게이트, F21 fail-closed, 릴레이 승인·멱등성, Raw CSV, 세션 스코프 WS가 있다. `DATA_MODE=postgres`는 기동 전에 migrations `000`~`009` 핵심 스키마를 확인한 뒤 실제 PostgreSQL domain provider를 사용하며, 초기화 실패 시 memory 데이터로 대체하지 않는다. Raw/Anomaly Consumer와 Outbox Worker unit 경로 및 수동 offset/재처리/lease 규칙은 구현됐지만 실제 Kafka·Timescale 부하 인수는 별도다. 프론트는 `npm --prefix frontend run dev:real`로 실제 REST/WS를 확인할 수 있고, 기본 `npm run e2e`는 MSW fixture 검증이다. PDF aggregate export는 아직 범위 밖이다.
+현재 데모 런타임에는 발급 토큰 인증, 자산/세션/계약형 대시보드, 핵심 사용자·관리자 REST, 관리자 상태·메모·계정 사유 게이트, F21 fail-closed, 릴레이 승인·멱등성, Raw CSV, 세션 스코프 WS가 있다. `DATA_MODE=postgres`는 기동 전에 migrations `000`~`009` 핵심 스키마를 확인한 뒤 실제 PostgreSQL domain provider를 사용하며, 초기화 실패 시 memory 데이터로 대체하지 않는다. Raw/Anomaly Consumer와 Outbox Worker unit 경로 및 수동 offset/재처리/lease 규칙은 구현됐지만 실제 Kafka·Timescale 부하 인수는 별도다. Task 1에서 domain event·공지·추세/PDF·Fail-Safe 설정 계약을 고정했으며 구현 전이다. 프론트는 `npm --prefix frontend run dev:real`로 실제 REST/WS를 확인할 수 있고, 기본 `npm run e2e`는 MSW fixture 검증이다.
 
 ## 에지 명령 Consumer (Task 6)
 
@@ -89,7 +93,7 @@ python3 -m unittest discover -s tools -p 'test_*.py'
 | 모드 1 회로 | `tools/gen_mode1_sch.py` 실행 후 KiCad ERC와 netlist 확인 | 생성 회로와 네트 연결이 일치하고 ERC 위반 0건 |
 | 모드 1 센서 | [`docs/hardware/mode1_backend_spec.md` §13](hardware/mode1_backend_spec.md#13-실물로-확인해야-하는-것)의 H1~H9 순서 | 실측값·주소·ROM 위치·프레임·baseline·TFT 전원 호환성을 기록하기 전 구현 확정 금지 |
 | 모드 2 진단 | [`docs/hardware/mode2_powerbank_diagnosis_spec.md` §3~§8](hardware/mode2_powerbank_diagnosis_spec.md#8-미결정) | 안전 중단·완충 게이트·기준선·미결정 문턱을 구분 |
-| 보유부품 통합형 | [`docs/hardware/mode1_mode2_combined_beginner_guide.md`](hardware/mode1_mode2_combined_beginner_guide.md) | `SOURCE_P` 양극 한 가닥, INA226 ID·CAL·OVF·션트 검산, 0.5A·10초 중단. 서버 `device_id` 프로필=V1에서 quick/capacity 각각 `409 SAFETY_PROFILE_NOT_READY`, Raw의 `gas_raw`·`temp_contact`·`temp_points.contact`·`pressure_raw`·`soc_pct`·`diag_phase`·`load_target_a` 모두 `null`, 릴레이 `1,0,0,0` 요청 거부 증적 |
+| 보유부품 통합형 | [`docs/hardware/mode1_mode2_combined_beginner_guide.md`](hardware/mode1_mode2_combined_beginner_guide.md) | `SOURCE_P` 양극 한 가닥, INA226 ID·CAL·OVF·션트 검산, 0.5A·10초 중단. 서버 `device_id` 프로필=V1에서 미지원 Raw의 `gas_raw`·`temp_contact`·`temp_points.contact`·`pressure_raw`·`soc_pct`·`diag_phase`·`load_target_a`는 `null`이며, Fail-Safe 문턱 `0` 자체를 `SAFETY_PROFILE_NOT_READY`로 바꾸지 않는다. 실제 릴레이 실행은 프로필·하드웨어 인수 후에만 검증한다 |
 | 릴레이·Fail-Safe | 무부하·전류 0A·인터락 순서 포함한 벤치 시험 | AI 결과와 무관한 안전 차단, 자동 복구 금지, 감사 이벤트 기록 |
 
 실물 전압·전류·온도 확인 없이 센서 주소, 임계값, 부하 동작을 추정하지 않는다.
@@ -107,7 +111,7 @@ python3 -m unittest discover -s tools -p 'test_*.py'
 |---|---|
 | 미연결 / 모드 1 | F21은 실행 경로를 열지 않고 각각 연결 필요 / 모드 2 전용을 안내한다 |
 | 모드 2 + 기본 `COMBINED_EXISTING_PARTS_V1` | 안전 준비 전·실행 잠금, 빠른/정밀 버튼 우회 불가, `soc_pct`·가스·접촉온도·진단 단계 등 미지원값을 `—`로 표시한다 |
-| 숨은 프로토타입 속성 `MODE2_FULL` | 최종 사용자 화면에 프로필 전환기가 없고, 서버 capability가 준비되지 않은 현재 상태에서는 속성을 켜도 `SAFETY_PROFILE_NOT_READY`로 잠긴다. 문턱 실측 후에만 진행/중단/이력을 검증한다 |
+| 숨은 프로토타입 속성 `MODE2_FULL` | 최종 사용자 화면에 프로필 전환기가 없고, 서버가 배포 프로필로만 선택한다. 문턱이 `0`이면 해당 Fail-Safe 계층만 비활성화하며 실제 외부 발송·하드웨어 검증을 성공으로 간주하지 않는다. 문턱 실측 후에만 실물 차단을 검증한다 |
 | 관리자 운영 상태 | NORMAL/WATCH/BLOCKED의 모든 실제 전환에서 사유와 확인을 요구하고, 성공 전에는 목록/상세를 바꾸지 않는다. BLOCKED 해제도 세션/릴레이를 자동 복구하지 않는다 |
 | 관리자 메모 | 상태와 별도 native 입력·별도 저장이며, 상태 사유 없이 저장할 수 있고 상세 재진입 후 유지된다 |
 

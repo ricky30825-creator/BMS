@@ -261,7 +261,7 @@ ADS1115          LAN          battery-anomaly-alerts ◀─ alerts 발행 ─┤
 - **반응형 웹**: 대시보드를 데스크톱/태블릿/모바일 **반응형 웹**으로 제공한다. 데스크톱은 사이드바+다중 컬럼 관제 화면, 태블릿은 2컬럼 중심, 모바일은 하단 내비게이션+단일 컬럼 카드/차트로 재배치한다(브레이크포인트 대응, 터치 조작, 다크모드·접근성 포함).
 - **유저/관리자 기능 분리**: 일반 사용자 기능과 관리자 기능을 화면·라우팅·권한 기준으로 분리한다. 일반 사용자 흐름은 `docs/userflow.md`, 관리자 전용 흐름은 `docs/admin_userflow.md`를 기준 문서로 관리한다.
 - **관리자 기능 MVP(신규)**: 일반 사용자 권한과 별도로 단일 `ADMIN` 역할을 둔다. 초기 운영 MVP 범위는 HTML 프로토타입을 우선 기준으로 사용자/계정 조회 및 정지·해제, 비밀번호 재설정, 전체 배터리 조회, 배터리 운영 상태(`NORMAL`/`WATCH`/`BLOCKED`)와 관리자 메모, 배터리 통계, 디바이스 상태, 공지사항 관리, 감사 로그로 둔다. 관리자 권한 세분화, 데이터 삭제, 릴레이/Kill-Switch 원격 제어는 MVP 이후로 미룬다.
-- **운영·복원력 보강**: MVP에서는 WebSocket cursor/sequence/eventId 기반 재개·하트비트·멱등성, 단순 헬스체크, 감사 로깅을 우선한다. Raw CSV는 100ms 원본이며 1시간 이하는 스트리밍, 초과 범위는 비동기 export job으로 제공한다. PDF·인앱 알림 고도화는 후속 기능으로 둔다.
+- **운영·복원력 보강**: MVP에서는 WebSocket cursor/sequence/eventId 기반 재개·하트비트·멱등성, 단순 헬스체크, 감사 로깅을 우선한다. Raw CSV는 100ms 원본이며 1시간 이하는 스트리밍, 초과 범위는 비동기 export job으로 제공한다. 추세 화면의 집계 PDF 다운로드는 이번 생산 기능 범위이며, 인앱 알림 고도화는 후속 기능으로 둔다.
 - **요구사항 정의서 사용자 관점 정비(2026-06-30)**: 웹 요구사항 정의서를 기능정의서형 문구에서 사용자·운영자 기대 중심 문구로 수정했다. 기존 SRS-WEB ID, 중요도, 비고 체계는 유지하고, HTML에서 확인되는 기능을 "사용자가 원하는 기능/운영자가 필요한 관리 기능" 관점으로 재서술했다.
 - **요구사항 상세설명 간결화(2026-06-30)**: 요구사항 상세설명 문구에서 "~싶다/원한다" 형태를 제거하고, "이메일로 안전하게 로그인."처럼 짧은 요구 동작 중심 문구로 정리했다.
 - **요구사항명 간결화(2026-06-30)**: 요구사항명을 "이메일 로그인", "소셜 로그인", "배터리 등록"처럼 짧은 명사형 이름으로 정리했다.
@@ -306,7 +306,7 @@ ADS1115          LAN          battery-anomaly-alerts ◀─ alerts 발행 ─┤
 - 전체 등록 배터리 수, 측정 이력이 있는 배터리 수, 최근 7일/30일 등록 배터리 수를 제공한다.
 - 측정 모드별, 화학 타입별, 제조사별, 관리자 운영 상태별 분포를 제공한다.
 - 정상/경고/위험 상태 배터리 수, 최근 24시간/7일 이상 이벤트 수, 이상 이벤트가 가장 많은 배터리 Top 5를 제공한다.
-- 집계 PDF와 고급 분석 리포트는 MVP 제외다. 100ms Raw CSV는 일반 사용자 데이터 내보내기 계약에 포함한다.
+- 고급 분석 리포트와 관리자 통계 전용 PDF는 MVP 제외다. F9의 추세 집계 PDF와 100ms Raw CSV는 각각의 일반 사용자 내보내기 계약에 포함한다.
 
 **디바이스 상태 모니터링**
 - 디바이스 ID, 온라인 상태, 최근 데이터 수신 시각, 현재 측정 세션, 연결 배터리, 최근 이벤트를 조회한다.
@@ -325,6 +325,7 @@ ADS1115          LAN          battery-anomaly-alerts ◀─ alerts 발행 ─┤
 - HTML 프로토타입 기준으로 관리자는 공지사항 목록에서 카테고리, 제목, 상태, 관리 동작을 확인한다.
 - 새 공지 작성과 기존 공지 수정 모달에서 카테고리, 공개 범위, 제목, 내용을 입력한다.
 - 공지는 임시 저장하거나 게시할 수 있으며, 게시와 동시에 웹푸시·카카오 알림 발송 여부를 선택할 수 있다.
+- 게시 알림은 DB의 `notice_delivery_intent` 기록과 실제 provider 발송을 분리한다. provider·자격증명이 없으면 발송 성공으로 처리하지 않고 외부 차단 상태로 남긴다.
 - 공지 보관/삭제는 확인 모달을 거쳐 처리한다.
 
 **관리자 데이터 모델/API**
@@ -332,11 +333,13 @@ ADS1115          LAN          battery-anomaly-alerts ◀─ alerts 발행 ─┤
 - `battery_asset`: `admin_status`(`NORMAL`/`WATCH`/`BLOCKED`), `admin_memo`, `admin_status_updated_at`, `admin_status_updated_by`, `admin_memo_updated_at`, `admin_memo_updated_by`
 - `device`: `device_id`, `display_name`, `last_seen_at`, `status`(`ONLINE`/`DELAYED`/`OFFLINE`/`UNKNOWN`), `hardware_profile`(`MODE2_FULL`/`COMBINED_EXISTING_PARTS_V1`; 서버 배포 메타데이터, Raw에는 미포함)
 - `audit_log`: `log_id`, `actor_id`, `action`, `target_type`, `target_id`, `before_value`, `after_value`, `reason`, `created_at`
+- `domain_event`: `event_id`, `event_type`, `severity`, `source`, `device_id`, `battery_id`, `session_id`, `occurred_at`, `score`, `params`, `acknowledged_at`, `acknowledged_by`, `dedupe_key`
+- `notice`·`notice_view`·`notice_delivery_intent`: 공지 본문/상태·대상, 사용자별 24시간 조회 dedupe, 외부 발송 의도와 실제 provider 상태
 - 관리자 API: `GET /api/admin/users`, `GET /api/admin/users/{userId}`, `PATCH /api/admin/users/{userId}`, `POST /api/admin/users/{userId}/suspend`, `POST /api/admin/users/{userId}/restore`, `POST /api/admin/users/{userId}/password-reset`, `GET /api/admin/batteries`, `GET /api/admin/batteries/{batteryId}`, `PATCH /api/admin/batteries/{batteryId}/ops-status`, `PATCH /api/admin/batteries/{batteryId}/memo`, `GET /api/admin/stats/summary`, `GET /api/admin/stats/batteries`, `GET /api/admin/stats/anomalies`, `GET /api/admin/devices`, `GET /api/admin/devices/{deviceId}`, `GET /api/admin/system-health`, `GET /api/admin/notices`, `POST /api/admin/notices`, `PATCH /api/admin/notices/{noticeId}`, `POST /api/admin/notices/{noticeId}/archive`, `GET /api/admin/audit-logs`
 
 **MVP 제외 항목**
 - 문의/고객지원 관리, 관리자 권한 세분화, 계정 삭제
-- 배터리 삭제, 센서/측정 데이터 수정, 관리자 통계 CSV/PDF 내보내기
+- 배터리 삭제, 센서/측정 데이터 수정, 관리자 통계 CSV/PDF 내보내기(추세 화면 F9 PDF와 구분)
 - 릴레이/Kill-Switch 원격 제어, AI 모델/드리프트 관리, Kafka lag 상세 분석, 백업/복구 관리
 
 ---
@@ -605,6 +608,32 @@ ADS1115          LAN          battery-anomaly-alerts ◀─ alerts 발행 ─┤
 
 ---
 
+## Task 1 공통 생산 계약 결정 (2026-09-15)
+
+구현 전에 다음 경계를 확정한다. 상세 요청·응답과 불변식의 정본은
+[`docs/backend_contract.md` §3.8](docs/backend_contract.md#38-task-1-공통-생산-계약-결정-2026-09-15)이다.
+
+- 관리자 이벤트 추이는 PostgreSQL `domain_event`의
+  `ANOMALY_GRADE_CHANGED`만 원천으로 삼는다. 목적지 등급 기준은
+  `CAUTION` 0.3 이상, `WARNING` 0.6 이상, `DANGER` 0.8 이상이며,
+  정상 해소·릴레이 차단·`UNASSIGNED_DATA`·관리자 감사 이벤트는 F20에 섞지 않는다.
+  anomaly 결과의 `(device_id, evaluated_at)`와 event dedupe key로 Kafka replay를 막는다.
+- 공지는 `DRAFT` → `PUBLISHED` → `ARCHIVED` 상태 수명주기와
+  `ALL`·`USER`·`ADMIN` 대상을 사용한다. 사용자는 게시된 ALL/USER만 보고,
+  목록은 본문 앞 120자 summary, 상세는 전체 본문이다. 상세 조회수는 같은
+  인증 사용자의 24시간 반복을 제외하며 notice·조회 dedupe·발송 의도는 DB에 둔다.
+- `/api/trends`와 `export.pdf`는 동일 집계 서비스·소유권 검증을 공유한다.
+  UTC bucket은 `24h=25시간`, `7d=7일`, `30d=30일`, `temp/anomaly=max`,
+  `volt/curr/soc=avg`이며 결측은 `null`이다. CSV Raw는 이 집계와 별도다.
+- Fail-Safe는 AI와 독립이고 프로필별 가용 센서만 판정한다. 문턱은 배포
+  `config/env`에서만 공급하며 0은 해당 계층만 끄는 sentinel이다. mode1
+  압력은 10초 baseline 상대 상승률·baseline 500 미만 부착불량 규칙을 쓰고,
+  숫자는 실측·승인 전까지 활성화하지 않는다.
+- schema/store 확장은 `010_domain_events.sql`, `011_notices.sql`로 예약한다.
+  기존 profile CHECK에 `MODE2_FULL`을 추가해야 할 때만 `012`를 별도 migration으로
+  만들며, 수치 문턱은 DB에 저장하지 않는다. memory provider는 테스트 호환용이고
+  PostgreSQL production 경로에는 고정 demo notice/event/trend를 두지 않는다.
+
 ## 8. 개발 로드맵
 
 > ### 🔧 인프라(Kafka·PostgreSQL/TimescaleDB) 담당자는 여기서 시작한다
@@ -620,7 +649,7 @@ ADS1115          LAN          battery-anomaly-alerts ◀─ alerts 발행 ─┤
 > | 5 | `docs/handover/schema-open-questions.md` | **과거 미결정 6건의 결정 기록.** 해당 DDL은 `backend/migrations/002`~`005`에 반영됐고, Consumer 착수 시 실제 컬럼·제약과 함께 확인한다 |
 > | 6 | `docs/verification_matrix.md` | 무엇을 어떻게 검증하면 끝난 것으로 치는지. 백엔드 typecheck·빌드·`/health`·테스트 명령이 여기 있다 |
 >
-> ✅ **DB는 `npm run db:migrate` 하나로 올라간다(2026-08-28).** `backend/migrations/000`~`009`가 연속된 파일명 순서로 적용된다. 실행기는 advisory lock, TimescaleDB 가용성 사전 확인, 완료 후 두 hypertable 확인을 수행한다. 예전에 `psql -f 001_app_auth.sql`이 첫 구문에서 멈추던 문제(`"user"` 테이블 DDL 부재)는 `000_identity.sql`이 해결했다. **`psql -f`로 001만 직접 돌리지 마라** — 순서가 있는 10개 파일이다. plain PostgreSQL로 강등하지 않는다. `npm run auth:generate`·`auth:migrate`는 CLI 패키지가 없어 실패하니 부르지 않는다(Better Auth는 지금 미사용).
+> ✅ **DB는 `npm run db:migrate` 하나로 올라간다(2026-08-28).** 현재 `backend/migrations/000`~`009`가 연속된 파일명 순서로 적용되며, Task 2~3에서 `010_domain_events.sql`·`011_notices.sql`, 필요 시 Task 6에서 `012_device_profile_mode2_full.sql`을 같은 순서로 추가한다. 실행기는 advisory lock, TimescaleDB 가용성 사전 확인, 완료 후 두 hypertable 확인을 수행한다. 예전에 `psql -f 001_app_auth.sql`이 첫 구문에서 멈추던 문제(`"user"` 테이블 DDL 부재)는 `000_identity.sql`이 해결했다. **`psql -f`로 001만 직접 돌리지 마라** — 순서가 있는 migration 묶음이다. plain PostgreSQL로 강등하지 않는다. `npm run auth:generate`·`auth:migrate`는 CLI 패키지가 없어 실패하니 부르지 않는다(Better Auth는 지금 미사용).
 >
 > 세부 계약이 필요해지면 — 에러 코드는 `docs/backend_contract.md` §1.10, 원자성 요구는 §3.4, 에지 프레임 정의와 `battery-events`의 code+params는 `docs/hardware/mode1_backend_spec.md` §9·§11이다.
 >
@@ -650,7 +679,7 @@ ADS1115          LAN          battery-anomaly-alerts ◀─ alerts 발행 ─┤
 - [x] Consumer 적재 시 active 세션 조회 → `battery_id` 태깅 (S-MSESSN) — 처리 시점 DB 조회·세션 밖 `null` 귀속은 `docs/handover/b2-session-tagging.md` 정본과 일치한다.
 - [x] 오프셋 커밋 및 재처리 전략 (S-SBCSJU) — DB transaction + safety hook 뒤 manual commit, `(device_id, measured_at)` replay 무해. DB/Kafka 원자성은 주장하지 않는다.
 - [ ] 대시보드용 조회 뷰 생성 (S-ROGPIB)
-- [ ] 오류/예외 이벤트 기록 (S-MVDKKZ)
+- [ ] 오류/예외 이벤트 기록 (S-MVDKKZ) — Task 2에서 영속 `domain_event`와 Kafka replay dedupe를 추가하며 `audit_log`(감사)와 분리한다
 
 ### Phase 4 — AI 이상 탐지
 - [ ] 정상 데이터 수집 및 라벨링 (S-LUTREM)
@@ -681,7 +710,7 @@ ADS1115          LAN          battery-anomaly-alerts ◀─ alerts 발행 ─┤
 ### Phase 6 — 알림 & 차단
 - [ ] ~~카카오톡 알림 연동 (S-EOCLMX, S-UZDNPT)~~ — **보류(2026-08-25 결정).** 설정 화면의 채널 토글은 **현행 유지**한다: 저장은 되지만 발송은 일어나지 않으며, 화면에 별도 미구현 표시를 추가하지 않는다. ⚠️ 시연에서 "알림이 간다"고 설명하지 않도록 주의
 - [ ] 릴레이/Kill-Switch 제어 API (S-ELAUQJ) — **부분 완료: REST(승인·재인증·사유·멱등성)와 감사 기록, PostgreSQL transactional outbox, Kafka producer/worker(`battery-events` 발행·재시도·배터리별 순서)는 구현됐다.** 남은 건 실제 Kafka/edge relay 인수 검증 — `docs/handover/infra-implementations.md` 2부
-- [ ] 긴급 차단 자동화 Fail-Safe (S-VMNNAM) — **부분 완료: 판정 엔진(`judgeFailsafe`)과 인터락·에지통보·WS 배선(`runFailsafe`), Consumer의 프레임별 callback·배터리별 직렬화가 구현됐다.** 남은 것은 하드웨어 실측 문턱값(지금 전부 `0`이라 어떤 계층도 차단하지 않는 휴면 상태)과 실 Kafka/DB 인수 검증이다 — `docs/handover/infra-implementations.md` §14·§14b
+- [ ] 긴급 차단 자동화 Fail-Safe (S-VMNNAM) — **부분 완료: 판정 엔진(`judgeFailsafe`)과 인터락·에지통보·WS 배선(`runFailsafe`), Consumer의 프레임별 callback·배터리별 직렬화가 구현됐다.** 프로필별 센서만 사용하며, `tempContactCapC`·`tempIrCapC`·`tempRiseRateCPerMin`·`pressureRisePct`·`gasRaw`의 `0`은 계층별 미설정 sentinel이다. 남은 것은 mode1 H8·mode2 H2/H3/H6/H11/H15 실측·승인과 실 Kafka/DB 인수 검증이다 — `docs/backend_contract.md` §3.8 및 `docs/handover/infra-implementations.md` §14·§14b
 - [ ] 디바이스 음성 안내 웹 설정 및 백엔드 API (S-VOCALR)
 - [ ] 알림 설정 및 이력 페이지
 
@@ -846,7 +875,7 @@ ADS1115          LAN          battery-anomaly-alerts ◀─ alerts 발행 ─┤
 
 - Q27: 전압·전류·SOC 배지는 임계값을 아직 계산하지 않으며 `status=null`로 둔다.
 - Q35: 세션 무수신 타임아웃은 5분으로 확정한다.
-- Q36: F21 문턱값은 모두 `0`을 **미설정 sentinel**로 저장한다. 값이 0인 동안 `MODE2_FULL`도 실행하지 않고 `SAFETY_PROFILE_NOT_READY`로 닫는다.
+- Q36: F21 진단 문턱값은 모두 `0`을 **미설정 sentinel**로 저장한다. 미설정 계층만 비활성화하며 진단 실행 잠금과 Fail-Safe 물리 차단 문턱은 `docs/backend_contract.md` §3.8의 별도 계약을 따른다.
 - Q37: `rated_output_current_a`는 모드 2 자산 등록·수정 시 필수 입력이다.
 - Q38: 상태 사유와 관리자 메모는 각각 필수/선택 입력과 별도 요청·별도 감사 레코드로 저장하며 기본 최대 길이·문자 정규화·버전 충돌 정책은 백엔드 계약의 기본값을 따른다.
 - Q6: 모드 1 SOH/RUL은 백엔드가 BQ27441 원시/집계값으로 계산한다. 모드 2의 미지원 건강도는 계속 `null`이다.
