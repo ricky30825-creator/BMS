@@ -75,31 +75,31 @@
 
 ## Task 4 — 관리자 이벤트 추세
 
-- 현재 상태: `REVIEW_REQUIRED`
+- 현재 상태: `COMPLETE`
 - 담당 에이전트: `/root/task4_event_trend`
 - 기준 커밋: `5f9b488`
 - 결과 커밋: `5b659f8`
 - 변경 파일: backend event trend route/helper/tests, frontend admin page/hooks/types/MSW/tests/E2E/styles, `docs/backend_contract.md`
 - 구현 결과: 영속 store 기반 event-trend API, period 검증, 관리자 요약/기간/ISO locale chart, 고정 응답 제거
-- 부모 검토 결과: 검토 대기
+- 부모 검토 결과: 통과 — store 집계 계약, period 파서, ADMIN RBAC 배선, UTC ISO bucket 응답, 관리자 화면의 클라이언트 표시 변환과 고정 배열 제거를 직접 검토함
 - 서브에이전트 테스트: backend typecheck 및 326 passed/1 skipped, frontend typecheck/build 및 79 passed, event-trend Playwright 통과, `git diff --check` 통과
-- 부모 독립 테스트: 미실행
-- 실환경 검증 여부: 미실행
-- 남은 문제 또는 외부 차단 조건: 부모 독립 검토 필요; 실제 PostgreSQL roundtrip 미검증
+- 부모 독립 테스트: backend typecheck/Vitest 326 passed/1 skipped/build, frontend typecheck/Vitest 79 passed/build, 전체 Playwright 32 passed, `git diff --check` 통과
+- 실환경 검증 여부: 브라우저 E2E 완료; `TEST_DATABASE_URL` 부재로 실제 PostgreSQL roundtrip은 Task 8에서 환경 가용 시 재검증
+- 남은 문제 또는 외부 차단 조건: 없음 (실제 PostgreSQL 환경 검증은 Task 8 통합 검토 항목)
 
 ## Task 5 — 추세 PDF
 
-- 현재 상태: `PENDING`
-- 담당 에이전트: 미배정
-- 기준 커밋: 미정
+- 현재 상태: `IN_PROGRESS`
+- 담당 에이전트: `/root/task5_pdf`
+- 기준 커밋: `c1817f1`
 - 결과 커밋: 미정
 - 변경 파일: 미정
-- 구현 결과: 미착수
+- 구현 결과: 구현 진행 중
 - 부모 검토 결과: 미착수
 - 서브에이전트 테스트: 미실행
 - 부모 독립 테스트: 미실행
 - 실환경 검증 여부: 미실행
-- 남은 문제 또는 외부 차단 조건: 한국어 글꼴과 Node/Docker 호환 PDF 도구 비교 필요
+- 남은 문제 또는 외부 차단 조건: 한국어 글꼴과 Node/Docker 호환 PDF 도구 비교 및 실제 PDF 파싱·렌더링 검증 필요
 
 ## Task 6 — Fail-Safe 설정 및 비실물 통합
 
