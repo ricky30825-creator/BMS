@@ -1,9 +1,10 @@
 import { createHash, randomUUID } from "node:crypto";
 
-import type { CellGuardStore, CreateBatteryInput, IdempotencyResult, UpdateBatteryInput } from "./contract.js";
+import type { CellGuardStore, CreateBatteryInput, CreateNoticeInput, IdempotencyResult, NoticeListQuery, UpdateBatteryInput, UpdateNoticeInput } from "./contract.js";
 import { CSV_HEADER, INPUT_LIMITS, csvRow } from "./types.js";
 import type {
   AdminEventTrend,
+  AdminNotice,
   AnomalyScoreRecord,
   DemoAudit,
   DemoBattery,
@@ -16,6 +17,11 @@ import type {
   DomainEvent,
   DomainEventQuery,
   EventTrendPeriod,
+  NoticeCategory,
+  NoticeDeliveryChannel,
+  NoticeDeliveryIntent,
+  NoticeDetail,
+  NoticeStatus,
   OpsStatus,
   RecordDomainEventInput,
 } from "./types.js";
@@ -66,10 +72,78 @@ export function createMemoryStore(): CellGuardStore & { demoUsers: DemoUser[] } 
     makeBattery({ id: "PB-HONG-OK", ownerId: "hong", label: "PB-HONG-OK", model: "USB 보조배터리 · 37Wh", maker: "CellGuard Lab", chemistry: "LI_PO", targetMode: 2, seriesCount: null, capacityWh: 37, ratedOutputCurrentA: 2, opsStatus: "NORMAL", latest: { voltageV: 5.08, currentA: -1, powerW: -5.08, tempContact: null, tempIrSurface: 32.1, socPct: 90, score: 0.12, measuredAt: "2026-08-06T01:24:00.000Z" } })
   ];
 
+  type MemoryNotice = AdminNotice;
+
+  // Memory mode is an explicitly isolated fixture provider. Production mode
+  // never reads this array; it reads notice rows through store/postgres.ts.
+  // Keeping the seed here, rather than in server.ts, exercises the same API
+  // and filtering rules without pretending that a demo process has durable DB
+  // state.
+  const demoNoticeFixtures: MemoryNotice[] = [
+    {
+      id: "notice-maintenance",
+      category: "MAINTENANCE",
+      audience: "ALL",
+      status: "PUBLISHED",
+      title: "7월 정기 서버 점검 (무중단)",
+      body: "7/7 00:00~04:00 인프라 점검이 진행됩니다. WebSocket 순단이 발생할 수 있으나 자동 재연결되며, 측정 데이터는 버퍼링 후 복원됩니다.",
+      summary: "WebSocket 순단이 발생할 수 있으나 자동 재연결됩니다.",
+      viewCount: 892,
+      publishedAt: "2026-07-01T00:00:00.000Z",
+      archivedAt: null,
+      createdAt: "2026-07-01T00:00:00.000Z",
+      updatedAt: "2026-07-01T00:00:00.000Z",
+      createdBy: "leelab",
+      updatedBy: "leelab",
+      deliveryIntents: [],
+    },
+    {
+      id: "notice-feature",
+      category: "FEATURE",
+      audience: "ALL",
+      status: "PUBLISHED",
+      title: "이상 근거(XAI) 패널 정식 오픈",
+      body: "이상 탐지 화면에서 서버가 제공하는 기여 요인을 확인할 수 있습니다.",
+      summary: "이상점수 상승에 기여한 특징을 확인할 수 있습니다.",
+      viewCount: 614,
+      publishedAt: "2026-06-28T00:00:00.000Z",
+      archivedAt: null,
+      createdAt: "2026-06-28T00:00:00.000Z",
+      updatedAt: "2026-06-28T00:00:00.000Z",
+      createdBy: "leelab",
+      updatedBy: "leelab",
+      deliveryIntents: [],
+    },
+    {
+      id: "notice-info",
+      category: "INFO",
+      audience: "ALL",
+      status: "PUBLISHED",
+      title: "모드 2 진단 안전 프로필 안내",
+      body: "현재 연결 부품 프로필은 안전 문턱과 연속 감시가 준비되지 않아 F21 진단을 실행할 수 없습니다.",
+      summary: "실측 전까지 보조배터리 진단은 실행 잠금 상태입니다.",
+      viewCount: 431,
+      publishedAt: "2026-06-20T00:00:00.000Z",
+      archivedAt: null,
+      createdAt: "2026-06-20T00:00:00.000Z",
+      updatedAt: "2026-06-20T00:00:00.000Z",
+      createdBy: "leelab",
+      updatedBy: "leelab",
+      deliveryIntents: [],
+    },
+  ];
+  // Keep fixture rows under the same projection invariant as rows created by
+  // the store. This still remains memory-only demo data; production never
+  // loads it.
+  for (const notice of demoNoticeFixtures) notice.summary = noticeSummary(notice.body);
+
   const demoSessions = new Map<string, DemoSession>();
   const demoRelays = new Map<string, DemoRelay>();
   const demoDiagnoses = new Map<string, DemoDiagnosis>();
   const domainEventsByDedupe = new Map<string, DomainEvent>();
+  const noticesById = new Map<string, MemoryNotice>(demoNoticeFixtures.map((notice) => [notice.id, notice]));
+  const noticeViews = new Map<string, string>();
+  const noticeDeliveryIntentsById = new Map<string, NoticeDeliveryIntent[]>();
 
   // PB-HONG-002의 기준선 이력. 이게 없으면 정밀 용량 테스트가 항상
   // isBaseline: true라 sohRelPct가 나오는 화면을 볼 수 없다.
@@ -129,6 +203,217 @@ export function createMemoryStore(): CellGuardStore & { demoUsers: DemoUser[] } 
     return { ...(demoRelays.get(id) ?? { batteryId: id, state: "CLOSED", interlockEngaged: false, interlockCondition: null, reasonCode: null, reason: null, changedAt: isoNow(), changedBy: "SYSTEM" }) };
   };
   const listAudits = (): DemoAudit[] => demoAudits.map((audit) => ({ ...audit }));
+
+  const NOTICE_CATEGORIES = new Set<NoticeCategory>(["IMPORTANT", "MAINTENANCE", "FEATURE", "INFO"]);
+  const NOTICE_STATUSES = new Set<NoticeStatus>(["DRAFT", "PUBLISHED", "ARCHIVED"]);
+  const NOTICE_AUDIENCES = new Set<string>(["ALL", "USER", "ADMIN"]);
+  const NOTICE_CHANNELS = new Set<NoticeDeliveryChannel>(["KAKAO", "EMAIL", "SMS", "WEBPUSH", "INAPP"]);
+  const NOTICE_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+  function noticeText(value: unknown): string {
+    if (typeof value !== "string") throw new Error("VALIDATION_FAILED");
+    // Titles and bodies are user-authored free text and must round-trip as
+    // entered. Unicode normalization is applied only to the derived summary.
+    return value;
+  }
+
+  function noticeSummary(body: string): string {
+    // Summary is a display-only projection: normalize Unicode and count code
+    // points rather than UTF-16 code units. The body itself remains untouched.
+    return Array.from(body.normalize("NFKC")).slice(0, 120).join("");
+  }
+
+  function assertNoticeInput(category: unknown, audience: unknown, status: unknown): asserts category is NoticeCategory {
+    if (!NOTICE_CATEGORIES.has(category as NoticeCategory) || typeof audience !== "string" || !NOTICE_AUDIENCES.has(audience) || !NOTICE_STATUSES.has(status as NoticeStatus)) {
+      throw new Error("VALIDATION_FAILED");
+    }
+  }
+
+  function normalizeNoticeChannels(value: NoticeDeliveryChannel[] | undefined): NoticeDeliveryChannel[] {
+    if (value === undefined) return [];
+    if (!Array.isArray(value) || value.some((channel) => !NOTICE_CHANNELS.has(channel))) throw new Error("VALIDATION_FAILED");
+    return [...new Set(value)];
+  }
+
+  function assertPublishable(title: string, body: string, status: NoticeStatus): void {
+    if (status === "ARCHIVED" || (status === "PUBLISHED" && (!title.trim() || !body.trim()))) throw new Error("VALIDATION_FAILED");
+  }
+
+  function publicNotice(notice: MemoryNotice): NoticeDetail {
+    if (notice.status !== "PUBLISHED" || (notice.audience !== "ALL" && notice.audience !== "USER")) throw new Error("NOT_FOUND");
+    if (!notice.publishedAt) throw new Error("NOT_FOUND");
+    return {
+      id: notice.id,
+      category: notice.category,
+      title: notice.title,
+      summary: notice.summary,
+      body: notice.body,
+      publishedAt: notice.publishedAt,
+    };
+  }
+
+  function noticeSortKey(notice: MemoryNotice): number {
+    return Date.parse(notice.publishedAt ?? notice.createdAt) || 0;
+  }
+
+  function validateNoticeQuery(query: NoticeListQuery = {}): void {
+    if (query.category !== undefined && !NOTICE_CATEGORIES.has(query.category)) throw new Error("VALIDATION_FAILED");
+    if (query.status !== undefined && !NOTICE_STATUSES.has(query.status)) throw new Error("VALIDATION_FAILED");
+    if (query.limit !== undefined && (!Number.isInteger(query.limit) || query.limit < 0)) throw new Error("VALIDATION_FAILED");
+    if (query.offset !== undefined && (!Number.isInteger(query.offset) || query.offset < 0)) throw new Error("VALIDATION_FAILED");
+  }
+
+  function applyNoticePage<T>(items: T[], query: NoticeListQuery): T[] {
+    const offset = query.offset ?? 0;
+    const limit = query.limit ?? items.length;
+    return items.slice(offset, offset + limit);
+  }
+
+  function addDeliveryIntents(noticeId: string, channels: NoticeDeliveryChannel[]): void {
+    if (!channels.length) return;
+    // There is intentionally no provider in this repository. A durable intent
+    // is recorded as BLOCKED, never as SENT, until a configured provider worker
+    // can actually deliver it.
+    const intents = noticeDeliveryIntentsById.get(noticeId) ?? [];
+    for (const channel of channels) {
+      if (intents.some((intent) => intent.channel === channel)) continue;
+      const requestedAt = isoNow();
+      intents.push({
+        id: `delivery_${randomUUID()}`,
+        noticeId,
+        channel,
+        status: "BLOCKED",
+        requestedAt,
+        sentAt: null,
+        providerMessageId: null,
+        lastError: "PROVIDER_NOT_CONFIGURED",
+      });
+    }
+    noticeDeliveryIntentsById.set(noticeId, intents);
+  }
+
+  function createNoticeInMemory(actorId: string, input: CreateNoticeInput): MemoryNotice {
+    const status = input.status ?? "DRAFT";
+    assertNoticeInput(input.category, input.audience, status);
+    const title = noticeText(input.title);
+    const body = noticeText(input.body);
+    assertPublishable(title, body, status);
+    const now = isoNow();
+    const notice: MemoryNotice = {
+      id: `notice_${randomUUID()}`,
+      category: input.category,
+      audience: input.audience,
+      status,
+      title,
+      body,
+      summary: noticeSummary(body),
+      viewCount: 0,
+      publishedAt: status === "PUBLISHED" ? now : null,
+      archivedAt: null,
+      createdAt: now,
+      updatedAt: now,
+      createdBy: actorId,
+      updatedBy: actorId,
+      deliveryIntents: [],
+    };
+    noticesById.set(notice.id, notice);
+    const channels = normalizeNoticeChannels(input.notifyChannels);
+    if (status === "PUBLISHED") addDeliveryIntents(notice.id, channels);
+    notice.deliveryIntents = noticeDeliveryIntentsById.get(notice.id) ?? [];
+    audit({ actorId, action: status === "PUBLISHED" ? "NOTICE_PUBLISH" : "NOTICE_CREATE", resource: notice.id, result: "SUCCESS", reason: null });
+    return structuredClone(notice);
+  }
+
+  function updateNoticeInMemory(actorId: string, noticeId: string, input: UpdateNoticeInput): MemoryNotice {
+    const notice = noticesById.get(noticeId);
+    if (!notice) throw new Error("NOT_FOUND");
+    if (notice.status === "ARCHIVED") throw new Error("VALIDATION_FAILED");
+    const nextStatus = input.status ?? notice.status;
+    const category = input.category ?? notice.category;
+    const audience = input.audience ?? notice.audience;
+    const title = input.title === undefined ? notice.title : noticeText(input.title);
+    const body = input.body === undefined ? notice.body : noticeText(input.body);
+    assertNoticeInput(category, audience, nextStatus);
+    if (notice.status === "PUBLISHED" && nextStatus !== "PUBLISHED") throw new Error("VALIDATION_FAILED");
+    if (notice.status === "DRAFT" && nextStatus === "ARCHIVED") throw new Error("VALIDATION_FAILED");
+    assertPublishable(title, body, nextStatus);
+    const channels = normalizeNoticeChannels(input.notifyChannels);
+    if (notice.status === "PUBLISHED" && channels.length) throw new Error("VALIDATION_FAILED");
+    const wasDraft = notice.status === "DRAFT";
+    notice.category = category;
+    notice.audience = audience;
+    notice.title = title;
+    notice.body = body;
+    notice.summary = noticeSummary(body);
+    notice.status = nextStatus;
+    notice.updatedAt = isoNow();
+    notice.updatedBy = actorId;
+    if (wasDraft && nextStatus === "PUBLISHED") {
+      notice.publishedAt = notice.publishedAt ?? notice.updatedAt;
+      addDeliveryIntents(notice.id, channels);
+    }
+    notice.deliveryIntents = noticeDeliveryIntentsById.get(notice.id) ?? [];
+    audit({ actorId, action: wasDraft && nextStatus === "PUBLISHED" ? "NOTICE_PUBLISH" : "NOTICE_UPDATE", resource: notice.id, result: "SUCCESS", reason: null });
+    return structuredClone(notice);
+  }
+
+  function archiveNoticeInMemory(actorId: string, noticeId: string): MemoryNotice {
+    const notice = noticesById.get(noticeId);
+    if (!notice) throw new Error("NOT_FOUND");
+    if (notice.status !== "PUBLISHED") throw new Error("VALIDATION_FAILED");
+    notice.status = "ARCHIVED";
+    notice.archivedAt = isoNow();
+    notice.updatedAt = notice.archivedAt;
+    notice.updatedBy = actorId;
+    audit({ actorId, action: "NOTICE_ARCHIVE", resource: notice.id, result: "SUCCESS", reason: null });
+    return structuredClone(notice);
+  }
+
+  function deleteNoticeInMemory(actorId: string, noticeId: string): void {
+    const notice = noticesById.get(noticeId);
+    if (!notice) throw new Error("NOT_FOUND");
+    if (notice.status !== "DRAFT") throw new Error("NOTICE_NOT_DELETABLE");
+    noticesById.delete(noticeId);
+    noticeDeliveryIntentsById.delete(noticeId);
+    for (const key of [...noticeViews.keys()]) if (key.startsWith(`${noticeId}:`)) noticeViews.delete(key);
+    audit({ actorId, action: "NOTICE_DELETE", resource: noticeId, result: "SUCCESS", reason: null });
+  }
+
+  const listPublicNotices = (query: NoticeListQuery = {}): import("./types.js").NoticeSummary[] => {
+    validateNoticeQuery(query);
+    const items = [...noticesById.values()]
+      .filter((notice) => notice.status === "PUBLISHED" && (notice.audience === "ALL" || notice.audience === "USER"))
+      .filter((notice) => !query.category || notice.category === query.category)
+      .sort((left, right) => noticeSortKey(right) - noticeSortKey(left) || right.id.localeCompare(left.id))
+      .map((notice) => {
+        if (!notice.publishedAt) throw new Error("INTERNAL_ERROR");
+        return { id: notice.id, category: notice.category, title: notice.title, summary: notice.summary, publishedAt: notice.publishedAt };
+      });
+    return applyNoticePage(items, query).map((item) => structuredClone(item));
+  };
+
+  const listAdminNotices = (query: NoticeListQuery = {}): MemoryNotice[] => {
+    validateNoticeQuery(query);
+    const items = [...noticesById.values()]
+      .filter((notice) => !query.category || notice.category === query.category)
+      .filter((notice) => !query.status || notice.status === query.status)
+      .sort((left, right) => noticeSortKey(right) - noticeSortKey(left) || right.id.localeCompare(left.id));
+    return applyNoticePage(items, query).map((notice) => structuredClone(notice));
+  };
+
+  const publicNoticeForUser = (noticeId: string, viewerId: string): NoticeDetail | undefined => {
+    const notice = noticesById.get(noticeId);
+    if (!notice || notice.status !== "PUBLISHED" || (notice.audience !== "ALL" && notice.audience !== "USER")) return undefined;
+    const key = `${noticeId}:${viewerId}`;
+    const previous = noticeViews.get(key);
+    const previousMs = previous ? Date.parse(previous) : Number.NaN;
+    const nowMs = Date.now();
+    if (!Number.isFinite(previousMs) || nowMs - previousMs >= NOTICE_WINDOW_MS) {
+      notice.viewCount += 1;
+      noticeViews.set(key, new Date(nowMs).toISOString());
+    }
+    return publicNotice(notice);
+  };
 
   const DOMAIN_EVENT_SEVERITIES = new Set(["NORMAL", "CAUTION", "WARNING", "DANGER", "CUT"]);
   const DOMAIN_EVENT_SOURCES = new Set(["SYSTEM", "AI", "INGEST", "USER"]);
@@ -550,6 +835,16 @@ export function createMemoryStore(): CellGuardStore & { demoUsers: DemoUser[] } 
     async domainEventById(id) { return eventById(id); },
     async domainEvents(query) { return listDomainEvents(query); },
     async getAdminEventTrend(period) { return eventTrend(period); },
+    async publishedNotices(query) { return listPublicNotices(query); },
+    async adminNotices(query) { return listAdminNotices(query); },
+    async noticeForUser(id, viewerId) { return publicNoticeForUser(id, viewerId); },
+    async adminNoticeById(id) {
+      const notice = noticesById.get(id);
+      return notice ? structuredClone(notice) : undefined;
+    },
+    async noticeDeliveryIntents(noticeId) {
+      return structuredClone(noticeDeliveryIntentsById.get(noticeId) ?? []);
+    },
     async activeDiagnosis(batteryId) { return findActiveDiagnosis(batteryId); },
     async diagnosisById(id) { return findDiagnosisById(id); },
     async diagnosesForBattery(batteryId) { return listDiagnosesForBattery(batteryId); },
@@ -575,6 +870,10 @@ export function createMemoryStore(): CellGuardStore & { demoUsers: DemoUser[] } 
       }
       return structuredClone(event);
     },
+    async createNotice(actorId, input) { return createNoticeInMemory(actorId, input); },
+    async updateNotice(actorId, noticeId, input) { return updateNoticeInMemory(actorId, noticeId, input); },
+    async archiveNotice(actorId, noticeId) { return archiveNoticeInMemory(actorId, noticeId); },
+    async deleteNotice(actorId, noticeId) { deleteNoticeInMemory(actorId, noticeId); },
     async startDiagnosis(ownerId, kind, batteryId, input) { return beginDiagnosis(ownerId, kind, batteryId, input); },
     async abortDiagnosis(ownerId, batteryId) { return cancelDiagnosis(ownerId, batteryId); },
     async advanceDiagnosis(id, phase, progress) { return advance(id, phase, progress); },

@@ -14,7 +14,7 @@ Node.js + TypeScript + Express backend for the CellGuard dashboard.
 ```bash
 npm install
 cp .env.example .env
-npm run db:migrate   # applies migrations/000..009, records them in schema_migrations
+npm run db:migrate   # applies migrations/000..011, records them in schema_migrations
 npm run build
 npm run dev
 ```
@@ -79,7 +79,7 @@ Better Auth cookie transport remains unchanged for production paths.
 The demo provider is intentionally not a production substitute. With
 `DATA_MODE=postgres`, startup verifies the required domain schema and the
 REST APIs use the PostgreSQL-backed `CellGuardStore`; there is no memory-data
-fallback. Apply migrations through `009_outbox_delivery.sql`
+fallback. Apply migrations through `011_notices.sql`
 before starting the server. The PostgreSQL integration contract suite runs
 only when `TEST_DATABASE_URL` is set; without it, the suite reports a clear
 skip and does not attempt a connection.
@@ -88,7 +88,7 @@ WebSocket production authentication is a separate deferred path: the current
 upgrade handler still accepts the demo token only when `AUTH_MODE=demo`, while
 Better Auth cookie-based streaming remains disabled.
 
-Migrations are applied by `npm run db:migrate` in filename order (`000`..`009`), not by running individual `.sql` files by hand. The earlier instruction to run `001_app_auth.sql` after creating the Better Auth core tables is obsolete: `000_identity.sql` now creates `"user"` itself, and `001` depends on it.
+Migrations are applied by `npm run db:migrate` in filename order (`000`..`011`), not by running individual `.sql` files by hand. `010_domain_events.sql` stores durable event transitions and `011_notices.sql` stores notices, view dedupe, and delivery intents. The earlier instruction to run `001_app_auth.sql` after creating the Better Auth core tables is obsolete: `000_identity.sql` now creates `"user"` itself, and `001` depends on it.
 
 ## Raw telemetry Consumer
 

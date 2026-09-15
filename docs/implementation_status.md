@@ -19,7 +19,7 @@
 
 `backend/src/store/postgres.ts`가 `CellGuardStore` 전체를 구현했고, `store.ts`는
 `DATA_MODE=postgres`에서 이 구현체를 선택한다. `initializeStore()`는 서버가
-listen하기 전에 migrations `000`~`009`의 핵심 스키마와
+listen하기 전에 migrations `000`~`011`의 핵심 스키마와
 `diagnosis.progress_snapshot`을 확인하며, 실패 시 memory 데이터로 대체하지
 않고 기동을 중단한다. `telemetry_metric.raw_payload`도 확인한다.
 `advanceDiagnosis`의 진행 상태는 런타임 메모리에 유지하고 phase 경계에서만
@@ -70,6 +70,20 @@ DB를 초기화해 실행한다. 현재 실행 환경에는 이 변수가 없어
   `011_notices.sql`, 필요 시 기존 profile CHECK를 확장하는
   `012_device_profile_mode2_full.sql`. 수치 문턱은 DB migration에 넣지 않는다.
 
+## 2026-09-15 Task 3 공지사항 생산 기능
+
+`011_notices.sql`과 `CellGuardStore`의 memory/PostgreSQL 구현으로 공지 본문·상태·노출
+대상·조회수·발송 의도를 영속화했다. 사용자 API는 `PUBLISHED`인 `ALL|USER`만
+노출하고, 상세 조회의 사용자별 24시간 dedupe와 조회수 갱신은 PostgreSQL 한
+transaction에서 처리한다. 관리자 API는 작성·수정·임시저장·게시·보관·DRAFT 삭제와
+상태/대상 필터를 제공하며 변경 감사 로그도 같은 transaction에 기록한다. 사용자
+대시보드와 관리자 대시보드의 최근 공지는 같은 store 조회를 사용한다.
+
+게시 알림은 `notice_delivery_intent`에 남기되 현재 외부 provider·자격증명이 없어
+`BLOCKED/PROVIDER_NOT_CONFIGURED`로 기록한다. 실제 외부 발송 성공으로 가장하지
+않는다. 실 PostgreSQL·provider 발송과 브라우저 E2E 인수는 해당 환경에서 추가
+검증이 필요하다.
+
 ## 읽는 법
 
 - **구현됨**: 저장소에서 실행 가능한 코드나 검증 가능한 산출물을 확인할 수 있다.
@@ -87,7 +101,7 @@ DB를 초기화해 실행한다. 현재 실행 환경에는 이 변수가 없어
 | 백엔드 도메인 데이터 저장 | `backend/src/store/contract.ts`의 `CellGuardStore`, `memory.ts` 참조 구현, `postgres.ts` PostgreSQL 구현, `store.ts`의 `DATA_MODE` 분기. PostgreSQL은 자산 최신값·릴레이·진단·건강 집계·텔레메트리 CSV를 읽고, 상태+감사 변경을 트랜잭션으로 처리한다 | **구현 완료 / TEST_DATABASE_URL 설정 시 실 DB 계약 검증** |
 | 백엔드 실시간 스트림 (WS 발신) | **C1 완료(2026-08-25).** 프론트가 처리하는 11종 중 `metrics.tick`·`anomaly.score`·`anomaly.gradeChanged`·`relay.changed`·`alert.created`·`event.created`·`session.ended`·`resync.required` 8종이 실제로 발신되고, `subscribe`/`resume`이 1만 건 링버퍼로 실제 재전송을 수행한다. memory 모드의 정적 `metrics.tick`·`anomaly.score`는 기존 데모 동작을 유지하며, PostgreSQL 모드의 anomaly 이벤트는 새로 커밋된 `anomaly_score` 결과에서만 발신한다. `relay.autoCut`은 **구현됨(문턱 미설정이라 휴면)**(B3 완료, §4 C1 참조), `diagnosis.progress`/`.done`/`.aborted`는 여전히 미발신 | **구현됨(부분 휴면)** — 잔여 `diagnosis.*`(→ F21 안전 프로필) |
 | 에지 명령 경로 | `backend/src/device/port.ts`(`DeviceCommandPort` 인터페이스, 메서드 4개) + `backend/src/device/logging.ts`(memory 전용 로깅 스텁) + `backend/src/kafka.ts`(version 1 wire contract·Zod 검증·파티션 키) + `backend/src/device/kafka.ts`(실 producer) + `backend/src/outboxWorker.ts`(lease/claim/retry worker). PostgreSQL 상태·감사·outbox 원자성은 `store/postgres.ts`와 `008_outbox_identity.sql`에 구현됐고, `SESSION_ENDED`도 `batteryId`를 payload·파티션 키에 포함한다. `009_outbox_delivery.sql`은 만료 claim 복구·poison quarantine을 제공한다 | **구현 완료 / 실 Kafka·edge relay 인수 검증 대기** (→ B4) |
-| 백엔드 DB 도메인 provider·Consumer·TimescaleDB | 현재 migration `000_identity.sql`~`009_outbox_delivery.sql`, `postgres.ts`, `telemetryConsumer.ts`, `anomalyConsumer.ts`, `outboxWorker.ts`. Raw/Anomaly Consumer와 Outbox Worker의 기존 경계는 유지하며, Task 2의 `010_domain_events.sql`·Task 3의 `011_notices.sql`과 관련 store/API는 아직 미구현이다. `TEST_DATABASE_URL`이 없으면 실 DB 계약 테스트는 skip한다. Kafka/Timescale 실측 부하는 별도이며 `AUTH_MODE=betterauth`의 WS 인증은 여전히 보류되고, WS upgrade가 `DATA_MODE`를 별도로 검사하지 않는 갭은 남아 있다 | **기존 Raw/Anomaly/Outbox 구현 / Task 2~5 추가 구현·실 Kafka·DB 인수 대기** |
+| 백엔드 DB 도메인 provider·Consumer·TimescaleDB | 현재 migration `000_identity.sql`~`011_notices.sql`, `postgres.ts`, `telemetryConsumer.ts`, `anomalyConsumer.ts`, `outboxWorker.ts`. Raw/Anomaly Consumer와 Outbox Worker의 기존 경계는 유지하며, domain event와 공지 store/API가 구현됐다. `TEST_DATABASE_URL`이 없으면 실 DB 계약 테스트는 skip한다. Kafka/Timescale 실측 부하는 별도이며 `AUTH_MODE=betterauth`의 WS 인증은 여전히 보류되고, WS upgrade가 `DATA_MODE`를 별도로 검사하지 않는 갭은 남아 있다 | **기존 Raw/Anomaly/Outbox + Task 2~3 구현 / Task 4~5 및 실 Kafka·DB 인수 대기** |
 | 알림 발송 (카카오·SMS·메일) | 채널 ON/OFF 토글과 policy 응답만 있고(`server.ts:405`·`:409`), **실제로 메시지를 보내는 코드는 `backend/src`에 없다** | **보류(의도적)** — 토글 현행 유지, 추가 작업 없음 |
 | AI 로컬 추론 프로세스 | `ai/`에 v1 raw/anomaly 계약 validator, fail-closed bundle loader, 외부 adapter/broker 경계, raw timestamp 기반 결정적 replay identity, 수동 offset lifecycle과 표준 테스트가 있다. 실제 checkpoint·scaler·권위 feature metadata와 외부 모델 adapter는 없다 | **외부 차단(`EXTERNALLY_BLOCKED`)** — 실제 추론·점수 품질을 주장하지 않음 (`docs/ai_inference.md`) |
 | 로컬 실행 패키징 | **C8 완료(2026-08-25)** — 단일 오리진(`:3005`), `start-local.bat`(Windows, 수동 실행), `docs/local_run.md`. **Task 7 구성 추가** — pinned TimescaleDB/Kafka Compose, ordered migration/topic bootstrap, backend healthcheck, localhost/LAN listener 분리, 선택 AI profile | memory 경로 완료 / Compose 실기동·Kafka·Timescale 인수 검증 대기 |
@@ -95,7 +109,7 @@ DB를 초기화해 실행한다. 현재 실행 환경에는 이 변수가 없어
 | AI 소프트웨어 | `ai/contracts.py`, `ai/bundle.py`, `ai/inference.py`, `ai/runtime.py`, `ai/kafka.py`에 계약·번들 검증·외부 adapter·Kafka lifecycle 골격과 테스트가 있다. 학습 코드·모델 binary·실 adapter는 저장하지 않는다 | **안전 경계 구현 / 외부 artifact·adapter 차단** |
 | 프론트엔드 | [`frontend/src/`](../frontend/src/)의 Vite + React + TypeScript strict 앱, v3 사용자 15·관리자 6 라우트, 계약형 API/WS 계층, MSW 시나리오, `npm run dev:real` 데모 경로. WS 이벤트 11종 핸들러 중 **9종이 서버 발신을 실제로 수신**(C1 8종 + B3의 `relay.autoCut`), 잔여 `diagnosis.*` 2종은 F21이 fail-closed라 도달 불가 | 부분 구현 / production WS 인증 미착수 |
 | 프론트엔드 실행 기반 | `frontend/package.json`, React Router, Query, RHF/Zod, 토큰 CSS, 공용 UI, Vitest/RTL/Playwright. **Vitest 44건·Playwright 28건·`tsc --noEmit` 통과**(2026-08-25 실행) | 구현됨 |
-| 미구현 REST·화면 | **C3 완료(2026-08-25)**: `POST /api/account/email-availability`, `POST /api/exports`+`GET /api/exports/{id}`+`GET /api/exports/{id}/download`(QUEUED→READY 비동기 잡, 서명·시한부 다운로드 URL, 멱등성·소유권 검증까지 실측 완료). **C4 완료(2026-08-25)**: `GET`/`PATCH /api/settings/voice-alert` + 설정 화면 새 탭. `GET /api/trends/export.pdf`는 현재 503 스텁이며 Task 5에서 실제 집계 PDF로 교체한다. 공지·관리자 이벤트 추이도 현재 데모 배열/고정 응답으로 Task 3~4 구현 대상이다 | **부분 구현 — Task 2~5 구현·브라우저/실 DB 검증 대기** |
+| 미구현 REST·화면 | **C3 완료(2026-08-25)**: `POST /api/account/email-availability`, `POST /api/exports`+`GET /api/exports/{id}`+`GET /api/exports/{id}/download`(QUEUED→READY 비동기 잡, 서명·시한부 다운로드 URL, 멱등성·소유권 검증까지 실측 완료). **C4 완료(2026-08-25)**: `GET`/`PATCH /api/settings/voice-alert` + 설정 화면 새 탭. `GET /api/trends/export.pdf`는 현재 503 스텁이며 Task 5에서 실제 집계 PDF로 교체한다. 공지 API·관리자 공지 CRUD와 대시보드 공지 store 연결은 Task 3에서 구현했으며, 관리자 이벤트 추이는 Task 4에서 고정 응답을 교체한다 | **부분 구현 — Task 4~5 및 브라우저/실 DB 검증 대기** |
 | 모드 1 하드웨어 | KiCad 회로 파일, [`docs/hardware/mode1_backend_spec.md`](hardware/mode1_backend_spec.md), 조립 안내서 | 문서·설계 있음, 실물 검증 전 |
 | 모드 2 하드웨어 | [`docs/hardware/mode2_powerbank_diagnosis_spec.md`](hardware/mode2_powerbank_diagnosis_spec.md) | 설계 계약 있음, 구현 전 |
 | 디자인·목업 | [`design-system/cellguard/MASTER.md`](../design-system/cellguard/MASTER.md), [`web/cellguard_mockup_v4.html`](../web/cellguard_mockup_v4.html) | 참고 산출물 있음 |

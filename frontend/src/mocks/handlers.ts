@@ -1,5 +1,5 @@
 import { http, HttpResponse } from "msw";
-import type { AdminBatteryDetail, AdminBatteryListItem, AlertChannels, AlertSettings, Battery, Diagnosis, DiagnosisListItem, Grade, MeResponse, Relay } from "../types";
+import type { AdminBatteryDetail, AdminBatteryListItem, AdminNotice, AlertChannels, AlertSettings, Battery, Diagnosis, DiagnosisListItem, Grade, MeResponse, NoticeAudience, NoticeCategory, NoticeDeliveryChannel, NoticeDeliveryIntent, NoticeStatus, NoticeSummary, Relay } from "../types";
 import { measurementPhaseFor } from "../measurementState";
 
 const now = () => new Date().toISOString();
@@ -58,6 +58,42 @@ const startDiagnosis = async (kind: "quick" | "capacity", request: Request) => {
   return HttpResponse.json(diagnosis, { status: 202 });
 };
 const users = [demoUser, { id: "u_admin", loginId: "lee", name: "이연구", email: "lee@lab.io", role: "ADMIN" as const, status: "ACTIVE" as const, phone: "010-3456-7890" }, { id: "u_park", loginId: "parktest", name: "박테스트", email: "park@test.io", role: "USER" as const, status: "SUSPENDED" as const, phone: "010-4567-8901" }];
+const noticeSummary = (body: string) => Array.from(body.normalize("NFKC")).slice(0, 120).join("");
+const mockNotice = (input: Pick<AdminNotice, "id" | "category" | "audience" | "status" | "title" | "body" | "publishedAt" | "archivedAt"> & Partial<Pick<AdminNotice, "viewCount" | "createdAt" | "updatedAt" | "createdBy" | "updatedBy">>): AdminNotice => {
+  const timestamp = input.createdAt ?? input.publishedAt ?? now();
+  return { ...input, summary: noticeSummary(input.body), viewCount: input.viewCount ?? 0, createdAt: timestamp, updatedAt: input.updatedAt ?? timestamp, createdBy: input.createdBy ?? "u_admin", updatedBy: input.updatedBy ?? "u_admin", deliveryIntents: [] };
+};
+const notices: AdminNotice[] = [
+  mockNotice({ id: "n1", category: "MAINTENANCE", audience: "ALL", status: "PUBLISHED", title: "7월 정기 서버 점검 (무중단)", body: "7/7 00:00~04:00 인프라 점검이 진행됩니다. WebSocket 순단이 발생할 수 있으나 자동 재연결됩니다.", publishedAt: "2026-07-01T00:00:00.000Z", archivedAt: null, viewCount: 892 }),
+  mockNotice({ id: "n2", category: "FEATURE", audience: "ALL", status: "PUBLISHED", title: "이상 근거(XAI) 패널 정식 오픈", body: "이상 탐지 화면에서 서버가 제공하는 기여 요인을 확인할 수 있습니다.", publishedAt: "2026-06-28T00:00:00.000Z", archivedAt: null, viewCount: 614 }),
+  mockNotice({ id: "n_draft", category: "INFO", audience: "ADMIN", status: "DRAFT", title: "운영팀 초안", body: "관리자만 확인할 수 있는 임시 공지입니다.", publishedAt: null, archivedAt: null }),
+];
+const noticeViews = new Map<string, string>();
+const publicNotice = (notice: AdminNotice): NoticeSummary => ({ id: notice.id, category: notice.category, title: notice.title, summary: notice.summary, publishedAt: notice.publishedAt! });
+const publicNotices = () => notices
+  .filter((notice) => notice.status === "PUBLISHED" && (notice.audience === "ALL" || notice.audience === "USER"))
+  .sort((left, right) => Date.parse(right.publishedAt ?? right.createdAt) - Date.parse(left.publishedAt ?? left.createdAt))
+  .map(publicNotice);
+const blockedIntent = (noticeId: string, channel: NoticeDeliveryChannel): NoticeDeliveryIntent => ({ id: `delivery_${randomId()}`, noticeId, channel, status: "BLOCKED", requestedAt: now(), sentAt: null, providerMessageId: null, lastError: "PROVIDER_NOT_CONFIGURED" });
+const noticeInput = async (request: Request): Promise<{ category?: NoticeCategory; audience?: NoticeAudience; title?: string; body?: string; status?: NoticeStatus; notifyChannels?: NoticeDeliveryChannel[]; invalid: boolean }> => {
+  const body = await request.json() as Record<string, unknown>;
+  const validChannels = ["KAKAO", "EMAIL", "SMS", "WEBPUSH", "INAPP"];
+  const invalid = (body.category !== undefined && (typeof body.category !== "string" || !["IMPORTANT", "MAINTENANCE", "FEATURE", "INFO"].includes(body.category)))
+    || (body.audience !== undefined && (typeof body.audience !== "string" || !["ALL", "USER", "ADMIN"].includes(body.audience)))
+    || (body.status !== undefined && (typeof body.status !== "string" || !["DRAFT", "PUBLISHED", "ARCHIVED"].includes(body.status)))
+    || (body.title !== undefined && typeof body.title !== "string")
+    || (body.body !== undefined && typeof body.body !== "string")
+    || (body.notifyChannels !== undefined && (!Array.isArray(body.notifyChannels) || body.notifyChannels.some((channel) => typeof channel !== "string" || !validChannels.includes(channel))));
+  return {
+    category: typeof body.category === "string" ? body.category as NoticeCategory : undefined,
+    audience: typeof body.audience === "string" ? body.audience as NoticeAudience : undefined,
+    title: typeof body.title === "string" ? body.title : undefined,
+    body: typeof body.body === "string" ? body.body : undefined,
+    status: typeof body.status === "string" ? body.status as NoticeStatus : undefined,
+    notifyChannels: Array.isArray(body.notifyChannels) ? body.notifyChannels as NoticeDeliveryChannel[] : undefined,
+    invalid,
+  };
+};
 const batteryOwner = (battery: Battery) => battery.id === "b_pack_002" ? { id: users[2].id, name: users[2].name } : battery.id === "b_pack_003" ? { id: users[1].id, name: users[1].name } : { id: demoUser.id, name: demoUser.name };
 const adminBatteryListItem = (battery: Battery): AdminBatteryListItem => ({
   id: battery.id,
@@ -146,7 +182,7 @@ export const handlers = [
       tempContact: { value: null, status: null }, tempIrSurface: { value: null, status: null }, representativeTempC: { value: null, source: null, status: null },
       socPct: { value: null, status: null }, socBasis: null, measuredAt: null,
     };
-    return HttpResponse.json({ session: sessionForResponse(), battery, metrics, anomaly: latest ? { score: latest.score, grade: latest.grade, evaluatedAt: latest.measuredAt ?? undefined } : { score: null, grade: null }, relay, notices: [{ id: "n1", category: "MAINTENANCE", title: "7월 정기 서버 점검 (무중단)", summary: "WebSocket 순단이 발생할 수 있습니다.", publishedAt: "2026-07-01T00:00:00.000Z" }], snapshotCursor: "1" });
+    return HttpResponse.json({ session: sessionForResponse(), battery, metrics, anomaly: latest ? { score: latest.score, grade: latest.grade, evaluatedAt: latest.measuredAt ?? undefined } : { score: null, grade: null }, relay, notices: publicNotices().slice(0, 3), snapshotCursor: "1" });
   }),
   http.get("/api/relay", () => session ? HttpResponse.json({ ...relay, batteryId: session.batteryId }) : bad(409, "NO_ACTIVE_SESSION")),
   http.get("/api/relay/history", () => HttpResponse.json({ items: [] })),
@@ -160,15 +196,32 @@ export const handlers = [
   http.get("/api/alerts", () => HttpResponse.json(page([]))),
   http.post("/api/alerts/:id/ack", () => HttpResponse.json({ ok: true })),
   http.post("/api/alerts/ack-all", () => HttpResponse.json({ acknowledgedCount: 1 })),
-  http.get("/api/notices", () => HttpResponse.json(page([{ id: "n1", category: "MAINTENANCE", title: "7월 정기 서버 점검 (무중단)", summary: "WebSocket 순단이 발생할 수 있습니다.", publishedAt: "2026-07-01T00:00:00.000Z" }, { id: "n2", category: "FEATURE", title: "이상 근거(XAI) 패널 정식 오픈", summary: "이상점수 상승에 기여한 특징을 확인합니다.", publishedAt: "2026-06-28T00:00:00.000Z" }]))),
-  http.get("/api/notices/:id", ({ params }) => HttpResponse.json({ id: params.id, category: "MAINTENANCE", title: "7월 정기 서버 점검 (무중단)", body: "7/7 00:00~04:00 인프라 점검이 진행됩니다. WebSocket 순단이 발생할 수 있으나 자동 재연결됩니다.", publishedAt: "2026-07-01T00:00:00.000Z" })),
+  http.get("/api/notices", ({ request }) => {
+    const query = new URL(request.url).searchParams;
+    const category = query.get("category");
+    if (category && !["IMPORTANT", "MAINTENANCE", "FEATURE", "INFO"].includes(category)) return bad(400, "VALIDATION_FAILED");
+    const items = publicNotices().filter((notice) => !category || notice.category === category);
+    return HttpResponse.json(page(items));
+  }),
+  http.get("/api/notices/:id", ({ params }) => {
+    const notice = notices.find((item) => item.id === String(params.id) && item.status === "PUBLISHED" && (item.audience === "ALL" || item.audience === "USER"));
+    if (!notice) return bad(404, "NOT_FOUND");
+    const viewer = currentUser?.id ?? "anonymous";
+    const viewKey = `${notice.id}:${viewer}`;
+    const lastViewedAt = noticeViews.get(viewKey);
+    if (!lastViewedAt || Date.now() - Date.parse(lastViewedAt) >= 24 * 60 * 60 * 1000) {
+      notice.viewCount += 1;
+      noticeViews.set(viewKey, now());
+    }
+    return HttpResponse.json({ id: notice.id, category: notice.category, title: notice.title, body: notice.body, publishedAt: notice.publishedAt });
+  }),
   http.get("/api/diagnosis/active", () => HttpResponse.json(activeDiagnosis)),
   http.post("/api/diagnosis/quick", ({ request }) => startDiagnosis("quick", request)),
   http.post("/api/diagnosis/capacity", ({ request }) => startDiagnosis("capacity", request)),
   http.delete("/api/diagnosis/active", () => { if (!activeDiagnosis) return bad(409, "NO_DIAGNOSIS_IN_PROGRESS"); const aborted: Diagnosis = { ...activeDiagnosis, status: "ABORTED", abortReason: "USER" }; diagnosisHistory[aborted.batteryId] = [aborted, ...(diagnosisHistory[aborted.batteryId] ?? [])]; activeDiagnosis = null; return HttpResponse.json(aborted); }),
   http.get("/api/batteries/:id/diagnoses", ({ params }) => { const items = (diagnosisHistory[String(params.id)] ?? []).map(diagnosisListItem); return HttpResponse.json(page(items)); }),
   http.get("/api/diagnoses/:id", ({ params }) => { const diagnosis = allDiagnoses().find((item) => item.id === String(params.id)) ?? (activeDiagnosis?.id === String(params.id) ? activeDiagnosis : undefined); return diagnosis ? HttpResponse.json(diagnosis) : bad(404, "NOT_FOUND"); }),
-  http.get("/api/admin/overview", () => HttpResponse.json({ users: 3, batteries: batteries.length, activeSessions: session ? 1 : 0, blockedBatteries: 0, relayOpen: relay.state === "OPEN" ? 1 : 0 })),
+  http.get("/api/admin/overview", () => HttpResponse.json({ users: 3, batteries: batteries.length, activeSessions: session ? 1 : 0, blockedBatteries: 0, relayOpen: relay.state === "OPEN" ? 1 : 0, recentNotices: publicNotices().slice(0, 3) })),
   http.get("/api/admin/event-trend", () => HttpResponse.json({ buckets: ["월", "화", "수", "목", "금", "토", "일"], series: [{ grade: "CAUTION", values: [2, 3, 1, 4, 2, 1, 3] }, { grade: "WARNING", values: [1, 2, 1, 2, 1, 0, 2] }, { grade: "DANGER", values: [0, 1, 0, 1, 0, 0, 1] }] })),
   http.get("/api/admin/users", () => hasTestFault("admin-users") ? bad(503, "RUNTIME_NOT_READY") : HttpResponse.json(page(users.map((user) => ({ ...user, batteryCount: user.id === "u_hong" ? 2 : 0 }))))),
   http.patch("/api/admin/users/:id", async ({ params, request }) => { const body = await request.json() as { status: "ACTIVE" | "SUSPENDED" }; const user = users.find((item) => item.id === params.id); if (!user) return bad(404, "NOT_FOUND"); user.status = body.status; return HttpResponse.json(user); }),
@@ -177,5 +230,72 @@ export const handlers = [
   http.patch("/api/admin/batteries/:id/ops-status", async ({ params, request }) => { const battery = batteries.find((item) => item.id === params.id); if (!battery) return bad(404, "NOT_FOUND"); const body = await request.json() as { opsStatus?: unknown; reason?: unknown }; if (!body.opsStatus || !["NORMAL", "WATCH", "BLOCKED"].includes(String(body.opsStatus))) return bad(400, "VALIDATION_FAILED"); try { normalizeAdminInput(body.reason, 500, false); } catch (error) { return bad(422, (error as Error).message); } if (body.opsStatus === battery.opsStatus) return bad(409, "NO_STATUS_CHANGE"); battery.opsStatus = body.opsStatus as Battery["opsStatus"]; return HttpResponse.json({ opsStatus: battery.opsStatus, updatedAt: now(), updatedBy: currentUser?.name }); }),
   http.patch("/api/admin/batteries/:id/memo", async ({ params, request }) => { const battery = batteries.find((item) => item.id === params.id); if (!battery) return bad(404, "NOT_FOUND"); const body = await request.json() as { memo?: unknown }; try { battery.adminMemo = normalizeAdminInput(body.memo, 2_000, true); } catch (error) { return bad(422, (error as Error).message); } return HttpResponse.json({ memo: battery.adminMemo, updatedAt: now(), updatedBy: currentUser?.name }); }),
   http.get("/api/admin/audit-logs", () => HttpResponse.json(page([]))),
-  http.get("/api/admin/notices", () => HttpResponse.json({ items: [] })),
+  http.get("/api/admin/notices", ({ request }) => {
+    const query = new URL(request.url).searchParams;
+    const status = query.get("status");
+    const category = query.get("category");
+    if ((status && !["DRAFT", "PUBLISHED", "ARCHIVED"].includes(status)) || (category && !["IMPORTANT", "MAINTENANCE", "FEATURE", "INFO"].includes(category))) return bad(400, "VALIDATION_FAILED");
+    const items = notices
+      .filter((notice) => (!status || notice.status === status) && (!category || notice.category === category))
+      .sort((left, right) => Date.parse(right.publishedAt ?? right.createdAt) - Date.parse(left.publishedAt ?? left.createdAt))
+      .map(({ id, category: noticeCategory, audience, title, summary, status: noticeStatus, viewCount, publishedAt, archivedAt }) => ({ id, category: noticeCategory, audience, title, summary, status: noticeStatus, viewCount, publishedAt, archivedAt }));
+    const counts = notices.filter((notice) => !category || notice.category === category).reduce<Record<NoticeStatus, number>>((result, notice) => {
+      result[notice.status] += 1;
+      return result;
+    }, { DRAFT: 0, PUBLISHED: 0, ARCHIVED: 0 });
+    return HttpResponse.json({ ...page(items), counts });
+  }),
+  http.get("/api/admin/notices/:id", ({ params }) => {
+    const notice = notices.find((item) => item.id === String(params.id));
+    return notice ? HttpResponse.json(notice) : bad(404, "NOT_FOUND");
+  }),
+  http.post("/api/admin/notices", async ({ request }) => {
+    const input = await noticeInput(request);
+    const status = input.status ?? "DRAFT";
+    if (input.invalid || !input.category || !input.audience || (status === "PUBLISHED" && (!input.title?.trim() || !input.body?.trim())) || !["DRAFT", "PUBLISHED"].includes(status)) return bad(422, "VALIDATION_FAILED");
+    const publishedAt = status === "PUBLISHED" ? now() : null;
+    const notice = mockNotice({ id: `notice_${randomId()}`, category: input.category, audience: input.audience, status, title: input.title ?? "", body: input.body ?? "", publishedAt, archivedAt: null, createdBy: currentUser?.id ?? "u_admin", updatedBy: currentUser?.id ?? "u_admin" });
+    notice.deliveryIntents = status === "PUBLISHED" ? (input.notifyChannels ?? []).map((channel) => blockedIntent(notice.id, channel)) : [];
+    notices.unshift(notice);
+    return HttpResponse.json(notice, { status: 201 });
+  }),
+  http.patch("/api/admin/notices/:id", async ({ params, request }) => {
+    const notice = notices.find((item) => item.id === String(params.id));
+    if (!notice) return bad(404, "NOT_FOUND");
+    if (notice.status === "ARCHIVED") return bad(409, "INVALID_STATE");
+    const input = await noticeInput(request);
+    const nextStatus = input.status ?? notice.status;
+    const nextTitle = input.title ?? notice.title;
+    const nextBody = input.body ?? notice.body;
+    if (input.invalid || !["DRAFT", "PUBLISHED"].includes(nextStatus) || (nextStatus === "PUBLISHED" && (!nextTitle.trim() || !nextBody.trim()))) return bad(422, "VALIDATION_FAILED");
+    if (notice.status === "PUBLISHED" && nextStatus === "DRAFT") return bad(409, "INVALID_STATE");
+    notice.category = input.category ?? notice.category;
+    notice.audience = input.audience ?? notice.audience;
+    notice.title = nextTitle;
+    notice.body = nextBody;
+    notice.summary = noticeSummary(notice.body);
+    notice.updatedAt = now();
+    notice.updatedBy = currentUser?.id ?? "u_admin";
+    if (nextStatus === "PUBLISHED" && notice.status === "DRAFT") notice.publishedAt = now();
+    notice.status = nextStatus;
+    if (notice.status === "PUBLISHED" && input.notifyChannels?.length) notice.deliveryIntents.push(...input.notifyChannels.map((channel) => blockedIntent(notice.id, channel)));
+    return HttpResponse.json(notice);
+  }),
+  http.post("/api/admin/notices/:id/archive", ({ params }) => {
+    const notice = notices.find((item) => item.id === String(params.id));
+    if (!notice) return bad(404, "NOT_FOUND");
+    if (notice.status !== "PUBLISHED") return bad(409, "INVALID_STATE");
+    notice.status = "ARCHIVED";
+    notice.archivedAt = now();
+    notice.updatedAt = notice.archivedAt;
+    notice.updatedBy = currentUser?.id ?? "u_admin";
+    return HttpResponse.json(notice);
+  }),
+  http.delete("/api/admin/notices/:id", ({ params }) => {
+    const index = notices.findIndex((item) => item.id === String(params.id));
+    if (index < 0) return bad(404, "NOT_FOUND");
+    if (notices[index].status !== "DRAFT") return bad(409, "NOTICE_NOT_DELETABLE");
+    notices.splice(index, 1);
+    return new HttpResponse(null, { status: 204 });
+  }),
 ];

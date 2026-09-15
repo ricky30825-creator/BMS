@@ -291,6 +291,61 @@ export function runStoreContractTests(name: string, makeStore: () => Promise<Cel
       });
     });
 
+    it("공지 목록·상세는 audience/status를 필터링하고 동일 사용자 24시간 조회를 dedupe한다", async () => {
+      const publicNotice = await store.createNotice("leelab", {
+        category: "INFO",
+        audience: "USER",
+        title: "공지 제목",
+        body: `${"Ａ".repeat(119)}😀Z`,
+        status: "PUBLISHED",
+      });
+      const adminNotice = await store.createNotice("leelab", {
+        category: "INFO",
+        audience: "ADMIN",
+        title: "관리자 공지",
+        body: "관리자 전용 본문",
+        status: "PUBLISHED",
+      });
+      const draft = await store.createNotice("leelab", {
+        category: "INFO",
+        audience: "ALL",
+        title: "임시 공지",
+        body: "임시 본문",
+      });
+
+      const list = await store.publishedNotices();
+      expect(list.some((notice) => notice.id === publicNotice.id)).toBe(true);
+      expect(list.some((notice) => notice.id === adminNotice.id)).toBe(false);
+      expect(list.some((notice) => notice.id === draft.id)).toBe(false);
+      expect(list.find((notice) => notice.id === publicNotice.id)?.summary).toBe(`${"A".repeat(119)}😀`);
+
+      await Promise.all(Array.from({ length: 12 }, () => store.noticeForUser(publicNotice.id, "hong")));
+      expect((await store.adminNoticeById(publicNotice.id))?.viewCount).toBe(1);
+      expect(await store.noticeForUser(adminNotice.id, "hong")).toBeUndefined();
+    });
+
+    it("공지 상태 전이와 외부 발송 의도는 감사와 함께 보존된다", async () => {
+      const draft = await store.createNotice("leelab", {
+        category: "MAINTENANCE",
+        audience: "ALL",
+        title: "점검",
+        body: "점검 본문",
+      });
+      expect((await store.updateNotice("leelab", draft.id, {
+        status: "PUBLISHED",
+        notifyChannels: ["WEBPUSH", "KAKAO"],
+      })).deliveryIntents.map((intent) => [intent.channel, intent.status, intent.lastError])).toEqual([
+        ["WEBPUSH", "BLOCKED", "PROVIDER_NOT_CONFIGURED"],
+        ["KAKAO", "BLOCKED", "PROVIDER_NOT_CONFIGURED"],
+      ]);
+      await expect(store.deleteNotice("leelab", draft.id)).rejects.toThrow("NOTICE_NOT_DELETABLE");
+      await store.archiveNotice("leelab", draft.id);
+      expect((await store.adminNoticeById(draft.id))?.status).toBe("ARCHIVED");
+      expect((await store.audits()).filter((audit) => audit.resource === draft.id).map((audit) => audit.action)).toEqual([
+        "NOTICE_ARCHIVE", "NOTICE_PUBLISH", "NOTICE_CREATE",
+      ]);
+    });
+
     it("동률 peak는 가장 이른 UTC bucket을 유지한다", async () => {
       await withTrendClock(async () => {
         await recordTrendEvent(store, { severity: "CAUTION", occurredAt: "2026-09-14T12:00:00.000Z", dedupeKey: "trend-tie-earliest-caution" });
@@ -334,7 +389,8 @@ const postgresTestPool = postgresTestUrl ? new pg.Pool({ connectionString: postg
 
 async function resetPostgresContractDatabase(pool: pg.Pool): Promise<void> {
   await pool.query(`
-    truncate table audit_log, idempotency_key, diagnosis, telemetry_metric,
+    truncate table notice_delivery_intent, notice_view, notice,
+      audit_log, idempotency_key, diagnosis, telemetry_metric,
       anomaly_score, battery_health, battery_latest, relay_state, measurement_session, outbox,
       domain_event,
       battery_asset restart identity cascade

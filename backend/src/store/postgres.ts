@@ -2,9 +2,11 @@ import { createHash, randomUUID } from "node:crypto";
 import type pg from "pg";
 
 import type { CellGuardStore, CreateBatteryInput, IdempotencyResult, UpdateBatteryInput } from "./contract.js";
+import type { CreateNoticeInput, NoticeListQuery, UpdateNoticeInput } from "./contract.js";
 import { CSV_HEADER, INPUT_LIMITS } from "./types.js";
 import type {
   AdminEventTrend,
+  AdminNotice,
   AnomalyScoreRecord,
   DemoAudit,
   DemoBattery,
@@ -19,6 +21,11 @@ import type {
   DomainEventSeverity,
   DomainEventSource,
   EventTrendPeriod,
+  NoticeCategory,
+  NoticeDeliveryChannel,
+  NoticeDeliveryIntent,
+  NoticeDetail,
+  NoticeStatus,
   OpsStatus,
   RecordDomainEventInput,
 } from "./types.js";
@@ -52,6 +59,7 @@ const DOMAIN_CODES = new Set([
   "RATED_CURRENT_REQUIRED",
   "IDEMPOTENCY_CONFLICT",
   "VALIDATION_FAILED",
+  "NOTICE_NOT_DELETABLE",
   "INTERNAL_ERROR",
 ]);
 
@@ -329,6 +337,112 @@ function mapDomainEvent(row: AnyRow): DomainEvent {
     dedupeKey: String(row.dedupe_key),
     createdAt: iso(row.created_at),
   };
+}
+
+function noticeSummary(body: string): string {
+  return Array.from(body.normalize("NFKC")).slice(0, 120).join("");
+}
+
+function mapNoticeDeliveryIntent(row: AnyRow): NoticeDeliveryIntent {
+  return {
+    id: String(row.id),
+    noticeId: String(row.notice_id),
+    channel: String(row.channel) as NoticeDeliveryChannel,
+    status: String(row.status) as NoticeDeliveryIntent["status"],
+    requestedAt: iso(row.requested_at),
+    sentAt: nullableIso(row.sent_at),
+    providerMessageId: row.provider_message_id == null ? null : String(row.provider_message_id),
+    lastError: row.last_error == null ? null : String(row.last_error),
+  };
+}
+
+function mapAdminNotice(row: AnyRow, deliveryIntents: NoticeDeliveryIntent[] = []): AdminNotice {
+  const body = row.body == null ? "" : String(row.body);
+  return {
+    id: String(row.id),
+    category: String(row.category) as NoticeCategory,
+    audience: String(row.audience) as AdminNotice["audience"],
+    status: String(row.status) as NoticeStatus,
+    title: row.title == null ? "" : String(row.title),
+    body,
+    summary: noticeSummary(body),
+    viewCount: integerOrNull(row.view_count) ?? 0,
+    publishedAt: nullableIso(row.published_at),
+    archivedAt: nullableIso(row.archived_at),
+    createdAt: iso(row.created_at),
+    updatedAt: iso(row.updated_at),
+    createdBy: row.created_by == null ? null : String(row.created_by),
+    updatedBy: row.updated_by == null ? null : String(row.updated_by),
+    deliveryIntents: clone(deliveryIntents),
+  };
+}
+
+function mapPublicNotice(row: AnyRow): NoticeDetail {
+  const body = row.body == null ? "" : String(row.body);
+  const publishedAt = nullableIso(row.published_at);
+  if (!publishedAt) throw new Error("INTERNAL_ERROR");
+  return {
+    id: String(row.id),
+    category: String(row.category) as NoticeCategory,
+    title: row.title == null ? "" : String(row.title),
+    body,
+    summary: noticeSummary(body),
+    publishedAt,
+  };
+}
+
+function validateNoticeCategory(value: unknown): value is NoticeCategory {
+  return value === "IMPORTANT" || value === "MAINTENANCE" || value === "FEATURE" || value === "INFO";
+}
+
+function validateNoticeStatus(value: unknown): value is NoticeStatus {
+  return value === "DRAFT" || value === "PUBLISHED" || value === "ARCHIVED";
+}
+
+function validateNoticeAudience(value: unknown): value is AdminNotice["audience"] {
+  return value === "ALL" || value === "USER" || value === "ADMIN";
+}
+
+const NOTICE_CHANNELS = new Set<NoticeDeliveryChannel>(["KAKAO", "EMAIL", "SMS", "WEBPUSH", "INAPP"]);
+
+function normalizedNoticeChannels(value: NoticeDeliveryChannel[] | undefined): NoticeDeliveryChannel[] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.some((channel) => !NOTICE_CHANNELS.has(channel))) throw new Error("VALIDATION_FAILED");
+  return [...new Set(value)];
+}
+
+function noticeText(value: unknown): string {
+  if (typeof value !== "string") throw new Error("VALIDATION_FAILED");
+  // Titles and bodies are free text and must round-trip exactly. Only the
+  // derived summary applies NFKC normalization.
+  return value;
+}
+
+function validateNoticeQuery(query: NoticeListQuery): void {
+  if (query.category !== undefined && !validateNoticeCategory(query.category)) throw new Error("VALIDATION_FAILED");
+  if (query.status !== undefined && !validateNoticeStatus(query.status)) throw new Error("VALIDATION_FAILED");
+  if (query.limit !== undefined && (!Number.isInteger(query.limit) || query.limit < 0)) throw new Error("VALIDATION_FAILED");
+  if (query.offset !== undefined && (!Number.isInteger(query.offset) || query.offset < 0)) throw new Error("VALIDATION_FAILED");
+}
+
+const NOTICE_COLUMNS = `
+  id, category, audience, status, title, body, view_count,
+  published_at, archived_at, created_by, updated_by, created_at, updated_at
+`;
+
+const NOTICE_COLUMNS_QUALIFIED = `
+  n.id, n.category, n.audience, n.status, n.title, n.body, n.view_count,
+  n.published_at, n.archived_at, n.created_by, n.updated_by, n.created_at, n.updated_at
+`;
+
+async function noticeRow(executor: QueryExecutor, noticeId: string, lock = false): Promise<AnyRow | null> {
+  const result = await query<AnyRow>(executor, `
+    select ${NOTICE_COLUMNS}
+    from notice
+    where id = $1
+    ${lock ? "for update" : ""}
+  `, [noticeId]);
+  return result.rows[0] ?? null;
 }
 
 const DOMAIN_EVENT_COLUMNS = `
@@ -706,6 +820,109 @@ export function createPostgresStore(pool: pg.Pool): CellGuardStore {
     };
   }
 
+  async function noticeDeliveryIntentRows(executor: QueryExecutor, noticeId: string): Promise<NoticeDeliveryIntent[]> {
+    const result = await query<AnyRow>(executor, `
+      select id, notice_id, channel, status, requested_at, sent_at,
+             provider_message_id, last_error
+      from notice_delivery_intent
+      where notice_id = $1
+      order by id asc
+    `, [noticeId]);
+    return result.rows.map((row) => mapNoticeDeliveryIntent(row));
+  }
+
+  async function insertNoticeDeliveryIntents(client: pg.PoolClient, noticeId: string, channels: NoticeDeliveryChannel[]): Promise<void> {
+    for (const channel of channels) {
+      // This repository has no Kakao/web-push provider or credentials. The
+      // intent is durable, but it is explicitly BLOCKED instead of pretending
+      // that a provider accepted the message.
+      await query(client, `
+        insert into notice_delivery_intent
+          (notice_id, channel, status, requested_at, sent_at, provider_message_id, last_error)
+        values ($1, $2, 'BLOCKED', clock_timestamp(), null, null, 'PROVIDER_NOT_CONFIGURED')
+        on conflict (notice_id, channel) do nothing
+      `, [noticeId, channel]);
+    }
+  }
+
+  function validateNoticeMutation(input: CreateNoticeInput | UpdateNoticeInput, status: NoticeStatus): void {
+    if (input.category !== undefined && !validateNoticeCategory(input.category)) throw new Error("VALIDATION_FAILED");
+    if (input.audience !== undefined && !validateNoticeAudience(input.audience)) throw new Error("VALIDATION_FAILED");
+    if (!validateNoticeStatus(status)) throw new Error("VALIDATION_FAILED");
+    if (status === "ARCHIVED") throw new Error("VALIDATION_FAILED");
+    if (input.notifyChannels !== undefined) normalizedNoticeChannels(input.notifyChannels);
+  }
+
+  function assertPublishableNotice(title: string, body: string, status: NoticeStatus): void {
+    if (status === "PUBLISHED" && (!title.trim() || !body.trim())) throw new Error("VALIDATION_FAILED");
+  }
+
+  async function adminNoticeWithIntents(executor: QueryExecutor, row: AnyRow): Promise<AdminNotice> {
+    const intents = await noticeDeliveryIntentRows(executor, String(row.id));
+    return clone(mapAdminNotice(row, intents));
+  }
+
+  async function publicNoticeRowForUser(executor: QueryExecutor, noticeId: string, viewerId: string): Promise<AnyRow | null> {
+    // Locking the notice row serializes the read/update pair for one notice;
+    // the visibility check and the conditional view upsert therefore share the
+    // same transaction and cannot double-count concurrent browser tabs.
+    const row = await noticeRow(executor, noticeId, true);
+    if (!row || String(row.status) !== "PUBLISHED" || !["ALL", "USER"].includes(String(row.audience))) return null;
+    const view = await query<AnyRow>(executor, `
+      select last_viewed_at
+      from notice_view
+      where notice_id = $1 and viewer_user_id = $2
+      for update
+    `, [noticeId, viewerId]);
+    const lastViewedAt = view.rows[0]?.last_viewed_at;
+    const lastMs = lastViewedAt == null ? Number.NaN : new Date(lastViewedAt).getTime();
+    // Compare against the same PostgreSQL clock used by the persisted view
+    // timestamp, so a web process clock skew cannot shorten or extend the
+    // 24-hour window.
+    const clock = await query<AnyRow>(executor, "select clock_timestamp() as now");
+    const nowMs = new Date(clock.rows[0]?.now ?? Date.now()).getTime();
+    if (!Number.isFinite(lastMs) || nowMs - lastMs >= 24 * 60 * 60 * 1000) {
+      await query(executor, `update notice set view_count = view_count + 1 where id = $1`, [noticeId]);
+      await query(executor, `
+        insert into notice_view (notice_id, viewer_user_id, last_viewed_at)
+        values ($1, $2, clock_timestamp())
+        on conflict (notice_id, viewer_user_id)
+        do update set last_viewed_at = excluded.last_viewed_at
+      `, [noticeId, viewerId]);
+      const updated = await noticeRow(executor, noticeId, false);
+      return updated;
+    }
+    return row;
+  }
+
+  async function listNoticeRows(executor: QueryExecutor, queryInput: NoticeListQuery, publicOnly: boolean): Promise<AnyRow[]> {
+    validateNoticeQuery(queryInput);
+    const values: unknown[] = [];
+    const where: string[] = ["1 = 1"];
+    const add = (value: unknown): string => {
+      values.push(value);
+      return `$${values.length}`;
+    };
+    if (publicOnly) {
+      where.push("n.status = 'PUBLISHED'");
+      where.push("n.audience in ('ALL', 'USER')");
+    } else if (queryInput.status !== undefined) {
+      where.push(`n.status = ${add(queryInput.status)}`);
+    }
+    if (queryInput.category !== undefined) where.push(`n.category = ${add(queryInput.category)}`);
+    const limit = queryInput.limit === undefined ? null : add(queryInput.limit);
+    const offset = queryInput.offset === undefined ? null : add(queryInput.offset);
+    const result = await query<AnyRow>(executor, `
+      select ${NOTICE_COLUMNS_QUALIFIED}
+      from notice n
+      where ${where.join(" and ")}
+      order by coalesce(n.published_at, n.created_at) desc, n.id desc
+      ${limit === null ? "" : `limit ${limit}`}
+      ${offset === null ? "" : `offset ${offset}`}
+    `, values);
+    return result.rows;
+  }
+
   function estimatedEnd(kind: "QUICK" | "CAPACITY", battery: DemoBattery, input: Record<string, unknown>, startMs: number): string {
     if (kind === "QUICK") return new Date(startMs + totalDurationMs(quickPhases(battery.ratedOutputCurrentA))).toISOString();
     const currentA = typeof input.dischargeCurrentA === "number" && input.dischargeCurrentA > 0 ? input.dischargeCurrentA : 1.0;
@@ -884,6 +1101,44 @@ export function createPostgresStore(pool: pg.Pool): CellGuardStore {
       return dbCall(() => adminEventTrend(period));
     },
 
+    async publishedNotices(queryInput = {}) {
+      return dbCall(async () => {
+        const rows = await listNoticeRows(pool, queryInput, true);
+        return rows.map((row) => clone({
+          id: String(row.id),
+          category: String(row.category) as NoticeCategory,
+          title: row.title == null ? "" : String(row.title),
+          summary: noticeSummary(row.body == null ? "" : String(row.body)),
+          publishedAt: nullableIso(row.published_at) ?? "",
+        }));
+      });
+    },
+
+    async adminNotices(queryInput = {}) {
+      return dbCall(async () => {
+        const rows = await listNoticeRows(pool, queryInput, false);
+        return Promise.all(rows.map((row) => adminNoticeWithIntents(pool, row)));
+      });
+    },
+
+    async noticeForUser(id, viewerId) {
+      return dbCall(async () => transaction(async (client) => {
+        const row = await publicNoticeRowForUser(client, id, viewerId);
+        return row ? clone(mapPublicNotice(row)) : undefined;
+      }));
+    },
+
+    async adminNoticeById(id) {
+      return dbCall(async () => {
+        const row = await noticeRow(pool, id);
+        return row ? await adminNoticeWithIntents(pool, row) : undefined;
+      });
+    },
+
+    async noticeDeliveryIntents(noticeId) {
+      return dbCall(async () => noticeDeliveryIntentRows(pool, noticeId));
+    },
+
     async activeDiagnosis(batteryId) {
       return dbCall(async () => {
         const row = await activeDiagnosisRow(pool, batteryId);
@@ -1036,6 +1291,99 @@ export function createPostgresStore(pool: pg.Pool): CellGuardStore {
         `, [eventId, actorId === "SYSTEM" ? null : actorId]);
         if (!result.rows[0]) throw new Error("NOT_FOUND");
         return clone(mapDomainEvent(result.rows[0]));
+      }));
+    },
+
+    async createNotice(actorId, input) {
+      const status = input.status ?? "DRAFT";
+      if (!validateNoticeCategory(input.category) || !validateNoticeAudience(input.audience) || !validateNoticeStatus(status)) throw new Error("VALIDATION_FAILED");
+      const title = noticeText(input.title);
+      const body = noticeText(input.body);
+      assertPublishableNotice(title, body, status);
+      const channels = normalizedNoticeChannels(input.notifyChannels);
+      return dbCall(async () => transaction(async (client) => {
+        const id = `notice_${randomUUID()}`;
+        const created = await query<AnyRow>(client, `
+          insert into notice
+            (id, category, audience, status, title, body, view_count,
+             published_at, archived_at, created_by, updated_by, created_at, updated_at)
+          values ($1, $2, $3, $4, $5, $6, 0,
+                  case when $4 = 'PUBLISHED' then clock_timestamp() else null end,
+                  null, $7, $7, clock_timestamp(), clock_timestamp())
+          returning ${NOTICE_COLUMNS}
+        `, [id, input.category, input.audience, status, title, body, actorId]);
+        if (!created.rows[0]) throw new Error("INTERNAL_ERROR");
+        if (status === "PUBLISHED") await insertNoticeDeliveryIntents(client, id, channels);
+        await insertAudit(client, { actorId, action: status === "PUBLISHED" ? "NOTICE_PUBLISH" : "NOTICE_CREATE", resource: id, result: "SUCCESS", reason: null });
+        return adminNoticeWithIntents(client, created.rows[0]);
+      }));
+    },
+
+    async updateNotice(actorId, noticeId, input) {
+      const channels = normalizedNoticeChannels(input.notifyChannels);
+      return dbCall(async () => transaction(async (client) => {
+        const current = await noticeRow(client, noticeId, true);
+        if (!current) throw new Error("NOT_FOUND");
+        const currentStatus = String(current.status) as NoticeStatus;
+        if (currentStatus === "ARCHIVED") throw new Error("VALIDATION_FAILED");
+        const nextStatus = input.status ?? currentStatus;
+        validateNoticeMutation(input, nextStatus);
+        if (currentStatus === "PUBLISHED" && nextStatus !== "PUBLISHED") throw new Error("VALIDATION_FAILED");
+        if (currentStatus === "DRAFT" && nextStatus === "ARCHIVED") throw new Error("VALIDATION_FAILED");
+
+        const category = input.category ?? String(current.category);
+        const audience = input.audience ?? String(current.audience);
+        if (!validateNoticeCategory(category) || !validateNoticeAudience(audience)) throw new Error("VALIDATION_FAILED");
+        const title = input.title === undefined ? String(current.title ?? "") : noticeText(input.title);
+        const body = input.body === undefined ? String(current.body ?? "") : noticeText(input.body);
+        assertPublishableNotice(title, body, nextStatus);
+        if (currentStatus === "PUBLISHED" && channels.length) throw new Error("VALIDATION_FAILED");
+        const publishing = currentStatus === "DRAFT" && nextStatus === "PUBLISHED";
+        const updated = await query<AnyRow>(client, `
+          update notice
+          set category = $2,
+              audience = $3,
+              status = $4,
+              title = $5,
+              body = $6,
+              published_at = case when $4 = 'PUBLISHED' then coalesce(published_at, clock_timestamp()) else published_at end,
+              updated_by = $7,
+              updated_at = clock_timestamp()
+          where id = $1
+          returning ${NOTICE_COLUMNS}
+        `, [noticeId, category, audience, nextStatus, title, body, actorId]);
+        if (!updated.rows[0]) throw new Error("NOT_FOUND");
+        if (publishing) await insertNoticeDeliveryIntents(client, noticeId, channels);
+        await insertAudit(client, { actorId, action: publishing ? "NOTICE_PUBLISH" : "NOTICE_UPDATE", resource: noticeId, result: "SUCCESS", reason: null });
+        return adminNoticeWithIntents(client, updated.rows[0]);
+      }));
+    },
+
+    async archiveNotice(actorId, noticeId) {
+      return dbCall(async () => transaction(async (client) => {
+        const current = await noticeRow(client, noticeId, true);
+        if (!current) throw new Error("NOT_FOUND");
+        if (String(current.status) !== "PUBLISHED") throw new Error("VALIDATION_FAILED");
+        const updated = await query<AnyRow>(client, `
+          update notice
+          set status = 'ARCHIVED', archived_at = clock_timestamp(), updated_by = $2, updated_at = clock_timestamp()
+          where id = $1
+          returning ${NOTICE_COLUMNS}
+        `, [noticeId, actorId]);
+        if (!updated.rows[0]) throw new Error("NOT_FOUND");
+        await insertAudit(client, { actorId, action: "NOTICE_ARCHIVE", resource: noticeId, result: "SUCCESS", reason: null });
+        return adminNoticeWithIntents(client, updated.rows[0]);
+      }));
+    },
+
+    async deleteNotice(actorId, noticeId) {
+      await dbCall(async () => transaction(async (client) => {
+        const current = await noticeRow(client, noticeId, true);
+        if (!current) throw new Error("NOT_FOUND");
+        if (String(current.status) !== "DRAFT") throw new Error("NOTICE_NOT_DELETABLE");
+        const deleted = await query(client, `delete from notice where id = $1`, [noticeId]);
+        if ((deleted.rowCount ?? 0) !== 1) throw new Error("NOT_FOUND");
+        await insertAudit(client, { actorId, action: "NOTICE_DELETE", resource: noticeId, result: "SUCCESS", reason: null });
       }));
     },
 

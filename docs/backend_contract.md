@@ -396,7 +396,7 @@ const locked = gated && r !== 'battery';
 | `USER_PASSWORD_RESET_SENT` | user | — 재설정 **링크 발송** `[REQ-WEB-116]` |
 | `BATTERY_OPS_STATUS_CHANGE` | battery | 모든 실제 상태 전환 시 ✅ `[REQ-WEB-125]` |
 | `BATTERY_MEMO_UPDATE` | battery | — `[REQ-WEB-124]` |
-| `NOTICE_PUBLISH` / `NOTICE_UPDATE` / `NOTICE_ARCHIVE` / `NOTICE_DELETE` | notice | — |
+| `NOTICE_CREATE` / `NOTICE_PUBLISH` / `NOTICE_UPDATE` / `NOTICE_ARCHIVE` / `NOTICE_DELETE` | notice | — |
 | `ADMIN_ACCESS_DENIED` | route | 시스템 자동 |
 | `ADMIN_LOGIN` | — | 시스템 자동 |
 
@@ -1512,6 +1512,11 @@ Q38 기본값은 다음과 같다: `reason` 최대 500자, `memo` 최대 2,000�
 | `PATCH` | `/api/admin/notices/{id}` |
 | `POST` | `/api/admin/notices/{id}/archive` |
 | `DELETE` | `/api/admin/notices/{id}` (`DRAFT`만 허용) |
+
+목록 응답은 공통 `items`·`page` 봉투와 함께 현재 `category` 범위의 상태별
+`counts`(`DRAFT`, `PUBLISHED`, `ARCHIVED`)를 반환한다. `status` 필터를 사용해도
+카운트는 필터 전 범위 기준으로 유지해 관리자 화면의 상태 요약을 안정적으로
+표시한다.
 
 ```json
 {

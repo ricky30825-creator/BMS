@@ -96,6 +96,54 @@ export type AdminEventTrend = {
   };
 };
 
+export type NoticeCategory = "IMPORTANT" | "MAINTENANCE" | "FEATURE" | "INFO";
+export type NoticeStatus = "DRAFT" | "PUBLISHED" | "ARCHIVED";
+export type NoticeAudience = "ALL" | "USER" | "ADMIN";
+export type NoticeDeliveryChannel = "KAKAO" | "EMAIL" | "SMS" | "WEBPUSH" | "INAPP";
+export type NoticeDeliveryStatus = "PENDING" | "SENT" | "FAILED" | "BLOCKED";
+
+/** The public list shape. User endpoints only return PUBLISHED ALL/USER rows. */
+export type NoticeSummary = {
+  id: string;
+  category: NoticeCategory;
+  title: string;
+  summary: string;
+  publishedAt: string;
+};
+
+/** The public detail shape. The view count is deliberately not exposed. */
+export type NoticeDetail = NoticeSummary & { body: string };
+
+export type NoticeDeliveryIntent = {
+  id: string;
+  noticeId: string;
+  channel: NoticeDeliveryChannel;
+  status: NoticeDeliveryStatus;
+  requestedAt: string;
+  sentAt: string | null;
+  providerMessageId: string | null;
+  lastError: string | null;
+};
+
+/** Administrative shape, including drafts, audience, lifecycle and views. */
+export type AdminNotice = {
+  id: string;
+  category: NoticeCategory;
+  audience: NoticeAudience;
+  status: NoticeStatus;
+  title: string;
+  body: string;
+  summary: string;
+  viewCount: number;
+  publishedAt: string | null;
+  archivedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  createdBy: string | null;
+  updatedBy: string | null;
+  deliveryIntents: NoticeDeliveryIntent[];
+};
+
 export type DemoUser = {
   id: string;
   email: string;

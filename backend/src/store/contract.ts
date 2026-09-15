@@ -1,5 +1,6 @@
 import type {
   AdminEventTrend,
+  AdminNotice,
   AnomalyScoreRecord,
   DemoAudit,
   DemoBattery,
@@ -12,6 +13,11 @@ import type {
   DomainEvent,
   DomainEventQuery,
   EventTrendPeriod,
+  NoticeCategory,
+  NoticeDeliveryChannel,
+  NoticeDeliveryIntent,
+  NoticeDetail,
+  NoticeStatus,
   OpsStatus,
   RecordDomainEventInput,
 } from "./types.js";
@@ -37,6 +43,26 @@ export type UpdateBatteryInput = {
 
 export type IdempotencyResult = { kind: "new" | "replay" | "conflict"; status?: number; body?: unknown };
 
+export type NoticeListQuery = {
+  category?: NoticeCategory;
+  status?: NoticeStatus;
+  limit?: number;
+  offset?: number;
+};
+
+export type CreateNoticeInput = {
+  category: NoticeCategory;
+  audience: "ALL" | "USER" | "ADMIN";
+  title: string;
+  body: string;
+  status?: NoticeStatus;
+  notifyChannels?: NoticeDeliveryChannel[];
+};
+
+export type UpdateNoticeInput = Partial<Omit<CreateNoticeInput, "notifyChannels">> & {
+  notifyChannels?: NoticeDeliveryChannel[];
+};
+
 // 도메인 저장소 계약. 인메모리와 PostgreSQL 구현체가 이 인터페이스를 공유하며,
 // store/contract.test.ts가 두 구현체에 같은 테스트를 돌린다.
 //
@@ -47,8 +73,9 @@ export type IdempotencyResult = { kind: "new" | "replay" | "conflict"; status?: 
 //  2. 반환값은 호출부가 마음대로 고쳐도 저장소가 오염되지 않아야 한다(방어 복사).
 //  3. 감사 로그를 함께 남기는 메서드는 원자적이어야 한다 — 계약 §3.4.
 //     changeRelay / engageFailsafe / changeOpsStatus / saveMemo /
-//     changeUserStatus / startSession이 해당한다. PostgreSQL 구현체는 이들을
-//     상태·감사·(해당 시) outbox까지 한 트랜잭션에 넣어야 한다.
+//     changeUserStatus / startSession / notice mutations가 해당한다.
+//     PostgreSQL 구현체는 이들을 상태·감사·(해당 시) outbox까지 한
+//     트랜잭션에 넣어야 한다.
 export interface CellGuardStore {
   // 조회
   userById(id: string): Promise<DemoUser | undefined>;
@@ -63,6 +90,15 @@ export interface CellGuardStore {
   domainEventById(id: string): Promise<DomainEvent | undefined>;
   domainEvents(query?: DomainEventQuery): Promise<DomainEvent[]>;
   getAdminEventTrend(period: EventTrendPeriod): Promise<AdminEventTrend>;
+  /** Published public notices, optionally filtered and paged. */
+  publishedNotices(query?: NoticeListQuery): Promise<import("./types.js").NoticeSummary[]>;
+  /** All notices for administrators, including drafts and archived rows. */
+  adminNotices(query?: NoticeListQuery): Promise<AdminNotice[]>;
+  /** Public detail plus a transactional 24-hour deduplicated view update. */
+  noticeForUser(id: string, viewerId: string): Promise<NoticeDetail | undefined>;
+  /** Administrative detail; this does not increment a view. */
+  adminNoticeById(id: string): Promise<AdminNotice | undefined>;
+  noticeDeliveryIntents(noticeId: string): Promise<NoticeDeliveryIntent[]>;
   activeDiagnosis(batteryId?: string): Promise<DemoDiagnosis | null>;
   diagnosisById(id: string): Promise<DemoDiagnosis | undefined>;
   diagnosesForBattery(batteryId: string): Promise<DemoDiagnosis[]>;
@@ -89,6 +125,10 @@ export interface CellGuardStore {
   /** Insert once for a durable natural key; an existing key is an idempotent replay. */
   recordDomainEvent(input: RecordDomainEventInput): Promise<DomainEvent>;
   acknowledgeDomainEvent(actorId: string, eventId: string): Promise<DomainEvent>;
+  createNotice(actorId: string, input: CreateNoticeInput): Promise<AdminNotice>;
+  updateNotice(actorId: string, noticeId: string, input: UpdateNoticeInput): Promise<AdminNotice>;
+  archiveNotice(actorId: string, noticeId: string): Promise<AdminNotice>;
+  deleteNotice(actorId: string, noticeId: string): Promise<void>;
   startDiagnosis(ownerId: string, kind: "QUICK" | "CAPACITY", batteryId: string, input: Record<string, unknown>): Promise<DemoDiagnosis>;
   abortDiagnosis(ownerId: string, batteryId: string): Promise<DemoDiagnosis>;
   advanceDiagnosis(id: string, phase: string, progress: DiagnosisProgress): Promise<DemoDiagnosis>;

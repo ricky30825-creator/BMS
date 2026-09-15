@@ -158,8 +158,31 @@ export type DashboardMetrics = {
   measuredAt: string | null;
 };
 
-export type NoticeSummary = { id: string; category: NoticeCategory; title: string; summary: string; publishedAt: string };
 export type NoticeCategory = "IMPORTANT" | "MAINTENANCE" | "FEATURE" | "INFO";
+export type NoticeStatus = "DRAFT" | "PUBLISHED" | "ARCHIVED";
+export type NoticeAudience = "ALL" | "USER" | "ADMIN";
+export type NoticeDeliveryChannel = "KAKAO" | "EMAIL" | "SMS" | "WEBPUSH" | "INAPP";
+export type NoticeDeliveryStatus = "PENDING" | "SENT" | "FAILED" | "BLOCKED";
+export type NoticeSummary = { id: string; category: NoticeCategory; title: string; summary: string; publishedAt: string };
+export type NoticeDetail = NoticeSummary & { body: string };
+export type NoticeDeliveryIntent = { id: string; noticeId: string; channel: NoticeDeliveryChannel; status: NoticeDeliveryStatus; requestedAt: string; sentAt: string | null; providerMessageId: string | null; lastError: string | null };
+export type AdminNotice = {
+  id: string;
+  category: NoticeCategory;
+  audience: NoticeAudience;
+  status: NoticeStatus;
+  title: string;
+  body: string;
+  summary: string;
+  viewCount: number;
+  publishedAt: string | null;
+  archivedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  createdBy: string | null;
+  updatedBy: string | null;
+  deliveryIntents: NoticeDeliveryIntent[];
+};
 
 export type Dashboard = {
   session: ActiveSession;
@@ -284,7 +307,7 @@ export type DiagnosisListItem = Pick<Diagnosis, "id" | "batteryId" | "batteryLab
   summary?: Record<string, number | string | null> | null;
 };
 
-export type AdminOverview = { users: number; batteries: number; activeSessions: number; blockedBatteries: number; relayOpen: number };
+export type AdminOverview = { users: number; batteries: number; activeSessions: number; blockedBatteries: number; relayOpen: number; recentNotices?: NoticeSummary[] };
 export type AuditEntry = { id: string; actorId: string | null; actorName?: string; action: string; resource: string; result: string; reason: string | null; at: string; before?: unknown; after?: unknown };
 
 export type WsEnvelope<T = unknown> = {
@@ -307,4 +330,4 @@ export type ErrorCode =
   | "VERSION_CONFLICT" | "REAUTH_REQUIRED" | "INTERLOCK_LOCKED" | "MODE_NOT_SUPPORTED" | "SAFETY_PROFILE_NOT_READY"
   | "DIAGNOSIS_IN_PROGRESS" | "NO_DIAGNOSIS_IN_PROGRESS" | "ACK_REQUIRED" | "FULL_CHARGE_REQUIRED" | "IDEMPOTENCY_CONFLICT"
   | "BATTERY_NAME_REQUIRED" | "CAPACITY_REQUIRED" | "RATED_CURRENT_REQUIRED"
-  | "CAPACITY_NOT_REGISTERED" | "RELAY_CUT" | "RUNTIME_NOT_READY" | "UNKNOWN";
+  | "CAPACITY_NOT_REGISTERED" | "NOTICE_NOT_DELETABLE" | "RELAY_CUT" | "RUNTIME_NOT_READY" | "UNKNOWN";

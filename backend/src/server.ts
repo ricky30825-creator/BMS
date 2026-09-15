@@ -50,7 +50,15 @@ import {
   idempotent,
   latestAnomaly,
   anomalyScoresForBattery,
+  adminNoticeById,
+  adminNotices,
+  archiveNotice,
   mode1Health,
+  createNotice,
+  deleteNotice,
+  noticeForUser,
+  noticeDeliveryIntents,
+  publishedNotices,
   recordAudit,
   relayByBattery,
   rememberIdempotency,
@@ -58,12 +66,13 @@ import {
   startDiagnosis,
   startSession,
   sessionsForBattery,
+  updateNotice,
   users,
   updateBattery,
   userById
 } from "./store.js";
 import { closeStore, initializeStore } from "./store.js";
-import type { DemoBattery, DemoRelay } from "./store.js";
+import type { AdminNotice, CreateNoticeInput, DemoBattery, DemoRelay, NoticeCategory, NoticeDeliveryChannel, NoticeStatus, UpdateNoticeInput } from "./store.js";
 
 const app = express();
 const httpServer = createServer(app);
@@ -196,12 +205,6 @@ async function batteryJson(battery: Awaited<ReturnType<typeof batteryById>>) {
   };
 }
 
-const demoNotices = [
-  { id: "notice-maintenance", category: "MAINTENANCE", title: "7월 정기 서버 점검 (무중단)", summary: "WebSocket 순단이 발생할 수 있으나 자동 재연결됩니다.", body: "7/7 00:00~04:00 인프라 점검이 진행됩니다. WebSocket 순단이 발생할 수 있으나 자동 재연결되며, 측정 데이터는 버퍼링 후 복원됩니다.", publishedAt: "2026-07-01T00:00:00.000Z", status: "PUBLISHED", views: 892 },
-  { id: "notice-feature", category: "FEATURE", title: "이상 근거(XAI) 패널 정식 오픈", summary: "이상점수 상승에 기여한 특징을 확인할 수 있습니다.", body: "이상 탐지 화면에서 서버가 제공하는 기여 요인을 확인할 수 있습니다.", publishedAt: "2026-06-28T00:00:00.000Z", status: "PUBLISHED", views: 614 },
-  { id: "notice-info", category: "INFO", title: "모드 2 진단 안전 프로필 안내", summary: "실측 전까지 보조배터리 진단은 실행 잠금 상태입니다.", body: "현재 연결 부품 프로필은 안전 문턱과 연속 감시가 준비되지 않아 F21 진단을 실행할 수 없습니다.", publishedAt: "2026-06-20T00:00:00.000Z", status: "PUBLISHED", views: 431 }
-] as const;
-
 async function sessionJson(session: NonNullable<Awaited<ReturnType<typeof activeSession>>>) {
   const battery = await batteryById(session.batteryId);
   return {
@@ -261,7 +264,7 @@ async function dashboardJson(session: NonNullable<Awaited<ReturnType<typeof acti
     metrics: await dashboardMetrics(battery),
     anomaly: await anomalyJson(battery),
     relay: await relayJson(battery.id),
-    notices: demoNotices.slice(0, 3).map(({ body: _body, status: _status, views: _views, ...notice }) => notice),
+    notices: await publishedNotices({ limit: 3 }),
     quickTrend: await quickTrend(battery, metricName),
     sync: { streamId: wsStreamId, snapshotCursor, asOf: new Date().toISOString() },
     snapshotCursor
@@ -272,6 +275,87 @@ function pageEnvelope<T>(items: T[], page = 1, size = 20) {
   const offset = Math.max(0, (page - 1) * size);
   const paged = items.slice(offset, offset + size);
   return { items: paged, page: { number: page, size, total: items.length, totalPages: items.length ? Math.ceil(items.length / size) : 0 } };
+}
+
+const NOTICE_CATEGORIES = new Set<NoticeCategory>(["IMPORTANT", "MAINTENANCE", "FEATURE", "INFO"]);
+const NOTICE_STATUSES = new Set<NoticeStatus>(["DRAFT", "PUBLISHED", "ARCHIVED"]);
+const NOTICE_AUDIENCES = new Set(["ALL", "USER", "ADMIN"]);
+const NOTICE_CHANNELS = new Set<NoticeDeliveryChannel>(["KAKAO", "EMAIL", "SMS", "WEBPUSH", "INAPP"]);
+
+function parseNoticeListQuery(req: Request, admin = false): { category?: NoticeCategory; status?: NoticeStatus } | null {
+  const category = req.query.category;
+  const status = req.query.status;
+  if (category !== undefined && (typeof category !== "string" || !NOTICE_CATEGORIES.has(category as NoticeCategory))) return null;
+  if (admin && status !== undefined && (typeof status !== "string" || !NOTICE_STATUSES.has(status as NoticeStatus))) return null;
+  return {
+    ...(typeof category === "string" ? { category: category as NoticeCategory } : {}),
+    ...(admin && typeof status === "string" ? { status: status as NoticeStatus } : {}),
+  };
+}
+
+function noticePage(req: Request): { page: number; size: number } | null {
+  const page = req.query.page === undefined ? 1 : Number(req.query.page);
+  const size = req.query.size === undefined ? 20 : Number(req.query.size);
+  if (!Number.isInteger(page) || page < 1 || !Number.isInteger(size) || size < 1 || size > 100) return null;
+  return { page, size };
+}
+
+function parseNoticeChannels(value: unknown): NoticeDeliveryChannel[] | null {
+  if (!Array.isArray(value) || value.some((channel) => typeof channel !== "string" || !NOTICE_CHANNELS.has(channel as NoticeDeliveryChannel))) return null;
+  return [...new Set(value as NoticeDeliveryChannel[])];
+}
+
+function noticeMutationBody(req: Request, partial: boolean): { value: Record<string, unknown> } | { error: string } {
+  if (!isRecord(req.body)) return { error: "body must be an object" };
+  const body = req.body;
+  const allowed = new Set(["category", "audience", "title", "body", "status", "notifyChannels", "notifyOnPublish"]);
+  if (Object.keys(body).some((key) => !allowed.has(key))) return { error: "unknown field" };
+  if (!partial && (typeof body.category !== "string" || typeof body.audience !== "string" || typeof body.title !== "string" || typeof body.body !== "string")) {
+    return { error: "category, audience, title and body are required" };
+  }
+  if (body.category !== undefined && (typeof body.category !== "string" || !NOTICE_CATEGORIES.has(body.category as NoticeCategory))) return { error: "invalid category" };
+  if (body.audience !== undefined && (typeof body.audience !== "string" || !NOTICE_AUDIENCES.has(body.audience))) return { error: "invalid audience" };
+  if (body.status !== undefined && (typeof body.status !== "string" || !NOTICE_STATUSES.has(body.status as NoticeStatus))) return { error: "invalid status" };
+  if (body.title !== undefined && typeof body.title !== "string") return { error: "title must be a string" };
+  if (body.body !== undefined && typeof body.body !== "string") return { error: "body must be a string" };
+  if (body.notifyChannels !== undefined && parseNoticeChannels(body.notifyChannels) === null) return { error: "invalid notifyChannels" };
+  if (body.notifyOnPublish !== undefined && typeof body.notifyOnPublish !== "boolean") return { error: "notifyOnPublish must be boolean" };
+  if (body.notifyChannels !== undefined && body.notifyOnPublish !== undefined) return { error: "choose notifyChannels or notifyOnPublish" };
+  const channels = body.notifyChannels !== undefined
+    ? parseNoticeChannels(body.notifyChannels)!
+    : body.notifyOnPublish === true
+      ? ["WEBPUSH", "KAKAO"] as NoticeDeliveryChannel[]
+      : body.notifyOnPublish === false
+        ? []
+        : undefined;
+  const value: Record<string, unknown> = { ...body };
+  delete value.notifyOnPublish;
+  if (channels !== undefined) value.notifyChannels = channels;
+  return { value };
+}
+
+function adminNoticeListItem(notice: AdminNotice): Record<string, unknown> {
+  return {
+    id: notice.id,
+    category: notice.category,
+    audience: notice.audience,
+    title: notice.title,
+    summary: notice.summary,
+    status: notice.status,
+    viewCount: notice.viewCount,
+    publishedAt: notice.publishedAt,
+    archivedAt: notice.archivedAt,
+  };
+}
+
+function adminNoticeRecentItem(notice: AdminNotice): Record<string, unknown> {
+  return {
+    id: notice.id,
+    category: notice.category,
+    title: notice.title,
+    summary: notice.summary,
+    publishedAt: notice.publishedAt,
+  };
 }
 
 async function ownerBatteries(req: Request): Promise<Awaited<ReturnType<typeof batteries>>> {
@@ -309,6 +393,7 @@ function errorFromDomain(res: Response, error: unknown): void {
     BATTERY_NAME_REQUIRED: [422, "BATTERY_NAME_REQUIRED"],
     CAPACITY_REQUIRED: [422, "CAPACITY_REQUIRED"],
     CAPACITY_NOT_REGISTERED: [409, "CAPACITY_NOT_REGISTERED"],
+    NOTICE_NOT_DELETABLE: [409, "NOTICE_NOT_DELETABLE"],
     RELAY_CUT: [409, "RELAY_CUT"],
     DEVICE_OFFLINE: [409, "DEVICE_OFFLINE"],
     RATED_CURRENT_REQUIRED: [422, "RATED_CURRENT_REQUIRED"],
@@ -806,25 +891,88 @@ app.post("/api/alerts/:id/ack", requireSession, (req, res) => {
   res.json(alertJson(alert));
 });
 
-app.get("/api/notices", requireSession, (req, res) => {
-  const category = typeof req.query.category === "string" ? req.query.category : null;
-  const items = demoNotices.filter((notice) => !category || notice.category === category).map(({ body: _body, status: _status, views: _views, ...notice }) => notice);
-  res.json(pageEnvelope(items, Number(req.query.page) || 1, Number(req.query.size) || 20));
-});
+app.get("/api/notices", requireSession, asyncRoute(async (req, res) => {
+  const query = parseNoticeListQuery(req);
+  const paging = noticePage(req);
+  if (!query || !paging) { apiError(res, 400, "VALIDATION_FAILED", "Invalid notice list query."); return; }
+  const items = await publishedNotices({ ...query });
+  res.json(pageEnvelope(items, paging.page, paging.size));
+}));
 
-app.get("/api/notices/:id", requireSession, (req, res) => {
-  const notice = demoNotices.find((item) => item.id === req.params.id);
+app.get("/api/notices/:id", requireSession, asyncRoute(async (req, res) => {
+  const notice = await noticeForUser(req.params.id, actorId(req));
   if (!notice) { apiError(res, 404, "NOT_FOUND", "Notice was not found."); return; }
+  // Keep the public detail contract free of administrative fields and view
+  // counts. The store has already performed the visibility check and the
+  // transactional 24-hour deduplicated increment.
   res.json({ id: notice.id, category: notice.category, title: notice.title, body: notice.body, publishedAt: notice.publishedAt });
-});
+}));
 
 app.get("/api/admin/event-trend", requireRole("ADMIN"), (_req, res) => {
   res.json({ buckets: ["월", "화", "수", "목", "금", "토", "일"], series: [{ grade: "CAUTION", values: [0, 0, 0, 0, 0, 0, 0] }, { grade: "WARNING", values: [0, 0, 0, 0, 0, 0, 0] }, { grade: "DANGER", values: [0, 0, 0, 0, 0, 0, 0] }] });
 });
 
-app.get("/api/admin/notices", requireRole("ADMIN"), (_req, res) => {
-  res.json({ items: demoNotices.map(({ id, category, title, status, views, publishedAt }) => ({ id, category, title, status, views, publishedAt })) });
-});
+app.get("/api/admin/notices", requireRole("ADMIN"), asyncRoute(async (req, res) => {
+  const query = parseNoticeListQuery(req, true);
+  const paging = noticePage(req);
+  if (!query || !paging) { apiError(res, 400, "VALIDATION_FAILED", "Invalid admin notice list query."); return; }
+  // Fetch the category scope once so the status chips show canonical counts
+  // even while the table is filtered to one lifecycle state. The store still
+  // owns ordering, filtering primitives, and the PostgreSQL query contract.
+  const all = await adminNotices({ category: query.category });
+  const filtered = query.status ? all.filter((notice) => notice.status === query.status) : all;
+  const counts = all.reduce<Record<NoticeStatus, number>>((result, notice) => {
+    result[notice.status] += 1;
+    return result;
+  }, { DRAFT: 0, PUBLISHED: 0, ARCHIVED: 0 });
+  res.json({ ...pageEnvelope(filtered.map(adminNoticeListItem), paging.page, paging.size), counts });
+}));
+
+app.get("/api/admin/notices/:id", requireRole("ADMIN"), asyncRoute(async (req, res) => {
+  const notice = await adminNoticeById(req.params.id);
+  if (!notice) { apiError(res, 404, "NOT_FOUND", "Notice was not found."); return; }
+  res.json(notice);
+}));
+
+app.post("/api/admin/notices", requireRole("ADMIN"), asyncRoute(async (req, res) => {
+  const parsed = noticeMutationBody(req, false);
+  if ("error" in parsed) { apiError(res, 400, "VALIDATION_FAILED", "Invalid notice payload.", { fields: [{ name: "notice", reason: parsed.error }] }); return; }
+  try {
+    const notice = await createNotice(actorId(req), parsed.value as CreateNoticeInput);
+    res.status(201).json({ ...notice, deliveryIntents: await noticeDeliveryIntents(notice.id) });
+  } catch (error) {
+    errorFromDomain(res, error);
+  }
+}));
+
+app.patch("/api/admin/notices/:id", requireRole("ADMIN"), asyncRoute(async (req, res) => {
+  const parsed = noticeMutationBody(req, true);
+  if ("error" in parsed) { apiError(res, 400, "VALIDATION_FAILED", "Invalid notice payload.", { fields: [{ name: "notice", reason: parsed.error }] }); return; }
+  try {
+    const notice = await updateNotice(actorId(req), req.params.id, parsed.value as UpdateNoticeInput);
+    res.json({ ...notice, deliveryIntents: await noticeDeliveryIntents(notice.id) });
+  } catch (error) {
+    errorFromDomain(res, error);
+  }
+}));
+
+app.post("/api/admin/notices/:id/archive", requireRole("ADMIN"), asyncRoute(async (req, res) => {
+  try {
+    const notice = await archiveNotice(actorId(req), req.params.id);
+    res.json(notice);
+  } catch (error) {
+    errorFromDomain(res, error);
+  }
+}));
+
+app.delete("/api/admin/notices/:id", requireRole("ADMIN"), asyncRoute(async (req, res) => {
+  try {
+    await deleteNotice(actorId(req), req.params.id);
+    res.status(204).send();
+  } catch (error) {
+    errorFromDomain(res, error);
+  }
+}));
 
 app.get("/api/admin/users", requireRole("ADMIN"), asyncRoute(async (req, res) => {
   const q = typeof req.query.q === "string" ? req.query.q.toLowerCase() : "";
@@ -922,7 +1070,8 @@ app.get("/api/admin/overview", requireRole("ADMIN"), asyncRoute(async (_req, res
   const allBatteries = await batteries();
   const session = await activeSession();
   const relays = await Promise.all(allBatteries.map((item) => relayByBattery(item.id)));
-  res.json({ users: allUsers.length, batteries: allBatteries.length, activeSessions: session ? 1 : 0, blockedBatteries: allBatteries.filter((item) => item.opsStatus === "BLOCKED").length, relayOpen: relays.filter((relay) => relay.state === "OPEN").length });
+  const recentNotices = (await adminNotices({ status: "PUBLISHED", limit: 3 })).map(adminNoticeRecentItem);
+  res.json({ users: allUsers.length, batteries: allBatteries.length, activeSessions: session ? 1 : 0, blockedBatteries: allBatteries.filter((item) => item.opsStatus === "BLOCKED").length, relayOpen: relays.filter((relay) => relay.state === "OPEN").length, recentNotices });
 }));
 
 app.get("/api/relay/history", requireSession, asyncRoute(async (req, res) => {
