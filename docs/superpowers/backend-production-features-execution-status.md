@@ -75,17 +75,17 @@
 
 ## Task 4 — 관리자 이벤트 추세
 
-- 현재 상태: `IN_PROGRESS`
+- 현재 상태: `REVIEW_REQUIRED`
 - 담당 에이전트: `/root/task4_event_trend`
 - 기준 커밋: `5f9b488`
-- 결과 커밋: 미정
-- 변경 파일: 미정
-- 구현 결과: 관리자 이벤트 추세 API/화면 연결 진행 중
-- 부모 검토 결과: 대기
-- 서브에이전트 테스트: 미실행
+- 결과 커밋: `5b659f8`
+- 변경 파일: backend event trend route/helper/tests, frontend admin page/hooks/types/MSW/tests/E2E/styles, `docs/backend_contract.md`
+- 구현 결과: 영속 store 기반 event-trend API, period 검증, 관리자 요약/기간/ISO locale chart, 고정 응답 제거
+- 부모 검토 결과: 검토 대기
+- 서브에이전트 테스트: backend typecheck 및 326 passed/1 skipped, frontend typecheck/build 및 79 passed, event-trend Playwright 통과, `git diff --check` 통과
 - 부모 독립 테스트: 미실행
 - 실환경 검증 여부: 미실행
-- 남은 문제 또는 외부 차단 조건: 없음
+- 남은 문제 또는 외부 차단 조건: 부모 독립 검토 필요; 실제 PostgreSQL roundtrip 미검증
 
 ## Task 5 — 추세 PDF
 
