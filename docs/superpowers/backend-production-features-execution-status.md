@@ -61,27 +61,27 @@
 
 ## Task 3 — 공지사항 실제 구현
 
-- 현재 상태: `REVIEW_REQUIRED`
+- 현재 상태: `COMPLETE`
 - 담당 에이전트: `/root/task3_notices_fix` (최초 구현 `/root/task3_notices`)
 - 기준 커밋: `200856f`
 - 결과 커밋: `e765546`, 수정 `64a8ec7`
 - 변경 파일: `backend/migrations/011_notices.sql`, backend store/server/tests/docs, frontend hooks/types/admin pages/MSW/E2E
 - 구현 결과: 공지 상태/audience CRUD, 24시간 조회 dedupe, 변경 감사, delivery intent 차단 상태, 사용자·관리자 dashboard/API/UI 연결; ARCHIVED 직접 생성과 no-op PATCH 입력 결함 수정
-- 부모 검토 결과: 수정 결과 재검토 대기
+- 부모 검토 결과: 통과 — migration, memory/PostgreSQL transaction, API RBAC/validation, dashboard 재사용, 관리자 UI와 MSW 경계를 직접 검토함
 - 서브에이전트 테스트: 수정 후 backend 323 passed/1 skipped, frontend typecheck 및 77 passed, `git diff --check` 통과; 최초 구현에서 양쪽 build와 Chromium Playwright 27 passed
-- 부모 독립 테스트: 미실행
-- 실환경 검증 여부: 미실행
-- 남은 문제 또는 외부 차단 조건: 부모 독립 검토 필요; 실제 PostgreSQL/Docker와 Kakao/WebPush provider·자격증명 부재
+- 부모 독립 테스트: backend typecheck/build 및 Vitest 323 passed/1 skipped, frontend typecheck/build 및 Vitest 77 passed, Playwright 31 passed, 전체 `git diff --check` 통과
+- 실환경 검증 여부: memory/API 단위와 MSW 브라우저 검증 완료; 실 PostgreSQL 미검증
+- 남은 문제 또는 외부 차단 조건: 외부 발송 하위 항목 `EXTERNALLY_BLOCKED` — Kakao/WebPush provider·자격증명 부재; 실제 PostgreSQL 동시성은 Task 8 환경 확인 대상
 
 ## Task 4 — 관리자 이벤트 추세
 
-- 현재 상태: `PENDING`
-- 담당 에이전트: 미배정
-- 기준 커밋: 미정
+- 현재 상태: `IN_PROGRESS`
+- 담당 에이전트: `/root/task4_event_trend`
+- 기준 커밋: `5f9b488`
 - 결과 커밋: 미정
 - 변경 파일: 미정
-- 구현 결과: 미착수
-- 부모 검토 결과: 미착수
+- 구현 결과: 관리자 이벤트 추세 API/화면 연결 진행 중
+- 부모 검토 결과: 대기
 - 서브에이전트 테스트: 미실행
 - 부모 독립 테스트: 미실행
 - 실환경 검증 여부: 미실행
