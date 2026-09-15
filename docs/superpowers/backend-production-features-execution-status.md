@@ -61,13 +61,13 @@
 
 ## Task 3 — 공지사항 실제 구현
 
-- 현재 상태: `REVIEW_REQUIRED`
-- 담당 에이전트: `/root/task3_notices`
+- 현재 상태: `IN_PROGRESS`
+- 담당 에이전트: `/root/task3_notices_fix` (최초 구현 `/root/task3_notices`)
 - 기준 커밋: `200856f`
 - 결과 커밋: `e765546`
 - 변경 파일: `backend/migrations/011_notices.sql`, backend store/server/tests/docs, frontend hooks/types/admin pages/MSW/E2E
 - 구현 결과: 공지 상태/audience CRUD, 24시간 조회 dedupe, 변경 감사, delivery intent 차단 상태, 사용자·관리자 dashboard/API/UI 연결
-- 부모 검토 결과: 검토 대기
+- 부모 검토 결과: 결함 발견 — direct `ARCHIVED` create가 memory/PostgreSQL에서 다르게 실패하고, 빈 PATCH가 변경 없는 감사 로그를 생성할 수 있음
 - 서브에이전트 테스트: backend 318 passed/1 skipped, frontend 77 passed, 양쪽 typecheck/build 통과, Chromium Playwright 27 passed, `git diff --check` 통과
 - 부모 독립 테스트: 미실행
 - 실환경 검증 여부: 미실행
