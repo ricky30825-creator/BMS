@@ -126,6 +126,35 @@
 .dashboard-trend-card .card-title-row { align-items: center; }
 .dashboard-trend-card .card-title-row > span { color: var(--fg-muted); font-size: 11px; white-space: nowrap; }
 .dashboard-trend-card .metric-selector { max-width: 100%; margin: 12px 0 8px; }
+.dashboard-trend-controls { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 10px; }
+.dashboard-trend-controls .metric-selector { min-width: 0; margin: 12px 0 8px; overflow-x: auto; }
+.dashboard-trend-action-row { display: flex; align-items: center; justify-content: flex-end; }
+.trend-pause-toggle { min-height: 38px; display: inline-flex; align-items: center; gap: 7px; padding: 7px 11px; white-space: nowrap; }
+.dashboard-trend-plot { min-width: 0; }
+.connection-progress-content { display: grid; justify-items: center; gap: 14px; min-height: 118px; padding: 8px 4px; text-align: center; }
+.connection-progress-content > p { max-width: 38ch; color: var(--fg-muted); line-height: 1.65; }
+.connection-progress-content > .form-error { color: var(--danger); }
+.connection-progress-content .modal-actions { width: 100%; flex-wrap: wrap; }
+.connection-progress-content .modal-actions > .button { flex: 1 1 auto; }
+.connection-progress-icon { width: 48px; height: 48px; display: grid; place-items: center; border-radius: 14px; color: var(--primary); background: var(--primary-soft); }
+.connection-progress-icon.phase-confirmed { color: var(--grade-normal); background: var(--grade-normal-bg); }
+.connection-progress-icon.phase-error { color: var(--danger); background: var(--grade-danger-bg); }
+.diagnosis-confidence-note { display: flex; align-items: flex-start; gap: 10px; padding: 12px; border-radius: var(--radius-md); color: var(--grade-warning); background: var(--grade-warning-bg); }
+.diagnosis-confidence-note > svg { flex: 0 0 auto; margin-top: 1px; }
+.diagnosis-confidence-note p { color: inherit; font-size: 12px; line-height: 1.6; }
+.diagnosis-source-note { color: var(--fg-muted); font-size: 11px; }
+.diagnosis-degradation-hero, .diagnosis-terminal-error { display: flex; align-items: flex-start; gap: 14px; padding: 16px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface-sunken); }
+.diagnosis-degradation-hero > div, .diagnosis-terminal-error > div { display: grid; gap: 5px; min-width: 0; }
+.diagnosis-degradation-hero small, .diagnosis-terminal-error small { color: var(--fg-muted); }
+.diagnosis-degradation-hero h3, .diagnosis-terminal-error h3 { font-size: 18px; }
+.diagnosis-degradation-hero p, .diagnosis-terminal-error p { color: var(--fg-muted); font-size: 12px; line-height: 1.6; }
+.diagnosis-terminal-icon { width: 48px; height: 48px; display: grid; flex: 0 0 auto; place-items: center; border-radius: 14px; }
+.degradation-healthy { border-color: color-mix(in srgb, var(--grade-normal) 32%, var(--border)); }.degradation-healthy .diagnosis-terminal-icon { color: var(--grade-normal); background: var(--grade-normal-bg); }
+.degradation-caution { border-color: color-mix(in srgb, var(--grade-caution) 32%, var(--border)); }.degradation-caution .diagnosis-terminal-icon { color: var(--grade-caution); background: var(--grade-caution-bg); }
+.degradation-suspect_degraded { border-color: color-mix(in srgb, var(--danger) 32%, var(--border)); }.degradation-suspect_degraded .diagnosis-terminal-icon { color: var(--danger); background: var(--grade-danger-bg); }
+.degradation-baseline_pending { border-color: color-mix(in srgb, var(--primary) 32%, var(--border)); }.degradation-baseline_pending .diagnosis-terminal-icon { color: var(--primary); background: var(--primary-soft); }
+.diagnosis-terminal-error { border-color: color-mix(in srgb, var(--danger) 32%, var(--border)); }
+.diagnosis-terminal-error .diagnosis-terminal-icon { color: var(--danger); background: var(--grade-danger-bg); }
 
 @media (min-width: 1024px) {
   .sidebar.collapsed ~ .main-column { margin-left: 108px; }
@@ -170,8 +199,11 @@
   .dashboard-metric-card:nth-child(odd) { border-left: 0; }
   .dashboard-metric-card:nth-child(n + 3) { border-top: 1px solid var(--border); }
   .dashboard-trend-card .card-title-row { flex-wrap: wrap; }
+  .dashboard-trend-controls { grid-template-columns: minmax(0, 1fr); gap: 0; }
   .dashboard-trend-card .metric-selector { width: 100%; overflow-x: auto; }
   .dashboard-trend-card .metric-selector button { min-width: 64px; flex: 1; }
+  .dashboard-trend-action-row { justify-content: flex-start; }
+  .connection-progress-content .modal-actions { align-items: stretch; flex-direction: column-reverse; }
 }
 
 @media (max-width: 480px) {

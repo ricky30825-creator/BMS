@@ -35,13 +35,13 @@ async function connectBattery(page: Page, label: string, measuring = true) {
   const dialog = page.getByRole("dialog", { name: `${label}을(를) 측정할까요?` });
   await expect(dialog).toBeVisible();
   await dialog.getByRole("button", { name: "연결하고 측정" }).click();
+  await expect(page.getByRole("dialog", { name: new RegExp(`연결 진행 · ${label}`) })).toBeVisible();
   await expect(page).toHaveURL(/\/battery$/);
   if (!measuring) return;
   const batteryId = ({ "PACK-001": "b_pack_001", "PACK-002": "b_pack_002", "PACK-003": "b_pack_003", "PACK-004": "b_pack_004" } as Record<string, string>)[label];
   if (!batteryId) throw new Error(`no test battery id for ${label}`);
   await markSensorFrame(page, batteryId);
-  await expect(page.locator(".connection-pill")).toHaveText("연결됨 · 측정 중");
-  await page.locator("aside").getByRole("button", { name: /대시보드/ }).click();
+  await expect(page.getByRole("dialog", { name: new RegExp(`연결 확인 · ${label}`) })).toBeVisible();
   await expect(page).toHaveURL(/\/dashboard$/);
 }
 
@@ -97,6 +97,147 @@ test.describe("CellGuard contract flows (MSW)", () => {
       "GET /api/batteries/b_pack_004/diagnoses",
       "POST /api/diagnosis/quick",
     ]));
+  });
+
+  test("keeps WAITING locked, reports a failed request, and retries", async ({ page }) => {
+    await signIn(page, "hong@cellguard.io");
+    await page.evaluate(() => fetch("/api/__test/fault", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ fault: "session-start-failed" }) }));
+    const card = page.locator("section.battery-card").filter({ hasText: "PACK-004" });
+    await card.getByRole("button", { name: "연결하고 측정" }).click();
+    await page.getByRole("dialog", { name: "PACK-004을(를) 측정할까요?" }).getByRole("button", { name: "연결하고 측정" }).click();
+    const failed = page.getByRole("dialog", { name: "연결 실패 · PACK-004" });
+    await expect(failed).toBeVisible();
+    await expect(failed).toContainText("진단기가 오프라인");
+    await page.evaluate(() => fetch("/api/__test/fault", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ fault: null }) }));
+    await failed.getByRole("button", { name: "다시 연결 요청" }).click();
+    const waiting = page.getByRole("dialog", { name: "연결 진행 · PACK-004" });
+    await expect(waiting).toContainText("첫 신선 센서 프레임을 기다리는 중");
+    await expect(page).toHaveURL(/\/battery$/);
+    await expect(page.locator("aside").getByRole("button", { name: /대시보드/ })).toHaveAttribute("aria-disabled", "true");
+    await markSensorFrame(page, "b_pack_004");
+    await expect(page.getByRole("dialog", { name: "연결 확인 · PACK-004" })).toBeVisible();
+    await expect(page).toHaveURL(/\/dashboard$/);
+  });
+
+  test("opens grade-specific final results once and keeps FAILED separate", async ({ page }) => {
+    await signIn(page, "hong@cellguard.io");
+    await connectBattery(page, "PACK-004");
+    await page.locator("aside").getByRole("button", { name: "보조배터리 진단" }).click();
+    const cases = [
+      { id: "dg_e2e_healthy", grade: "HEALTHY", title: "빠른 진단 완료 · 양호" },
+      { id: "dg_e2e_caution", grade: "CAUTION", title: "빠른 진단 완료 · 주의" },
+      { id: "dg_e2e_degraded", grade: "SUSPECT_DEGRADED", title: "빠른 진단 완료 · 열화 의심" },
+      { id: "dg_e2e_baseline", grade: "BASELINE_PENDING", title: "빠른 진단 완료 · 기준선 수집 중" },
+    ] as const;
+    await page.evaluate((diagnosisCases) => {
+      const originalFetch = window.fetch.bind(window);
+      const details = new Map(diagnosisCases.map(({ id, grade }) => [id, { id, batteryId: "b_pack_004", batteryLabel: "PACK-004", sessionId: "s-e2e", kind: "QUICK", status: "COMPLETED", confidence: "LOW", startedAt: "2026-09-16T00:00:00.000Z", measuredAt: "2026-09-16T00:02:00.000Z", socHintLevel: 3, dataSource: "MEASURED", quick: { regulationKneeA: 1.6, kneeIsUpperBound: false, thermalSlopeCPerMin: 2.4, specAttainmentPct: 80, grade }, capacity: null }]));
+      details.set("dg_e2e_failed", { id: "dg_e2e_failed", batteryId: "b_pack_004", batteryLabel: "PACK-004", sessionId: "s-e2e", kind: "QUICK", status: "FAILED", confidence: null, startedAt: "2026-09-16T00:00:00.000Z", measuredAt: "2026-09-16T00:02:00.000Z", socHintLevel: null, dataSource: "MEASURED", quick: null, capacity: null });
+      const state = window as unknown as { __diagnosisDetailRequests: Record<string, number> };
+      state.__diagnosisDetailRequests = {};
+      window.fetch = async (input, init) => {
+        const request = input instanceof Request ? input : null;
+        const url = new URL(request?.url ?? String(input), window.location.origin);
+        const method = init?.method ?? request?.method ?? "GET";
+        const id = url.pathname.match(/^\/api\/diagnoses\/([^/]+)$/)?.[1];
+        const diagnosis = id ? details.get(id) : undefined;
+        if (method === "GET" && id && diagnosis) {
+          state.__diagnosisDetailRequests[id] = (state.__diagnosisDetailRequests[id] ?? 0) + 1;
+          return new Response(JSON.stringify(diagnosis), { status: 200, headers: { "Content-Type": "application/json" } });
+        }
+        return originalFetch(input, init);
+      };
+    }, cases);
+
+    for (const [index, diagnosisCase] of cases.entries()) {
+      await page.evaluate(async ({ id, duplicate }) => {
+        const [{ queryClient }, { applyDiagnosisRealtimeEvent }] = await Promise.all([import("/src/queryClient.ts"), import("/src/realtime/useRealtime.ts")]);
+        const payload = { id, status: "COMPLETED", kind: "QUICK" } as const;
+        applyDiagnosisRealtimeEvent(queryClient, "diagnosis.done", payload);
+        if (duplicate) applyDiagnosisRealtimeEvent(queryClient, "diagnosis.done", payload);
+      }, { id: diagnosisCase.id, duplicate: index === 0 });
+      const result = page.getByRole("dialog", { name: "진단 최종 결과" });
+      await expect(result).toBeVisible();
+      await expect(result.getByText(diagnosisCase.title)).toBeVisible();
+      await expect(result.locator(`[data-degradation-grade="${diagnosisCase.grade}"]`)).toBeVisible();
+      await expect(result).toContainText("최종 열화 판정");
+      await expect(result).toContainText("레귤레이션 이탈 전류");
+      await expect(result).toContainText("발열 기울기");
+      await expect(result).toContainText("스펙 도달률");
+      await expect(page.getByRole("dialog")).toHaveCount(1);
+      await result.getByRole("button", { name: "닫기" }).click();
+    }
+    await expect.poll(() => page.evaluate(() => (window as unknown as { __diagnosisDetailRequests: Record<string, number> }).__diagnosisDetailRequests)).toEqual({
+      dg_e2e_healthy: 1,
+      dg_e2e_caution: 1,
+      dg_e2e_degraded: 1,
+      dg_e2e_baseline: 1,
+    });
+
+    await page.evaluate(async () => {
+      const [{ queryClient }, { announceDiagnosisCompletion }] = await Promise.all([import("/src/queryClient.ts"), import("/src/api/diagnosis.ts")]);
+      announceDiagnosisCompletion(queryClient, "dg_e2e_failed", "poll");
+    });
+    const failed = page.getByRole("dialog", { name: "진단 실패 안내" });
+    await expect(failed).toBeVisible();
+    await expect(failed).toContainText("원인");
+    await expect(failed).toContainText("다음 조치");
+    await expect(page.getByRole("dialog", { name: "진단 최종 결과" })).toHaveCount(0);
+  });
+
+  test("shows user abort as an error popup, never as a completion result", async ({ page }) => {
+    await signIn(page, "hong@cellguard.io");
+    await connectBattery(page, "PACK-004");
+    await page.locator("aside").getByRole("button", { name: "보조배터리 진단" }).click();
+    await page.getByLabel("진단 중 이상 알림은 억제되지만 Fail-Safe 자동 차단은 항상 우선함을 확인했습니다.").check();
+    await page.getByRole("button", { name: "빠른 진단 시작" }).click();
+    await expect(page.getByRole("heading", { name: "진단 진행 중" })).toBeVisible();
+    await page.getByRole("button", { name: "진단 중단" }).click();
+    const aborted = page.getByRole("dialog", { name: "진단 중단 안내" });
+    await expect(aborted).toBeVisible();
+    await expect(aborted).toContainText("사용자 중단");
+    await expect(aborted).toContainText("다음 조치");
+    await expect(page.getByRole("dialog", { name: "진단 최종 결과" })).toHaveCount(0);
+  });
+
+  test("freezes only the dashboard chart and catches up on resume", async ({ page }) => {
+    await signIn(page, "hong@cellguard.io");
+    await connectBattery(page, "PACK-004");
+    await page.evaluate(async () => {
+      const originalFetch = window.fetch.bind(window);
+      const base = await originalFetch("/api/dashboard").then((response) => response.json()) as Record<string, unknown> & { metrics: Record<string, unknown> };
+      const state = window as unknown as { __dashboardTrendValue: number };
+      state.__dashboardTrendValue = 31.2;
+      window.fetch = async (input, init) => {
+        const request = input instanceof Request ? input : null;
+        const url = new URL(request?.url ?? String(input), window.location.origin);
+        const method = init?.method ?? request?.method ?? "GET";
+        if (method === "GET" && url.pathname === "/api/dashboard") {
+          const value = state.__dashboardTrendValue;
+          const pointAt = new Date(Date.now() + 1_000).toISOString();
+          return new Response(JSON.stringify({
+            ...base,
+            metrics: { ...base.metrics, representativeTempC: { value, source: "CONTACT", status: "OK" } },
+            quickTrend: { metric: "temp", points: [
+              { at: new Date(Date.now()).toISOString(), value: 31.2 },
+              { at: pointAt, value },
+            ] },
+          }), { status: 200, headers: { "Content-Type": "application/json" } });
+        }
+        return originalFetch(input, init);
+      };
+    });
+
+    const temperatureCard = page.locator(".dashboard-metric-card.temp");
+    await temperatureCard.click();
+    await expect(page.getByRole("group", { name: /마지막 표시값 31.2 °C/ })).toBeVisible();
+    await page.getByRole("button", { name: "차트 일시 정지" }).click();
+    await expect(page.getByRole("status")).toContainText("실시간 측정은 계속 수신 중입니다.");
+    await page.evaluate(() => { (window as unknown as { __dashboardTrendValue: number }).__dashboardTrendValue = 38.8; });
+    await temperatureCard.click();
+    await expect(page.getByRole("group", { name: /마지막 표시값 31.2 °C/ })).toBeVisible();
+    await page.getByRole("button", { name: "실시간 이어보기" }).click();
+    await expect(page.getByRole("group", { name: /마지막 표시값 38.8 °C/ })).toBeVisible();
   });
 
   test("renders PostgreSQL-shaped event trends and switches period buckets", async ({ page }) => {

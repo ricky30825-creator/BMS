@@ -1,19 +1,19 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { AlertTriangle, ArrowDown, ArrowUp, BarChart3, BatteryCharging, Check, Clock, Download, FileText, LockKeyhole, Pause, Play, RefreshCw, ShieldAlert, Thermometer, TrendingUp, WifiOff, X } from "lucide-react";
-import { useQuery } from "@tanstack/react-query";
+import { AlertTriangle, ArrowDown, ArrowUp, BarChart3, BatteryCharging, Check, CircleCheckBig, Clock, Download, FileText, Gauge, Info, LoaderCircle, LockKeyhole, Pause, Play, RefreshCw, ShieldAlert, Thermometer, TrendingUp, WifiOff, X } from "lucide-react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "react-router-dom";
 import { api, ApiError } from "../api/client";
-import { buildCapacityDiagnosisBody, buildQuickDiagnosisBody, type SocHintLevel } from "../api/diagnosis";
+import { announceDiagnosisCompletion, buildCapacityDiagnosisBody, buildQuickDiagnosisBody, diagnosisCompletionIdsFromPoll, type DiagnosisCompletionNotice, type SocHintLevel } from "../api/diagnosis";
 import { abortReasonLabel, capabilityLock, gradeLabel, progressPct, statusLabel } from "../api/diagnosisLabels";
 import { dashboardMetricKey, dashboardMetricParam, normalizeBattery, type DashboardMetricKey, type DashboardMetricParam } from "../api/normalize";
 import { rightAlignTrend } from "../dashboardTrend";
-import { useAckAlert, useAckAll, useActiveDiagnosis, useAnomalySummary, useBattery, useBatteries, useCreateBattery, useDashboard, useDiagnosisDetail, useDiagnosisHistory, useDiagnosisStart, useDiagnosisStop, useEvidence, useEvents, useNotices, useRelay, useRelayHistory, useRelayMutation, useStartSession, useTrends, useUpdateBattery, useAlertSummary, useAlerts } from "../api/hooks";
+import { useAckAlert, useAckAll, useActiveDiagnosis, useAnomalySummary, useBattery, useBatteries, useCreateBattery, useDashboard, useDiagnosisDetail, useDiagnosisHistory, useDiagnosisStart, useDiagnosisStop, useEvidence, useEvents, useMe, useNotices, useRelay, useRelayHistory, useRelayMutation, useStartSession, useTrends, useUpdateBattery, useAlertSummary, useAlerts } from "../api/hooks";
 import { isMeasuringSession, measurementPhaseLabel } from "../measurementState";
 import { useRealtime, type RealtimeState } from "../realtime/useRealtime";
-import type { Alert, AlertChannels, Battery, BatteryEvent, Dashboard, Grade, MeResponse, NoticeCategory, Relay, TrendResponse, VoiceAlertSettings } from "../types";
+import type { Alert, AlertChannels, Battery, BatteryEvent, Dashboard, Diagnosis, Grade, MeResponse, NoticeCategory, Relay, TrendResponse, VoiceAlertSettings } from "../types";
 import { Button, Card, EmptyState, Field, MetricStatusBadge, Modal, PageHeading, Pagination, StatusBadge, TableState, Tabs, formatDateTime, formatTime, relativeTime, score100 } from "../components/ui";
 import { Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis, BarChart, Bar, CartesianGrid, Cell } from "recharts";
 
@@ -65,9 +65,10 @@ export function dashboardTrendData(data: Dashboard, metric: DashboardMetricKey):
 
 export function DashboardPage({ realtime, me }: { realtime: { state: RealtimeState; dashboard: Dashboard | null; lastAt: string | null; refetchMetric: (metric: DashboardMetricParam) => Promise<void> }; me: MeResponse }) {
   const [metric, setMetric] = useState<DashboardMetricKey>("representativeTempC");
+  const [pausedTrend, setPausedTrend] = useState<Array<{ at: string; value: number | null }> | null>(null);
   const query = useDashboard(Boolean(me.activeSession), dashboardMetricParam(metric));
   const data = realtime.dashboard ?? query.data;
-  const selectMetric = (key: DashboardMetricKey) => { setMetric(key); void realtime.refetchMetric(dashboardMetricParam(key)); };
+  const selectMetric = (key: DashboardMetricKey) => { if (key !== metric) setPausedTrend(null); setMetric(key); void realtime.refetchMetric(dashboardMetricParam(key)); };
   if (!me.activeSession) return <GateCard />;
   if (!data && (query.isPending || realtime.state === "loading" || realtime.state === "connecting")) return <TableState state="loading" message="대시보드 스냅샷을 불러오는 중입니다." />;
   if (data && data.session.id !== me.activeSession.id) return <TableState state="loading" message="새 측정 세션을 준비하는 중입니다." />;
@@ -80,9 +81,13 @@ export function DashboardPage({ realtime, me }: { realtime: { state: RealtimeSta
   const anomalyScore = data.anomaly.score;
   if (grade === null || anomalyScore === null) return null;
   const metrics = [{ key: "voltageV" as const, label: "전압", short: "V", unit: "V", value: data.metrics.voltageV.value, status: data.metrics.voltageV.status, tone: "volt", color: "#16a34a" }, { key: "currentA" as const, label: "전류", short: "A", unit: "A", value: data.metrics.currentA.value, status: data.metrics.currentA.status, tone: "curr", color: "#0ea5e9" }, { key: "representativeTempC" as const, label: "온도 (°C)", short: "온도", unit: "°C", value: data.metrics.representativeTempC.value, status: data.metrics.representativeTempC.status, tone: "temp", color: "#ea580c" }, { key: "socPct" as const, label: data.metrics.socBasis === "RELATIVE_SESSION_START" ? "상대 SOC" : "SOC", short: "SOC", unit: "%", value: data.metrics.socPct.value, status: data.metrics.socPct.status, tone: "soc", color: "#7c3aed" }];
-  const trend = dashboardTrendData(data, metric);
+  const liveTrend = dashboardTrendData(data, metric);
+  const trend = pausedTrend ?? liveTrend;
   const trendValueCount = trend.filter((point) => point.value != null).length;
-  return <div className="page-stack dashboard-page"><Card className={`dashboard-hero ${grade.toLowerCase()}`}><div className="dashboard-hero-copy"><div className="dashboard-context"><span className="dashboard-battery-icon"><BatteryCharging size={18} /></span><div><strong>{data.battery.label}</strong><small>{data.battery.model ?? "모델 미입력"} · {data.battery.targetMode === 2 ? "모드 2 · 보조배터리" : "모드 1 · 외부 셀"}</small><small className="mono">battery_id {data.battery.id}</small></div><MeasuringElapsed startedAt={data.session.startedAt} /><Link className="dashboard-change" to="/battery">배터리 변경</Link></div><div><h1>{grade === "DANGER" ? "위험 상태" : grade === "WARNING" ? "경고 상태" : grade === "CAUTION" ? "주의 · 이상점수 상승" : "정상적으로 가동 중"}</h1><p>이상점수 {score100(anomalyScore)} · {data.relay.state === "OPEN" ? "릴레이가 차단된 상태입니다." : "현재 회로가 연결되어 있습니다."}</p></div><div className="dashboard-hero-actions"><Link className="button button-danger" to="/relay">릴레이 차단</Link><span className={`stream-status stream-${realtime.state}`}><span className="status-dot" />{realtime.state === "live" ? "실시간 수신 중" : realtime.state === "reconnecting" ? "재연결 중" : "연결 대기"}</span></div></div><div className="dashboard-score"><div className="dashboard-score-head"><span>현재 이상점수</span><Link to="/anomaly">이상 탐지 →</Link></div><div className="score-gauge"><svg viewBox="0 0 220 124" role="img" aria-label={`이상점수 ${score100(anomalyScore)} ${grade}`}><path d="M18 108 A92 92 0 0 1 202 108" fill="none" stroke="var(--border)" strokeWidth="16" strokeLinecap="round" /><path d="M18 108 A92 92 0 0 1 202 108" fill="none" className={`stroke-${grade.toLowerCase()}`} strokeWidth="16" strokeLinecap="round" pathLength="100" strokeDasharray={`${Math.max(0, Math.min(100, anomalyScore * 100))} 100`} /></svg><div className="score-gauge-value"><strong className="mono">{score100(anomalyScore)}</strong><StatusBadge grade={grade} compact /></div></div><div className="grade-legend">{(["NORMAL", "CAUTION", "WARNING", "DANGER"] as Grade[]).map((item) => <span key={item}><i className={`grade-shape ${item === "NORMAL" ? "circle" : item === "CAUTION" ? "diamond" : item === "WARNING" ? "triangle" : "square"}`} />{item === "NORMAL" ? "정상 0–29" : item === "CAUTION" ? "주의 30–59" : item === "WARNING" ? "경고 60–79" : "위험 80+"}</span>)}</div></div></Card><div className="quick-trend-section"><div className="section-heading-inline"><div><h2>빠른 추세</h2><p>최신 측정값을 한눈에 확인합니다.</p></div><Link className="text-button" to="/trend">전체 추세 보기 →</Link></div><div className="quick-metric-grid">{metrics.map((item) => <button className={`dashboard-metric-card ${item.tone} ${metric === item.key ? "active" : ""}`} key={item.key} aria-pressed={metric === item.key} onClick={() => selectMetric(item.key)}><span className="metric-tone-head"><small>{item.label}</small><MetricStatusBadge status={item.status} /></span><strong className="mono">{metricValue(item.key === "currentA" ? magnitude(item.value) : item.value)}<em>{item.unit}</em></strong>{item.key === "currentA" && <span className="metric-direction">{direction(item.value)}</span>}<MiniMetricLine color={item.color} points={dashboardMetricKey(data.quickTrend?.metric) === item.key ? data.quickTrend?.points : undefined} /></button>)}</div></div><Card className="dashboard-trend-card"><div className="card-title-row"><h2>V · I · T · SOC 추세</h2><span className="mono">{formatDateTime(data.metrics.measuredAt, true)}</span></div><div className="metric-selector segmented">{metrics.map((item) => <button key={item.key} className={metric === item.key ? "active" : ""} onClick={() => selectMetric(item.key)}>{item.label}</button>)}</div>{trendValueCount ? <ResponsiveContainer width="100%" height={190}><LineChart data={trend}><CartesianGrid vertical={false} stroke="var(--border)" strokeDasharray="3 4" /><XAxis dataKey="at" tick={false} axisLine={false} /><YAxis hide domain={["auto", "auto"]} /><Tooltip contentStyle={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 8 }} /><Line type="monotone" dataKey="value" connectNulls={false} stroke={metrics.find((item) => item.key === metric)?.color ?? "var(--primary)"} strokeWidth={2.5} dot={trendValueCount < 2 ? { r: 4 } : false} isAnimationActive={false} /></LineChart></ResponsiveContainer> : <TableState state="empty" message="추세 데이터가 없습니다." />}</Card></div>;
+  const trendMetric = metrics.find((item) => item.key === metric);
+  const lastDisplayedValue = [...trend].reverse().find((point) => point.value != null)?.value ?? null;
+  const toggleTrendPause = () => setPausedTrend((current) => current === null ? liveTrend.map((point) => ({ ...point })) : null);
+  return <div className="page-stack dashboard-page"><Card className={`dashboard-hero ${grade.toLowerCase()}`}><div className="dashboard-hero-copy"><div className="dashboard-context"><span className="dashboard-battery-icon"><BatteryCharging size={18} /></span><div><strong>{data.battery.label}</strong><small>{data.battery.model ?? "모델 미입력"} · {data.battery.targetMode === 2 ? "모드 2 · 보조배터리" : "모드 1 · 외부 셀"}</small><small className="mono">battery_id {data.battery.id}</small></div><MeasuringElapsed startedAt={data.session.startedAt} /><Link className="dashboard-change" to="/battery">배터리 변경</Link></div><div><h1>{grade === "DANGER" ? "위험 상태" : grade === "WARNING" ? "경고 상태" : grade === "CAUTION" ? "주의 · 이상점수 상승" : "정상적으로 가동 중"}</h1><p>이상점수 {score100(anomalyScore)} · {data.relay.state === "OPEN" ? "릴레이가 차단된 상태입니다." : "현재 회로가 연결되어 있습니다."}</p></div><div className="dashboard-hero-actions"><Link className="button button-danger" to="/relay">릴레이 차단</Link><span className={`stream-status stream-${realtime.state}`}><span className="status-dot" />{realtime.state === "live" ? "실시간 수신 중" : realtime.state === "reconnecting" ? "재연결 중" : "연결 대기"}</span></div></div><div className="dashboard-score"><div className="dashboard-score-head"><span>현재 이상점수</span><Link to="/anomaly">이상 탐지 →</Link></div><div className="score-gauge"><svg viewBox="0 0 220 124" role="img" aria-label={`이상점수 ${score100(anomalyScore)} ${grade}`}><path d="M18 108 A92 92 0 0 1 202 108" fill="none" stroke="var(--border)" strokeWidth="16" strokeLinecap="round" /><path d="M18 108 A92 92 0 0 1 202 108" fill="none" className={`stroke-${grade.toLowerCase()}`} strokeWidth="16" strokeLinecap="round" pathLength="100" strokeDasharray={`${Math.max(0, Math.min(100, anomalyScore * 100))} 100`} /></svg><div className="score-gauge-value"><strong className="mono">{score100(anomalyScore)}</strong><StatusBadge grade={grade} compact /></div></div><div className="grade-legend">{(["NORMAL", "CAUTION", "WARNING", "DANGER"] as Grade[]).map((item) => <span key={item}><i className={`grade-shape ${item === "NORMAL" ? "circle" : item === "CAUTION" ? "diamond" : item === "WARNING" ? "triangle" : "square"}`} />{item === "NORMAL" ? "정상 0–29" : item === "CAUTION" ? "주의 30–59" : item === "WARNING" ? "경고 60–79" : "위험 80+"}</span>)}</div></div></Card><div className="quick-trend-section"><div className="section-heading-inline"><div><h2>빠른 추세</h2><p>최신 측정값을 한눈에 확인합니다.</p></div><Link className="text-button" to="/trend">전체 추세 보기 →</Link></div><div className="quick-metric-grid">{metrics.map((item) => <button className={`dashboard-metric-card ${item.tone} ${metric === item.key ? "active" : ""}`} key={item.key} aria-pressed={metric === item.key} onClick={() => selectMetric(item.key)}><span className="metric-tone-head"><small>{item.label}</small><MetricStatusBadge status={item.status} /></span><strong className="mono">{metricValue(item.key === "currentA" ? magnitude(item.value) : item.value)}<em>{item.unit}</em></strong>{item.key === "currentA" && <span className="metric-direction">{direction(item.value)}</span>}<MiniMetricLine color={item.color} points={dashboardMetricKey(data.quickTrend?.metric) === item.key ? data.quickTrend?.points : undefined} /></button>)}</div></div><Card className="dashboard-trend-card"><div className="card-title-row"><h2>V · I · T · SOC 추세</h2><span className="mono">{formatDateTime(data.metrics.measuredAt, true)}</span></div><div className="dashboard-trend-controls"><div className="metric-selector segmented">{metrics.map((item) => <button key={item.key} className={metric === item.key ? "active" : ""} onClick={() => selectMetric(item.key)}>{item.label}</button>)}</div><div className="dashboard-trend-action-row"><button type="button" className="button button-secondary trend-pause-toggle" aria-pressed={pausedTrend !== null} onClick={toggleTrendPause}>{pausedTrend !== null ? <Play size={16} aria-hidden="true" /> : <Pause size={16} aria-hidden="true" />}<span>{pausedTrend !== null ? "실시간 이어보기" : "차트 일시 정지"}</span></button><span className="sr-only" role="status" aria-live="polite">{pausedTrend !== null ? `추세 차트 일시 정지됨. 마지막 표시값 ${metricValue(lastDisplayedValue)} ${trendMetric?.unit ?? ""}. 실시간 측정은 계속 수신 중입니다.` : "추세 차트가 실시간 측정을 따라갑니다."}</span></div></div>{trendValueCount ? <div className="dashboard-trend-plot" role="group" aria-label={`${trendMetric?.label ?? "선택 지표"} 추세 그래프 · 마지막 표시값 ${metricValue(lastDisplayedValue)} ${trendMetric?.unit ?? ""}`}><ResponsiveContainer width="100%" height={190}><LineChart data={trend}><CartesianGrid vertical={false} stroke="var(--border)" strokeDasharray="3 4" /><XAxis dataKey="at" tick={false} axisLine={false} /><YAxis hide domain={["auto", "auto"]} /><Tooltip contentStyle={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 8 }} /><Line type="monotone" dataKey="value" connectNulls={false} stroke={metrics.find((item) => item.key === metric)?.color ?? "var(--primary)"} strokeWidth={2.5} dot={trendValueCount < 2 ? { r: 4 } : false} isAnimationActive={false} /></LineChart></ResponsiveContainer></div> : <TableState state="empty" message="추세 데이터가 없습니다." />}</Card></div>;
 }
 
 function MiniMetricLine({ color, points }: { color: string; points?: Array<{ at: string; value: number | null }> }) {
@@ -120,31 +125,119 @@ function BatteryForm({ initial, onClose }: { initial?: Battery; onClose: () => v
   return <Modal title={initial ? "배터리 정보 수정" : "새 배터리 등록"} description="측정 모드는 등록 후 변경할 수 없습니다." onClose={onClose}><form onSubmit={submit} className="form-stack"><Field label="배터리 이름" error={form.formState.errors.label?.message}><input {...form.register("label")} placeholder="PACK-006" /></Field><div className="two-column"><Field label="배터리 종류"><select {...form.register("chemistry")}><option value="LI_ION">리튬이온 (LI_ION)</option><option value="LI_PO">리튬폴리머 (LI_PO)</option></select></Field><Field label="측정 모드"><select {...form.register("targetMode")} disabled={Boolean(initial)}><option value="1">모드 1 · 외부 셀</option><option value="2">모드 2 · 보조배터리</option></select></Field></div><div className="two-column"><Field label="제조사"><input {...form.register("maker")} placeholder="선택 입력" /></Field><Field label="모델"><input {...form.register("model")} placeholder="선택 입력" /></Field></div>{mode === "1" ? <Field label="직렬 셀 수" hint="외부 셀 측정에서만 사용합니다."><input {...form.register("seriesCount")} type="number" min="1" placeholder="3" /></Field> : <div className="two-column"><Field label="정격 용량 (Wh)" error={form.formState.errors.capacityWh?.message}><input {...form.register("capacityWh")} type="number" min="0.01" step="0.01" placeholder="37" /></Field><Field label="정격 출력 전류 (A)" error={form.formState.errors.ratedOutputCurrentA?.message}><input {...form.register("ratedOutputCurrentA")} type="number" min="0.01" step="0.01" placeholder="2" /></Field></div>}<Field label="메모"><textarea {...form.register("memo")} rows={3} placeholder="측정 대상 특이사항…" /></Field>{mutation.error && <p className="form-error">{errorMessage(mutation.error)}</p>}<div className="modal-actions"><Button variant="secondary" onClick={onClose}>취소</Button><Button type="submit" variant="primary" loading={mutation.isPending}>{initial ? "변경 저장" : "등록하기"}</Button></div></form></Modal>;
 }
 
+type ConnectionAttempt = { battery: Battery; phase: "submitting" | "waiting" | "confirmed" | "error"; sessionId?: string; deviceId?: string; message?: string };
+type SessionEndedSignal = { sessionId?: string; endReason?: string } | null;
+type DeviceStatusSignal = { deviceId?: string; status?: string } | null;
+
+function connectionFailureMessage(error: unknown): string {
+  if (typeof navigator !== "undefined" && !navigator.onLine) return "인터넷 연결이 끊겼습니다. 네트워크를 확인한 뒤 다시 시도하세요.";
+  if (error instanceof ApiError && error.code === "DEVICE_OFFLINE") return "진단기가 오프라인이거나 응답하지 않습니다. 진단기 전원과 네트워크를 확인한 뒤 다시 시도하세요.";
+  if (error instanceof ApiError) return errorMessage(error);
+  if (error instanceof Error && error.message) return `연결 요청이 실패했습니다: ${error.message}`;
+  return "연결 요청이 실패했습니다. 상태를 확인한 뒤 다시 시도하세요.";
+}
+
+function sessionEndMessage(reason: string | undefined): string {
+  if (reason === "TIMEOUT") return "장비 응답을 기다리는 동안 측정 세션 시간이 만료되었습니다.";
+  if (reason === "SUPERSEDED") return "다른 연결 요청으로 대기 세션이 종료되었습니다.";
+  if (reason === "BLOCKED") return "배터리 운영 상태 변경으로 대기 세션이 종료되었습니다.";
+  return "측정 세션이 종료되었습니다. 다시 연결을 요청하세요.";
+}
+
 export function BatteryPage({ me }: { me: MeResponse }) {
   const list = useBatteries();
   const start = useStartSession();
+  const meQuery = useMe();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const sessionEnded = useQuery<SessionEndedSignal>({ queryKey: ["session-ended"], queryFn: async () => null, enabled: false });
+  const deviceStatus = useQuery<DeviceStatusSignal>({ queryKey: ["device-status"], queryFn: async () => null, enabled: false });
   const [mode, setMode] = useState("all");
   const [sort, setSort] = useState("recent");
   const [modal, setModal] = useState<"create" | "edit" | null>(null);
   const [selected, setSelected] = useState<Battery | undefined>();
   const [connect, setConnect] = useState<Battery | null>(null);
-  const [message, setMessage] = useState("");
+  const [attempt, setAttempt] = useState<ConnectionAttempt | null>(null);
   const batteries = useMemo(() => {
     const items = list.data?.items.filter((battery) => mode === "all" || String(battery.targetMode) === mode) ?? [];
     return [...items].sort((a, b) => sort === "score" ? (b.latest?.score ?? -1) - (a.latest?.score ?? -1) : sort === "soc" ? (a.latest?.socPct ?? 101) - (b.latest?.socPct ?? 101) : String(b.latest?.measuredAt).localeCompare(String(a.latest?.measuredAt)));
   }, [list.data, mode, sort]);
-  const openConnect = (battery: Battery) => { start.reset(); setMessage(""); setConnect(battery); };
-  const doConnect = async () => {
-    if (!connect) return;
-    const target = connect;
+  const openConnect = (battery: Battery) => { start.reset(); setAttempt(null); setConnect(battery); };
+  const doConnect = async (target: Battery) => {
+    start.reset();
+    setConnect(null);
+    queryClient.setQueryData(["session-ended"], null);
+    queryClient.setQueryData(["device-status"], null);
+    setAttempt({ battery: target, phase: "submitting" });
     try {
       const started = await start.mutateAsync(target.id);
-      setConnect(null);
-      if (isMeasuringSession(started)) navigate("/dashboard");
-      else setMessage(`${target.label} 연결 요청을 보냈습니다. 장비의 첫 센서 프레임을 기다리는 중입니다. 응답이 없으면 다시 시도하세요.`);
-    } catch (error) { setMessage(errorMessage(error)); }
+      setAttempt((current) => current?.battery.id === target.id && current.phase === "submitting" ? { ...current, phase: isMeasuringSession(started) ? "confirmed" : "waiting", sessionId: started.id, deviceId: started.deviceId } : current);
+    } catch (error) {
+      setAttempt((current) => current?.battery.id === target.id ? { ...current, phase: "error", message: connectionFailureMessage(error) } : current);
+    }
   };
+  useEffect(() => {
+    if (!attempt?.sessionId || attempt.phase === "error" || !sessionEnded.data?.sessionId || sessionEnded.data.sessionId !== attempt.sessionId) return;
+    const sessionId = attempt.sessionId;
+    const message = sessionEndMessage(sessionEnded.data.endReason);
+    setAttempt((current) => {
+      if (!current || current.sessionId !== sessionId) return current;
+      return { ...current, phase: "error", message };
+    });
+  }, [attempt?.phase, attempt?.sessionId, sessionEnded.data]);
+  useEffect(() => {
+    if (!attempt || attempt.phase === "error" || deviceStatus.data?.status !== "OFFLINE") return;
+    if (attempt.deviceId && deviceStatus.data.deviceId && attempt.deviceId !== deviceStatus.data.deviceId) return;
+    setAttempt((current) => current?.battery.id === attempt.battery.id ? { ...current, phase: "error", message: "진단기가 오프라인으로 전환되었습니다. 전원과 네트워크를 확인한 뒤 다시 시도하세요." } : current);
+  }, [attempt?.battery.id, attempt?.phase, attempt?.deviceId, deviceStatus.data]);
+  useEffect(() => {
+    const onOffline = () => setAttempt((current) => current && current.phase !== "error" ? { ...current, phase: "error", message: "인터넷 연결이 끊겼습니다. 네트워크를 확인한 뒤 다시 시도하세요." } : current);
+    window.addEventListener("offline", onOffline);
+    return () => window.removeEventListener("offline", onOffline);
+  }, []);
+  useEffect(() => {
+    if (attempt?.phase !== "waiting") return;
+    const refreshId = window.setInterval(() => { void meQuery.refetch(); }, 1_000);
+    return () => window.clearInterval(refreshId);
+  }, [attempt?.phase, meQuery.refetch]);
+  useEffect(() => {
+    if (attempt?.phase !== "waiting") return;
+    const sessionId = attempt.sessionId;
+    const timeoutId = window.setTimeout(() => setAttempt((current) => {
+      if (!current || current.sessionId !== sessionId || current.phase !== "waiting") return current;
+      return { ...current, phase: "error", message: "제한 시간 안에 첫 센서 프레임을 받지 못했습니다. 장비 전원과 연결 상태를 확인한 뒤 다시 시도하세요." };
+    }), 30_000);
+    return () => window.clearTimeout(timeoutId);
+  }, [attempt?.phase, attempt?.sessionId]);
+  useEffect(() => {
+    if (attempt?.phase !== "waiting" || !attempt.sessionId) return;
+    if (me.activeSession?.id !== attempt.sessionId || !isMeasuringSession(me.activeSession)) return;
+    const sessionId = attempt.sessionId;
+    setAttempt((current) => {
+      if (!current || current.sessionId !== sessionId || current.phase !== "waiting") return current;
+      return { ...current, phase: "confirmed" };
+    });
+  }, [attempt?.phase, attempt?.sessionId, me.activeSession?.id, me.activeSession?.measurementPhase]);
+  useEffect(() => {
+    if (attempt?.phase !== "confirmed" || !attempt.sessionId) return;
+    const active = queryClient.getQueryData<MeResponse>(["me"])?.activeSession ?? me.activeSession;
+    if (active?.id !== attempt.sessionId || !isMeasuringSession(active)) {
+      const sessionId = attempt.sessionId;
+      setAttempt((current) => current?.sessionId === sessionId ? current ? { ...current, phase: "error", message: "측정 세션이 확인되지 않았습니다. 활성 세션을 다시 확인하고 연결을 재시도하세요." } : current : current);
+      return;
+    }
+    const sessionId = attempt.sessionId;
+    const timeoutId = window.setTimeout(() => {
+      const confirmedSession = queryClient.getQueryData<MeResponse>(["me"])?.activeSession ?? me.activeSession;
+      if (confirmedSession?.id !== sessionId || !isMeasuringSession(confirmedSession)) {
+        setAttempt((current) => current?.sessionId === sessionId ? current ? { ...current, phase: "error", message: "센서 연결이 유지되지 않았습니다. 상태를 확인한 뒤 다시 시도하세요." } : current : current);
+        return;
+      }
+      setAttempt((current) => current?.sessionId === sessionId ? null : current);
+      navigate("/dashboard");
+    }, 900);
+    return () => window.clearTimeout(timeoutId);
+  }, [attempt?.phase, attempt?.sessionId, me.activeSession?.id, me.activeSession?.measurementPhase, navigate, queryClient]);
   const openCreate = () => { setSelected(undefined); setModal("create"); };
   return <div className="page-stack battery-page"><PageHeading eyebrow="ASSET MANAGEMENT" title="배터리 관리" description="저장된 배터리 선택 · 새 배터리 등록" actions={<Button variant="primary" onClick={openCreate}>+ 새 배터리 등록</Button>} />
     {list.error ? <Card><TableState state="error" message="배터리 데이터를 불러오지 못했습니다." /></Card> : !list.isPending && !list.data?.items.length ? <Card><EmptyState title="등록된 배터리가 없습니다." description="첫 배터리를 등록하면 측정을 시작할 수 있습니다." action={<Button variant="primary" onClick={openCreate}>배터리 등록</Button>} /></Card> : <>
@@ -161,7 +254,7 @@ export function BatteryPage({ me }: { me: MeResponse }) {
           <div className="battery-card-foot"><span className="battery-mode-chip">{battery.targetMode === 2 ? "모드 2 · 보조배터리" : "모드 1 · 외부 셀"}</span><div><Button variant="ghost" onClick={() => { setSelected(battery); setModal("edit"); }}>수정</Button><Button variant="primary" onClick={() => openConnect(battery)} disabled={battery.opsStatus === "BLOCKED"}>{battery.opsStatus === "BLOCKED" ? "연결 잠김" : measuring ? "측정 중" : waiting ? "응답 대기 · 다시 시도" : "연결하고 측정"}</Button></div></div>
         </Card>;
       })}</div>
-    </>}{message && <div className="toast" role="alert">{message}</div>}{modal && <BatteryForm initial={modal === "edit" ? selected : undefined} onClose={() => setModal(null)} />}{connect && (() => { const waiting = me.activeSession?.batteryId === connect.id && !isMeasuringSession(me.activeSession); const actionLabel = waiting ? "다시 연결 요청" : "연결하고 측정"; return <Modal title={`${connect.label}을(를) 측정할까요?`} description={waiting ? "현재 세션이 장비 응답을 기다리고 있습니다. 다시 요청하면 기존 대기 세션을 종료하고 재시도합니다." : "연결하면 기존 측정 세션은 서버에서 자동 종료됩니다."} onClose={() => setConnect(null)}><div className="confirm-panel"><div className="confirm-icon"><BatteryCharging size={22} /></div><p>한 번에 하나의 배터리만 연결됩니다. 기존 연결은 해제되고 이 배터리로 새 세션이 시작됩니다.</p></div>{start.error && <p className="form-error">{errorMessage(start.error)}</p>}<div className="modal-actions"><Button variant="secondary" onClick={() => setConnect(null)}>취소</Button><Button variant="primary" loading={start.isPending} onClick={() => void doConnect()}>{actionLabel}</Button></div></Modal>; })()}</div>;
+    </>}{modal && <BatteryForm initial={modal === "edit" ? selected : undefined} onClose={() => setModal(null)} />}{connect && (() => { const waiting = me.activeSession?.batteryId === connect.id && !isMeasuringSession(me.activeSession); const actionLabel = waiting ? "다시 연결 요청" : "연결하고 측정"; return <Modal title={connect.label + "을(를) 측정할까요?"} description={waiting ? "현재 세션이 장비 응답을 기다리고 있습니다. 다시 요청하면 기존 대기 세션을 종료하고 재시도합니다." : "연결하면 기존 측정 세션은 서버에서 자동 종료됩니다."} onClose={() => setConnect(null)}><div className="confirm-panel"><div className="confirm-icon"><BatteryCharging size={22} /></div><p>한 번에 하나의 배터리만 연결됩니다. 기존 연결은 해제되고 이 배터리로 새 세션이 시작됩니다.</p></div>{start.error && <p className="form-error">{errorMessage(start.error)}</p>}<div className="modal-actions"><Button variant="secondary" onClick={() => setConnect(null)}>취소</Button><Button variant="primary" loading={start.isPending} onClick={() => void doConnect(connect)}>{actionLabel}</Button></div></Modal>; })()}{attempt && (() => { const busy = attempt.phase !== "error"; const title = attempt.phase === "error" ? "연결 실패 · " + attempt.battery.label : attempt.phase === "confirmed" ? "연결 확인 · " + attempt.battery.label : "연결 진행 · " + attempt.battery.label; const description = attempt.phase === "error" ? "요청 원인과 재시도 방법을 확인하세요." : attempt.phase === "confirmed" ? "서버에서 측정 단계 진입을 확인했습니다." : "연결을 확인할 때까지 이 화면에서 기다려 주세요."; return <Modal title={title} description={description} onClose={() => setAttempt(null)} dismissible={!busy}><div className={"connection-progress-content phase-" + attempt.phase} aria-busy={busy}><div className={"connection-progress-icon phase-" + attempt.phase} aria-hidden="true">{attempt.phase === "confirmed" ? <Check size={22} /> : attempt.phase === "error" ? <AlertTriangle size={22} /> : <LoaderCircle size={22} className="spin" />}</div>{attempt.phase === "error" ? <p className="form-error" role="alert">{attempt.message}</p> : <p role="status" aria-live="polite">{attempt.phase === "confirmed" ? "첫 센서 프레임을 확인했습니다. 잠시 후 대시보드로 이동합니다." : attempt.phase === "submitting" ? "측정 세션을 요청하고 있습니다." : "세션 요청을 접수했습니다. 장비의 첫 신선 센서 프레임을 기다리는 중입니다. 이 확인 전에는 측정 화면이 열리지 않습니다."}</p>}{attempt.phase === "error" && <div className="modal-actions"><Button variant="secondary" onClick={() => setAttempt(null)}>닫기</Button><Button variant="primary" onClick={() => void doConnect(attempt.battery)}>다시 연결 요청</Button></div>}</div></Modal>; })()}</div>;
 }
 
 export function BatteryDetailPage({ id }: { id: string }) {
@@ -254,11 +347,67 @@ export function NoticesPage() {
 }
 function categoryLabel(value: NoticeCategory): string { return ({ IMPORTANT: "중요", MAINTENANCE: "점검", FEATURE: "기능", INFO: "안내" } as Record<NoticeCategory, string>)[value]; }
 
+function DiagnosisResultDetails({ diagnosis }: { diagnosis: Diagnosis }) {
+  const quick = diagnosis.quick;
+  const knee = quick?.regulationKneeA == null ? "—" : `${quick.kneeIsUpperBound ? "≥ " : ""}${metricValue(quick.regulationKneeA, 2)} A`;
+  return <div className="diagnosis-detail">
+    {(diagnosis.confidence === "LOW" || diagnosis.kind === "QUICK") && <div className="diagnosis-confidence-note" role="note"><AlertTriangle size={18} aria-hidden="true" /><p>낮은 신뢰도의 참고용 선별 결과입니다. 최종 건강도나 절대 SOH 판정이 아닙니다.</p></div>}
+    {diagnosis.dataSource === "SIMULATED" && <p className="diagnosis-source-note">시뮬레이션 기반 진단 결과</p>}
+    <div className="detail-summary">
+      <span>상태<strong>{statusLabel(diagnosis.status)}</strong></span>
+      <span>종류<strong>{diagnosis.kind === "QUICK" ? "빠른 진단" : "정밀 용량 테스트"}</strong></span>
+      <span>신뢰도<strong>{diagnosis.confidence === "LOW" ? "낮음" : diagnosis.confidence === "HIGH" ? "높음" : "—"}</strong></span>
+      <span>측정 완료 시각<strong>{diagnosis.measuredAt ? formatDateTime(diagnosis.measuredAt, true) : "—"}</strong></span>
+    </div>
+    {diagnosis.kind === "QUICK" ? <div className="raw-list">
+      <div><code>최종 열화 판정</code><span>{gradeLabel(quick?.grade)}</span></div>
+      <div><code>잔량 힌트</code><span>{diagnosis.socHintLevel == null ? "모름" : `${diagnosis.socHintLevel}단계`}</span></div>
+      <div><code>레귤레이션 이탈 전류</code><span className="mono">{knee}</span></div>
+      <div><code>발열 기울기</code><span className="mono">{metricValue(quick?.thermalSlopeCPerMin, 2)} °C/min</span></div>
+      <div><code>스펙 도달률</code><span className="mono">{metricValue(quick?.specAttainmentPct, 1)}{quick?.specAttainmentPct == null ? "" : "%"}</span></div>
+    </div> : <div className="raw-list">
+      <div><code>방전 전류</code><span className="mono">{metricValue(diagnosis.capacity?.dischargeCurrentA, 2)} A</span></div>
+      <div><code>전달 용량</code><span className="mono">{metricValue(diagnosis.capacity?.deliveredWh, 1)} Wh</span></div>
+      <div><code>상대 SOH</code><span className="mono">{metricValue(diagnosis.capacity?.sohRelPct, 1)}%</span></div>
+      <div><code>기준 결과</code><span>{diagnosis.capacity?.isBaseline ? "기준" : "비교"}</span></div>
+    </div>}
+  </div>;
+}
+
+type DegradationGrade = "HEALTHY" | "CAUTION" | "SUSPECT_DEGRADED" | "BASELINE_PENDING";
+
+function degradationPresentation(grade: string | null | undefined): { grade: DegradationGrade; title: string; message: string; icon: ReactNode } {
+  if (grade === "HEALTHY") return { grade, title: "빠른 진단 완료 · 양호", message: "이번 선별 검사에서는 뚜렷한 열화 징후가 확인되지 않았습니다. 낮은 신뢰도의 참고 결과이므로 정밀 용량 테스트와 이력을 함께 확인하세요.", icon: <CircleCheckBig size={26} /> };
+  if (grade === "CAUTION") return { grade, title: "빠른 진단 완료 · 주의", message: "일부 열화 징후가 관찰됐습니다. 사용 조건을 점검하고 같은 조건의 재검사 또는 정밀 용량 테스트를 권장합니다.", icon: <AlertTriangle size={26} /> };
+  if (grade === "SUSPECT_DEGRADED") return { grade, title: "빠른 진단 완료 · 열화 의심", message: "열화 가능성이 높은 반응이 관찰됐습니다. 고부하 사용을 줄이고 정밀 용량 테스트로 확인하세요.", icon: <Gauge size={26} /> };
+  return { grade: "BASELINE_PENDING", title: "빠른 진단 완료 · 기준선 수집 중", message: "비교 기준이 충분하지 않습니다. 동일 조건의 후속 진단 이력을 쌓은 뒤 추세를 확인하세요.", icon: <Info size={26} /> };
+}
+
+function diagnosisNextAction(diagnosis: Diagnosis): string {
+  if (diagnosis.status === "FAILED") return "장비·네트워크 상태를 확인한 뒤 다시 실행하세요. 반복되면 진단기 로그와 서버 상태를 점검하세요.";
+  if (diagnosis.abortReason === "TEMP_ABSOLUTE" || diagnosis.abortReason === "TEMP_SLOPE" || diagnosis.abortReason === "GAS" || diagnosis.abortReason === "VOLTAGE_COLLAPSE") return "배터리에서 부하를 제거하고 환기된 안전한 장소에서 상태를 확인하세요. 원인을 확인하기 전 진단을 재시작하지 마세요.";
+  if (diagnosis.abortReason === "RELAY_CUT") return "릴레이 차단 원인과 인터락 상태를 확인한 뒤, 안전이 확인된 경우에만 복구 후 재시도하세요.";
+  if (diagnosis.abortReason === "DEVICE_OFFLINE") return "진단기 전원과 네트워크 연결을 확인한 뒤 다시 연결하고 재시도하세요.";
+  if (diagnosis.abortReason === "SESSION_ENDED") return "배터리를 다시 연결해 MEASURING 상태를 확인한 뒤 진단을 재시작하세요.";
+  return "안전 상태를 확인한 뒤 필요하면 진단을 다시 시작하세요.";
+}
+
+function DiagnosisTerminalContent({ diagnosis, automatic }: { diagnosis: Diagnosis; automatic: boolean }) {
+  if (diagnosis.status === "ABORTED" || diagnosis.status === "FAILED") return <div className="diagnosis-terminal-error" role="alert"><div className="diagnosis-terminal-icon"><AlertTriangle size={26} aria-hidden="true" /></div><div><h3>{diagnosis.status === "ABORTED" ? "진단이 중단되었습니다" : "진단을 완료하지 못했습니다"}</h3><p><strong>원인</strong> {diagnosis.status === "ABORTED" ? abortReasonLabel(diagnosis.abortReason) : "진단 처리 실패"}</p><p><strong>다음 조치</strong> {diagnosisNextAction(diagnosis)}</p>{automatic && <small>완료 결과로 저장하거나 건강도 판정에 사용하지 않습니다.</small>}</div></div>;
+  if (diagnosis.kind === "QUICK") {
+    const presentation = degradationPresentation(diagnosis.quick?.grade);
+    return <><div className={`diagnosis-degradation-hero degradation-${presentation.grade.toLowerCase()}`} data-degradation-grade={presentation.grade}><span className="diagnosis-terminal-icon" aria-hidden="true">{presentation.icon}</span><div><small>최종 열화 판정</small><h3>{presentation.title}</h3><p>{presentation.message}</p></div></div><DiagnosisResultDetails diagnosis={diagnosis} /></>;
+  }
+  return <DiagnosisResultDetails diagnosis={diagnosis} />;
+}
+
 export function PowerbankDiagnosisPage({ me }: { me: MeResponse }) {
   const batteryId = me.activeSession?.batteryId;
+  const queryClient = useQueryClient();
   const battery = useBattery(batteryId, Boolean(batteryId));
   const active = useActiveDiagnosis(Boolean(batteryId));
   const history = useDiagnosisHistory(batteryId, Boolean(batteryId));
+  const completionNotice = useQuery<DiagnosisCompletionNotice | null>({ queryKey: ["diagnosis-completion"], queryFn: async () => null, enabled: false });
   const quick = useDiagnosisStart("quick");
   const capacity = useDiagnosisStart("capacity");
   const stop = useDiagnosisStop();
@@ -267,11 +416,37 @@ export function PowerbankDiagnosisPage({ me }: { me: MeResponse }) {
   const [dischargeCurrentA, setDischargeCurrentA] = useState("1");
   const [fullyChargedConfirmed, setFullyChargedConfirmed] = useState(false);
   const [selectedDiagnosisId, setSelectedDiagnosisId] = useState<string | null>(null);
+  const [automaticDiagnosisId, setAutomaticDiagnosisId] = useState<string | null>(null);
+  const runningDiagnosisId = useRef<string | null>(null);
+  const observedSessionId = useRef(me.activeSession?.id);
+  const consumedCompletionId = useRef<string | null>(null);
   const detail = useDiagnosisDetail(selectedDiagnosisId ?? undefined, Boolean(selectedDiagnosisId));
   const supported = battery.data?.targetMode === 2;
   const allowed = supported && battery.data?.diagnosisCapability?.executionAllowed === true;
   const dischargeCurrent = Number(dischargeCurrentA);
   const capacityInputValid = Number.isFinite(dischargeCurrent) && dischargeCurrent > 0;
+  useEffect(() => {
+    if (observedSessionId.current !== me.activeSession?.id) {
+      observedSessionId.current = me.activeSession?.id;
+      runningDiagnosisId.current = null;
+    }
+    const previousId = runningDiagnosisId.current;
+    const currentDiagnosis = active.data;
+    for (const diagnosisId of diagnosisCompletionIdsFromPoll(previousId, currentDiagnosis)) announceDiagnosisCompletion(queryClient, diagnosisId, "poll");
+    if (currentDiagnosis?.status === "RUNNING") {
+      runningDiagnosisId.current = currentDiagnosis.id;
+      return;
+    }
+    runningDiagnosisId.current = null;
+  }, [active.data, me.activeSession?.id, queryClient]);
+  useEffect(() => {
+    const notice = completionNotice.data;
+    if (!notice || consumedCompletionId.current === notice.diagnosisId) return;
+    consumedCompletionId.current = notice.diagnosisId;
+    setAutomaticDiagnosisId(notice.diagnosisId);
+    setSelectedDiagnosisId(notice.diagnosisId);
+    queryClient.setQueryData<DiagnosisCompletionNotice | null>(["diagnosis-completion"], null);
+  }, [completionNotice.data, queryClient]);
   const run = async (kind: "quick" | "capacity") => {
     if (!ack || !allowed) return;
     try {
@@ -297,8 +472,8 @@ export function PowerbankDiagnosisPage({ me }: { me: MeResponse }) {
     <label className="safety-ack"><input type="checkbox" checked={ack} onChange={(event) => setAck(event.target.checked)} disabled={!allowed} /><span>진단 중 이상 알림은 억제되지만 Fail-Safe 자동 차단은 항상 우선함을 확인했습니다.</span></label>
     {(quick.error || capacity.error) && <p className="form-error">{errorMessage(quick.error ?? capacity.error)}</p>}
     {active.data && <Card className="diagnosis-progress"><div className="card-title-row"><div><h2>진단 진행 중</h2><p>{active.data.kind === "QUICK" ? "빠른 진단" : "정밀 용량 테스트"} · {active.data.phase ?? "진행"}</p></div><Button variant="danger-outline" loading={stop.isPending} onClick={() => void stop.mutateAsync()}>진단 중단</Button></div><div className="progress-track"><span style={{ width: `${progressPct(active.data.startedAt, active.data.estimatedEndAt) ?? 0}%` }} /></div><div className="diagnosis-live-values"><span>목표 부하 <strong className="mono">{metricValue(active.data.loadTargetA, 2)} A</strong></span><span>실측 부하 <strong className="mono">{metricValue(active.data.loadActualA, 2)} A</strong></span></div></Card>}
-    <Card><div className="card-title-row"><h2>과거 진단 이력</h2><span className="field-hint">유효한 결과만 건강도에 반영</span></div>{history.isPending ? <TableState state="loading" message="진단 이력을 불러오는 중입니다." /> : history.error ? <TableState state="error" message={errorMessage(history.error)} /> : history.data?.items.length ? <div className="diagnosis-history-list">{history.data.items.map((item) => <div className="diagnosis-history-row" key={item.id}><div><strong>{item.kind === "QUICK" ? "빠른 진단" : "정밀 용량 테스트"}</strong><small>{statusLabel(item.status)} · {formatDateTime(item.measuredAt ?? item.startedAt)}{item.confidence ? ` · ${item.confidence}` : ""}</small></div><span className="mono">{item.summary?.sohRelPct == null ? "—" : `${item.summary.sohRelPct}%`}</span><Button variant="ghost" onClick={() => setSelectedDiagnosisId(item.id)}>상세</Button></div>)}</div> : <TableState state="empty" message="유효한 진단 이력이 없습니다." />}</Card>
-    {selectedDiagnosisId && <Modal title={detail.data?.kind === "QUICK" ? "빠른 진단 상세" : "정밀 용량 테스트 상세"} description={detail.data ? `${statusLabel(detail.data.status)}${detail.data.abortReason ? ` · ${abortReasonLabel(detail.data.abortReason)}` : ""} · ${formatDateTime(detail.data.measuredAt ?? detail.data.startedAt)}` : ""} onClose={() => setSelectedDiagnosisId(null)} wide>{detail.isPending ? <TableState state="loading" /> : detail.error ? <TableState state="error" message={errorMessage(detail.error)} /> : detail.data ? <div className="diagnosis-detail"><div className="detail-summary"><span>상태<strong>{statusLabel(detail.data.status)}</strong></span><span>신뢰도<strong>{detail.data.confidence ?? "—"}</strong></span><span>시작<strong>{formatDateTime(detail.data.startedAt)}</strong></span></div>{detail.data.kind === "QUICK" ? <div className="raw-list"><div><code>잔량 힌트</code><span>{detail.data.socHintLevel ?? "모름"}</span></div><div><code>규제 무릎 전류</code><span className="mono">{metricValue(detail.data.quick?.regulationKneeA, 2)} A</span></div><div><code>열 기울기</code><span className="mono">{metricValue(detail.data.quick?.thermalSlopeCPerMin, 2)} °C/min</span></div><div><code>판정</code><span>{gradeLabel(detail.data.quick?.grade as string | null)}</span></div></div> : <div className="raw-list"><div><code>방전 전류</code><span className="mono">{metricValue(detail.data.capacity?.dischargeCurrentA, 2)} A</span></div><div><code>전달 용량</code><span className="mono">{metricValue(detail.data.capacity?.deliveredWh, 1)} Wh</span></div><div><code>상대 SOH</code><span className="mono">{metricValue(detail.data.capacity?.sohRelPct, 1)}%</span></div><div><code>기준 결과</code><span>{detail.data.capacity?.isBaseline ? "기준" : "비교"}</span></div></div>}</div> : null}</Modal>}
+    <Card><div className="card-title-row"><h2>과거 진단 이력</h2><span className="field-hint">유효한 결과만 건강도에 반영</span></div>{history.isPending ? <TableState state="loading" message="진단 이력을 불러오는 중입니다." /> : history.error ? <TableState state="error" message={errorMessage(history.error)} /> : history.data?.items.length ? <div className="diagnosis-history-list">{history.data.items.map((item) => <div className="diagnosis-history-row" key={item.id}><div><strong>{item.kind === "QUICK" ? "빠른 진단" : "정밀 용량 테스트"}</strong><small>{statusLabel(item.status)} · {formatDateTime(item.measuredAt ?? item.startedAt)}{item.confidence ? ` · ${item.confidence}` : ""}</small></div><span className="mono">{item.summary?.sohRelPct == null ? "—" : `${item.summary.sohRelPct}%`}</span><Button variant="ghost" onClick={() => { setAutomaticDiagnosisId(null); setSelectedDiagnosisId(item.id); }}>상세</Button></div>)}</div> : <TableState state="empty" message="유효한 진단 이력이 없습니다." />}</Card>
+    {selectedDiagnosisId && <Modal title={detail.data?.status === "ABORTED" ? "진단 중단 안내" : detail.data?.status === "FAILED" ? "진단 실패 안내" : automaticDiagnosisId === selectedDiagnosisId ? "진단 최종 결과" : detail.data?.kind === "QUICK" ? "빠른 진단 상세" : detail.data ? "정밀 용량 테스트 상세" : "진단 상세"} description={detail.data ? statusLabel(detail.data.status) + (detail.data.abortReason ? " · " + abortReasonLabel(detail.data.abortReason) : "") + " · 측정 완료 시각 " + (detail.data.measuredAt ? formatDateTime(detail.data.measuredAt, true) : "—") : "진단 결과를 불러오는 중입니다."} onClose={() => { setSelectedDiagnosisId(null); setAutomaticDiagnosisId(null); }} wide>{detail.isPending ? <TableState state="loading" message="진단 상세를 불러오는 중입니다." /> : detail.error ? <><TableState state="error" message={errorMessage(detail.error)} /><div className="modal-actions"><Button variant="secondary" onClick={() => void detail.refetch()}>다시 시도</Button></div></> : detail.data ? <DiagnosisTerminalContent diagnosis={detail.data} automatic={automaticDiagnosisId === selectedDiagnosisId} /> : null}</Modal>}
   </div>;
 }
 

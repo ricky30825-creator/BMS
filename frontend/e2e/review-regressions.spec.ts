@@ -52,6 +52,10 @@ test.describe("frontend review regressions", () => {
 
   test("uses the active session label and renders an honest empty notification state", async ({ page }) => {
     await signIn(page, "hong@cellguard.io");
+    await page.getByRole("button", { name: "알림 열기" }).click();
+    await expect(page.locator(".notification-popover")).toContainText("새 알림이 없습니다.");
+    await expect(page.locator(".notification-popover")).not.toContainText("PACK-001");
+    await page.getByRole("button", { name: "알림 열기" }).click();
     await connectBattery(page, "PACK-003", false);
     await expect(page.locator(".connection-pill")).toHaveText("장비 연결 대기");
     await expect(page.locator(".connection-pill")).not.toContainText("측정 중");
@@ -61,10 +65,7 @@ test.describe("frontend review regressions", () => {
     const dashboard = page.locator("aside").getByRole("button", { name: /대시보드/ });
     await expect(dashboard).toHaveAttribute("aria-disabled", "true");
     await dashboard.click({ force: true });
-    await expect(page.getByRole("status")).toHaveText("장비의 첫 센서 프레임을 기다리는 중입니다. 응답이 없으면 배터리 관리에서 다시 시도하세요.");
-    await page.getByRole("button", { name: "알림 열기" }).click();
-    await expect(page.locator(".notification-popover")).toContainText("새 알림이 없습니다.");
-    await expect(page.locator(".notification-popover")).not.toContainText("PACK-001");
+    await expect(page.getByRole("status")).toHaveText("세션 요청을 접수했습니다. 장비의 첫 신선 센서 프레임을 기다리는 중입니다. 이 확인 전에는 측정 화면이 열리지 않습니다.");
   });
 
   test("keeps a failed session request retryable", async ({ page }) => {
@@ -74,12 +75,14 @@ test.describe("frontend review regressions", () => {
     await card.getByRole("button", { name: "연결하고 측정" }).click();
     const dialog = page.getByRole("dialog", { name: "PACK-001을(를) 측정할까요?" });
     await dialog.getByRole("button", { name: "연결하고 측정" }).click();
-    await expect(dialog).toContainText("진단기가 오프라인이거나 응답하지 않습니다.");
-    await expect(dialog.getByRole("button", { name: "연결하고 측정" })).toBeEnabled();
+    const failed = page.getByRole("dialog", { name: "연결 실패 · PACK-001" });
+    await expect(failed).toContainText("진단기가 오프라인이거나 응답하지 않습니다.");
+    await expect(failed.getByRole("button", { name: "다시 연결 요청" })).toBeEnabled();
     await enableMockFault(page, null);
-    await dialog.getByRole("button", { name: "연결하고 측정" }).click();
+    await failed.getByRole("button", { name: "다시 연결 요청" }).click();
     await expect(page).toHaveURL(/\/battery$/);
     await markSensorFrame(page, "b_pack_001");
+    await expect(page.getByRole("dialog", { name: "연결 확인 · PACK-001" })).toBeVisible();
     await expect(page.locator(".connection-pill")).toHaveText("연결됨 · 측정 중");
   });
 

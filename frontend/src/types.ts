@@ -279,6 +279,7 @@ export type Diagnosis = {
   sessionId: string;
   kind: "QUICK" | "CAPACITY";
   status: "RUNNING" | "COMPLETED" | "ABORTED" | "FAILED";
+  dataSource?: "SIMULATED" | "MEASURED";
   phase?: string;
   confidence?: "LOW" | "HIGH";
   startedAt: string;
@@ -292,7 +293,9 @@ export type Diagnosis = {
   result?: Record<string, unknown> | null;
   quick?: {
     regulationKneeA?: number | null;
+    kneeIsUpperBound?: boolean | null;
     thermalSlopeCPerMin?: number | null;
+    specAttainmentPct?: number | null;
     grade?: string | null;
     [key: string]: unknown;
   } | null;

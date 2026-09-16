@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { QueryClient, useQueryClient } from "@tanstack/react-query";
 import { api, apiBaseUrl, demoAuthToken } from "../api/client";
+import { announceDiagnosisCompletion } from "../api/diagnosis";
 import { normalizeDashboard, normalizeDashboardAnomaly, normalizeDashboardMetrics, normalizeRelay, type DashboardMetricParam } from "../api/normalize";
 import { measurementPhaseFor } from "../measurementState";
 import { appendDashboardTrendPoint } from "../dashboardTrend";
@@ -53,6 +54,15 @@ export function applyDiagnosisEvent(current: Diagnosis | null | undefined, type:
   if (type === "diagnosis.progress") return current ? { ...current, ...(payload as Partial<Diagnosis>), status: "RUNNING" } : current;
   if (type === "diagnosis.aborted") return current ? { ...current, ...(payload as Partial<Diagnosis>), status: "ABORTED" } : current;
   return current;
+}
+
+export function applyDiagnosisRealtimeEvent(queryClient: QueryClient, type: "diagnosis.progress" | "diagnosis.done" | "diagnosis.aborted", payload: Partial<Diagnosis>): void {
+  const current = queryClient.getQueryData<Diagnosis | null>(["diagnosis"]);
+  const next = applyDiagnosisEvent(current, type, payload);
+  queryClient.setQueryData(["diagnosis"], type === "diagnosis.progress" ? next : null);
+  void queryClient.invalidateQueries({ queryKey: ["diagnosis"] });
+  if (type !== "diagnosis.progress" && payload.id) announceDiagnosisCompletion(queryClient, payload.id, "websocket");
+  if (type !== "diagnosis.progress") void queryClient.invalidateQueries({ queryKey: ["diagnosis-history"] });
 }
 
 type AlertListCache = { items: Alert[]; page: { number: number; size: number; total: number; totalPages: number } };
@@ -328,21 +338,18 @@ export function useRealtime({ enabled, sessionKey, onAutoCut, onSessionEnded, on
           else if (envelope.type === "alert.created" && isAlertPayload(envelope.payload)) applyAlertCreated(queryClient, envelope.payload);
           else if (envelope.type === "event.created" && isEventPayload(envelope.payload)) applyEventCreated(queryClient, envelope.payload);
           else if (envelope.type === "session.ended") {
+            queryClient.setQueryData(["session-ended"], envelope.payload);
             void queryClient.invalidateQueries({ queryKey: ["me"] });
             void queryClient.invalidateQueries({ queryKey: ["dashboard"] });
             callbacks.current.onSessionEnded();
           }
+          else if (envelope.type === "device.status") {
+            queryClient.setQueryData(["device-status"], envelope.payload);
+            void queryClient.invalidateQueries({ queryKey: ["me"] });
+          }
           else if (envelope.type === "diagnosis.progress" || envelope.type === "diagnosis.done" || envelope.type === "diagnosis.aborted") {
             const payload = envelope.payload as Partial<Diagnosis>;
-            const current = queryClient.getQueryData<Diagnosis | null>(["diagnosis"]);
-            const next = applyDiagnosisEvent(current, envelope.type, payload);
-            queryClient.setQueryData(["diagnosis"], envelope.type === "diagnosis.done" || envelope.type === "diagnosis.aborted" ? null : next);
-            void queryClient.invalidateQueries({ queryKey: ["diagnosis"] });
-            if (payload.id) {
-              if (envelope.type === "diagnosis.done") queryClient.setQueryData(["diagnosis-detail", payload.id], payload as Diagnosis);
-              void queryClient.invalidateQueries({ queryKey: ["diagnosis-detail", payload.id] });
-            }
-            if (envelope.type !== "diagnosis.progress") void queryClient.invalidateQueries({ queryKey: ["diagnosis-history"] });
+            applyDiagnosisRealtimeEvent(queryClient, envelope.type, payload);
           }
           else if (envelope.type === "resync.required") {
             setState("resyncing");
