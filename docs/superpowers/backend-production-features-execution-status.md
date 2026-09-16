@@ -103,26 +103,26 @@
 
 ## Task 6 — Fail-Safe 설정 및 비실물 통합
 
-- 현재 상태: `REVIEW_REQUIRED`
-- 담당 에이전트: `/root/task6_failsafe_resume` (이전 `/root/task6_failsafe`는 사용자 요청으로 변경 없이 중단)
+- 현재 상태: `COMPLETE`
+- 담당 에이전트: `/root/task6_failsafe_ws_fix` (최초 구현 `/root/task6_failsafe_resume`; 이전 `/root/task6_failsafe`는 사용자 요청으로 변경 없이 중단)
 - 기준 커밋: `bba50a4`
-- 결과 커밋: `d4fe894`
+- 결과 커밋: `d4fe894`, `4c4bcd4`
 - 변경 파일: Fail-Safe/env/Raw Consumer/store/server 구현·테스트, migration `012_failsafe_profile_and_baseline.sql`, Compose/env 예시, PLAN 및 관련 계약·하드웨어·상태·검증 문서
 - 구현 결과: 0 sentinel 전용 설정, 프로필별 센서 판정, 세션별 10초 압력 baseline 영속화, 부착 불량 이벤트, replay-safe 신규 차단 transaction과 commit 후 WS 발신 구현
-- 부모 검토 결과: 검토 대기
-- 서브에이전트 테스트: backend typecheck/build, Vitest 357 passed/1 skipped, contract lint 위반 0건·lint tests 17/17, Compose YAML 파싱 및 Fail-Safe 기본값 0 확인
-- 부모 독립 테스트: 미실행
-- 실환경 검증 여부: 미실행
-- 남은 문제 또는 외부 차단 조건: 부모 독립 검토 필요; Docker CLI, 실제 PostgreSQL/Kafka/relay 및 승인 실측 임계값은 환경 부재
+- 부모 검토 결과: 통과 — 최초 구현의 WS 선발신 결함을 발견해 outbox Kafka publish + `sent_at` ACK 뒤 발신하도록 별도 수정하고 migration, DB baseline, profile sensor, transaction/replay/offset, manual cut 분리를 직접 검토함
+- 서브에이전트 테스트: 최종 backend typecheck/build, Vitest 361 passed/1 skipped, contract lint 위반 0건, `git diff --check` 통과
+- 부모 독립 테스트: backend typecheck/build 및 Vitest 361 passed/1 skipped, contract lint 위반 0건·lint tests 20/20, Compose YAML 파싱과 Fail-Safe 환경값 5개 모두 0, `git diff --check` 통과
+- 실환경 검증 여부: synthetic raw→DB→Fail-Safe→interlock/audit/domain/outbox→Kafka publish/sent ACK→WS 완료; Docker CLI·`TEST_DATABASE_URL`·실 Kafka·물리 relay ACK 부재
+- 남은 문제 또는 외부 차단 조건: 승인 임계값과 실제 relay actuation 인수는 Task 7의 외부 차단 범위
 
 ## Task 7 — 실물 임계값·릴레이 인수
 
-- 현재 상태: `PENDING`
-- 담당 에이전트: 미배정
-- 기준 커밋: 미정
+- 현재 상태: `IN_PROGRESS`
+- 담당 에이전트: `/root/task7_hardware_acceptance`
+- 기준 커밋: `4c4bcd4`
 - 결과 커밋: 미정
 - 변경 파일: 미정
-- 구현 결과: 미착수
+- 구현 결과: 실측 기록 양식·외부 차단 조건 정리 진행 중
 - 부모 검토 결과: 미착수
 - 서브에이전트 테스트: 미실행
 - 부모 독립 테스트: 미실행
