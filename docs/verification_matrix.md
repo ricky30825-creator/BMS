@@ -88,6 +88,9 @@ python3 -m unittest discover -s tools -p 'test_*.py'
 
 ## 하드웨어·회로
 
+Task 7의 임계 실측표, relay end-to-end 인수 절차와 현재 relay.autoCut ACK 한계는
+[물리 Fail-Safe 실측·릴레이 인수 기록](hardware/failsafe_threshold_relay_acceptance.md)을 따른다.
+
 | 변경 범위 | 검증 | 통과 기준 |
 |---|---|---|
 | 모드 1 회로 | `tools/gen_mode1_sch.py` 실행 후 KiCad ERC와 netlist 확인 | 생성 회로와 네트 연결이 일치하고 ERC 위반 0건 |

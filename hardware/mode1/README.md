@@ -16,6 +16,8 @@
 
 ## 같이 볼 문서
 
+- Fail-Safe 실측·릴레이 인수 기록: [기록표](../../docs/hardware/failsafe_threshold_relay_acceptance.md)
+
 - 조립·배선·안전: `docs/hardware/mode1_beginner_guide.md`
 - 레지스터·샘플링·릴레이 계약: `docs/hardware/mode1_backend_spec.md`
 

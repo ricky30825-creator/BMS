@@ -295,6 +295,9 @@ Timescale 적재, 물리 Fail-Safe는 여전히 별도 범위다.
 
 ### B3. Fail-Safe 판정 주체 — **비실물 소프트웨어 통합 완료(2026-09-16) / 실측 문턱·실물 인수 대기**
 
+Task 7의 항목별 실측·승인 양식과 relay 인수 순서는
+[Fail-Safe 실측·릴레이 인수 기록](hardware/failsafe_threshold_relay_acceptance.md)에 기록한다.
+
 - `judgeFailsafe`는 AI score/checkpoint 없이 `MODE1_EXTERNAL_CELL_V1`(접촉·IR·온도 상승률·압력), `MODE2_FULL`(IR·온도 상승률·가스), `COMBINED_EXISTING_PARTS_V1`(IR·온도 상승률)에서 실재 센서만 판정한다. `FAILSAFE_TEMP_CONTACT_CAP_C`, `FAILSAFE_TEMP_IR_CAP_C`, `FAILSAFE_TEMP_RISE_RATE_C_PER_MIN`, `FAILSAFE_PRESSURE_RISE_PCT`, `FAILSAFE_GAS_RAW`는 전용 배포 설정이며 현재 기본값은 전부 `0`이다. 사용자 온도 배지 `WARN|CRIT`와 물리 차단 문턱은 별도다.
 - Raw Consumer는 새 Raw row를 PostgreSQL에 먼저 commit한 뒤 해당 세션의 시간순 sample만 Fail-Safe에 전달한다. mode1 pressure는 세션 시작 후 10초 구간 중앙값을 `failsafe_pressure_baseline`에 한 번 고정한다. baseline `<500`이면 `PRESSURE_SENSOR_ATTACHMENT_INVALID` domain event를 기록하고 그 세션의 압력 계층은 비활성화된다. 이전 세션 baseline 재사용·out-of-order 프레임의 안전 판정은 없다.
 - 신규 차단은 `relay_state`·`RELAY_AUTO_CUT` audit·domain event·`RELAY_CUT` outbox를 PostgreSQL transaction 하나로 commit한다. 저장소가 commit 뒤 `newlyEngaged`를 돌려주며, 동시 worker·replay·이미 걸린 interlock은 중복 차단·edge 전달·`relay.autoCut` 발신을 만들지 않는다. PostgreSQL의 `relay.autoCut`은 `FAILSAFE_*` command와 `failsafe-relay-cut:<batteryId>:<reasonCode>:` dedupe identity가 모두 맞고 Kafka publish 및 outbox `sent_at` ACK까지 성공한 뒤에만 한 번 발신한다. publish/retry/poison/ACK 실패와 수동 `RELAY_CUT`에는 발신하지 않는다. 이 단계는 Kafka 전달 ACK일 뿐 실물 relay actuation ACK는 아니며 Task 7에서 검증한다. WS callback 실패는 로그로 남기고 이미 ACK된 command를 재발행하지 않는다.
