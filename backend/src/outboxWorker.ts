@@ -78,6 +78,13 @@ export type OutboxProcessResult = {
   poisoned: number;
 };
 
+export type FailsafeCutOutboxAcknowledgement = {
+  eventId: string;
+  dedupeKey: string;
+  batteryId: string;
+  reasonCode: string;
+};
+
 export type OutboxWorkerOptions = {
   db: OutboxDbPool;
   publisher: KafkaDeviceCommandPublisher;
@@ -88,6 +95,7 @@ export type OutboxWorkerOptions = {
   retryBaseMs?: number;
   retryMaxMs?: number;
   logger?: (message: string, details?: Record<string, unknown>) => void;
+  onFailsafeCutOutboxAcknowledged?: (acknowledgement: FailsafeCutOutboxAcknowledgement) => Promise<void> | void;
 };
 
 export type OutboxRuntimeGate = {
@@ -466,6 +474,35 @@ export class OutboxWorker {
           partitionKey: row.partitionKey!,
         });
         const acknowledged = await markOutboxSent(this.options.db, row);
+        const reasonCode = event.code === "RELAY_CUT" ? event.params.reasonCode : null;
+        const isFailsafeCut = event.code === "RELAY_CUT"
+          && reasonCode?.startsWith("FAILSAFE_") === true
+          && row.dedupeKey.startsWith(`failsafe-relay-cut:${event.params.batteryId}:${reasonCode}:`);
+        if (acknowledged && isFailsafeCut && this.options.onFailsafeCutOutboxAcknowledged) {
+          try {
+            await this.options.onFailsafeCutOutboxAcknowledged({
+              eventId: row.eventId,
+              dedupeKey: row.dedupeKey,
+              batteryId: event.params.batteryId,
+              reasonCode,
+            });
+          } catch (error) {
+            // The outbox row is already sent. A failed WS callback is observable,
+            // but must never put the command back into the publish retry path.
+            try {
+              this.logger("Fail-Safe relay.autoCut callback failed after outbox sent acknowledgement", {
+                id: row.id,
+                eventId: row.eventId,
+                dedupeKey: row.dedupeKey,
+                batteryId: event.params.batteryId,
+                reasonCode,
+                error: errorText(error),
+              });
+            } catch {
+              // Logging must not turn an acknowledged command into a retry either.
+            }
+          }
+        }
         return { outcome: "published", acknowledged };
       } catch (error) {
         if (error instanceof PoisonOutboxRowError) {
@@ -475,7 +512,7 @@ export class OutboxWorker {
         }
         const delayMs = outboxRetryDelayMs(row.attempts, this.retryBaseMs, this.retryMaxMs);
         const retried = await markOutboxRetry(this.options.db, row, errorText(error), delayMs);
-        this.logger("outbox publish failed; retry scheduled", { id: row.id, eventId: row.eventId, retried, delayMs, error: errorText(error) });
+        this.logger("outbox delivery failed; retry scheduled", { id: row.id, eventId: row.eventId, retried, delayMs, error: errorText(error) });
         return { outcome: "retried", acknowledged: false };
       }
     }));

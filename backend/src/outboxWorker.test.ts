@@ -8,6 +8,7 @@ import {
   outboxRetryDelayMs,
   recoverExpiredOutboxClaims,
   shouldStartOutboxWorker,
+  type FailsafeCutOutboxAcknowledgement,
   type OutboxDbClient,
   type OutboxDbPool,
   type OutboxRow,
@@ -33,9 +34,9 @@ type FakeRow = {
   dead_at: Date | null;
 };
 
-function event(code: "RELAY_CUT" | "RELAY_RESTORE", batteryId: string) {
+function event(code: "RELAY_CUT" | "RELAY_RESTORE", batteryId: string, reasonCode = "USER") {
   return code === "RELAY_CUT"
-    ? { version: 1, code, params: { batteryId, reasonCode: "USER" } }
+    ? { version: 1, code, params: { batteryId, reasonCode } }
     : { version: 1, code, params: { batteryId } };
 }
 
@@ -61,10 +62,17 @@ function row(id: number, batteryId: string, payload: unknown = event("RELAY_CUT"
   };
 }
 
+function failsafeRow(id: number, batteryId: string, reasonCode: string): FakeRow {
+  const result = row(id, batteryId, event("RELAY_CUT", batteryId, reasonCode));
+  result.dedupe_key = `failsafe-relay-cut:${batteryId}:${reasonCode}:fixture-condition`;
+  return result;
+}
+
 /** Small SQL-aware fake to exercise the real claim/update boundaries. */
 class FakeOutboxDb implements OutboxDbPool {
   readonly queries: Array<{ text: string; values: unknown[] }> = [];
   readonly client: OutboxDbClient;
+  failNextSentAck = false;
 
   constructor(readonly rows: FakeRow[]) {
     this.client = {
@@ -108,6 +116,10 @@ class FakeOutboxDb implements OutboxDbPool {
           return { rows: expired.map((candidate) => ({ id: String(candidate.id) })), rowCount: expired.length } as { rows: T[]; rowCount: number };
         }
         if (normalized.startsWith("update outbox set sent_at")) {
+          if (this.failNextSentAck) {
+            this.failNextSentAck = false;
+            throw new Error("sent acknowledgement unavailable");
+          }
           const [id, eventId, claimToken, dedupeKey] = values.map(String);
           const candidate = this.rows.find((item) => String(item.id) === id && item.event_id === eventId && item.claim_token === claimToken
             && item.dedupe_key === dedupeKey
@@ -209,6 +221,92 @@ describe("OutboxWorker claim, retry, and lifecycle", () => {
     expect(db.rows[0].last_error).toBeNull();
   });
 
+  it("notifies only a Fail-Safe cut after Kafka publish and sent acknowledgement, never for a manual cut", async () => {
+    const failsafe = failsafeRow(1, "battery-a", "FAILSAFE_TEMP_IR_OVER_CAP");
+    const manual = row(2, "battery-b", event("RELAY_CUT", "battery-b", "USER"));
+    const manualWithFailsafeReason = row(3, "battery-c", event("RELAY_CUT", "battery-c", "FAILSAFE_TEMP_IR_OVER_CAP"));
+    const db = new FakeOutboxDb([failsafe, manual, manualWithFailsafeReason]);
+    const publisher = fakePublisher();
+    const onFailsafeCutOutboxAcknowledged = vi.fn(async (acknowledgement: FailsafeCutOutboxAcknowledgement) => {
+      expect(failsafe.sent_at).toBeInstanceOf(Date);
+      expect(acknowledgement).toEqual({
+        eventId: "evt-1",
+        dedupeKey: "failsafe-relay-cut:battery-a:FAILSAFE_TEMP_IR_OVER_CAP:fixture-condition",
+        batteryId: "battery-a",
+        reasonCode: "FAILSAFE_TEMP_IR_OVER_CAP",
+      });
+    });
+
+    const result = await worker(db, publisher, { batchSize: 3, onFailsafeCutOutboxAcknowledged }).processOnce();
+
+    expect(result).toMatchObject({ claimed: 3, published: 3, acknowledged: 3, retried: 0, poisoned: 0 });
+    expect(failsafe.sent_at).toBeInstanceOf(Date);
+    expect(manual.sent_at).toBeInstanceOf(Date);
+    expect(manualWithFailsafeReason.sent_at).toBeInstanceOf(Date);
+    expect(onFailsafeCutOutboxAcknowledged).toHaveBeenCalledOnce();
+  });
+
+  it("publishes no Fail-Safe notification on failure and calls it once after retry succeeds", async () => {
+    const db = new FakeOutboxDb([failsafeRow(1, "battery-a", "FAILSAFE_GAS_OVER_CAP")]);
+    let publishAttempts = 0;
+    const publisher = fakePublisher(async () => {
+      publishAttempts += 1;
+      if (publishAttempts === 1) throw new Error("broker unavailable");
+    });
+    const onFailsafeCutOutboxAcknowledged = vi.fn();
+    const outbox = worker(db, publisher, { onFailsafeCutOutboxAcknowledged });
+
+    expect(await outbox.processOnce()).toMatchObject({ claimed: 1, published: 0, acknowledged: 0, retried: 1 });
+    expect(onFailsafeCutOutboxAcknowledged).not.toHaveBeenCalled();
+    expect(db.rows[0].sent_at).toBeNull();
+    db.rows[0].next_attempt_at = new Date(Date.now() - 1);
+
+    expect(await outbox.processOnce()).toMatchObject({ claimed: 1, published: 1, acknowledged: 1, retried: 0 });
+    expect(await outbox.processOnce()).toMatchObject({ claimed: 0, published: 0, acknowledged: 0 });
+    expect(publisher.publish).toHaveBeenCalledTimes(2);
+    expect(onFailsafeCutOutboxAcknowledged).toHaveBeenCalledOnce();
+  });
+
+  it("does not notify when sent acknowledgement fails; a later acknowledged retry notifies once", async () => {
+    const db = new FakeOutboxDb([failsafeRow(1, "battery-a", "FAILSAFE_GAS_OVER_CAP")]);
+    const publisher = fakePublisher();
+    const onFailsafeCutOutboxAcknowledged = vi.fn();
+    const outbox = worker(db, publisher, { onFailsafeCutOutboxAcknowledged });
+    db.failNextSentAck = true;
+
+    expect(await outbox.processOnce()).toMatchObject({ claimed: 1, published: 0, acknowledged: 0, retried: 1 });
+    expect(onFailsafeCutOutboxAcknowledged).not.toHaveBeenCalled();
+    expect(db.rows[0].sent_at).toBeNull();
+    db.rows[0].next_attempt_at = new Date(Date.now() - 1);
+
+    expect(await outbox.processOnce()).toMatchObject({ claimed: 1, published: 1, acknowledged: 1, retried: 0 });
+    expect(publisher.publish).toHaveBeenCalledTimes(2);
+    expect(onFailsafeCutOutboxAcknowledged).toHaveBeenCalledOnce();
+  });
+
+  it("logs a post-ack callback failure without retrying the sent command", async () => {
+    const db = new FakeOutboxDb([failsafeRow(1, "battery-a", "FAILSAFE_TEMP_OVER_CAP")]);
+    const publisher = fakePublisher();
+    const logger = vi.fn();
+    const onFailsafeCutOutboxAcknowledged = vi.fn(async () => { throw new Error("websocket unavailable"); });
+    const outbox = worker(db, publisher, { logger, onFailsafeCutOutboxAcknowledged });
+
+    expect(await outbox.processOnce()).toMatchObject({ claimed: 1, published: 1, acknowledged: 1, retried: 0 });
+    expect(await outbox.processOnce()).toMatchObject({ claimed: 0, published: 0, acknowledged: 0 });
+    expect(db.rows[0].sent_at).toBeInstanceOf(Date);
+    expect(publisher.publish).toHaveBeenCalledTimes(1);
+    expect(onFailsafeCutOutboxAcknowledged).toHaveBeenCalledOnce();
+    expect(logger).toHaveBeenCalledWith(
+      "Fail-Safe relay.autoCut callback failed after outbox sent acknowledgement",
+      expect.objectContaining({
+        eventId: "evt-1",
+        dedupeKey: "failsafe-relay-cut:battery-a:FAILSAFE_TEMP_OVER_CAP:fixture-condition",
+        batteryId: "battery-a",
+        error: "websocket unavailable",
+      }),
+    );
+  });
+
   it("keeps failed rows unsent, records error, and applies capped exponential backoff", async () => {
     const db = new FakeOutboxDb([row(1, "battery-a"), row(2, "battery-a")]);
     const publisher = fakePublisher(async () => { throw new Error("broker unavailable"); });
@@ -249,12 +347,14 @@ describe("OutboxWorker claim, retry, and lifecycle", () => {
   it("quarantines invalid payloads without sent_at and unblocks later commands", async () => {
     const db = new FakeOutboxDb([row(1, "battery-a", { version: 99, code: "RELAY_CUT", params: {} }), row(2, "battery-a")]);
     const publisher = fakePublisher();
-    const outbox = worker(db, publisher);
+    const onFailsafeCutOutboxAcknowledged = vi.fn();
+    const outbox = worker(db, publisher, { onFailsafeCutOutboxAcknowledged });
     const poisonResult = await outbox.processOnce();
     expect(poisonResult).toMatchObject({ claimed: 1, poisoned: 1, published: 0 });
     expect(db.rows[0].dead_at).toBeInstanceOf(Date);
     expect(db.rows[0].sent_at).toBeNull();
     expect(db.rows[0].last_error).toMatch(/^POISON:/);
+    expect(onFailsafeCutOutboxAcknowledged).not.toHaveBeenCalled();
     const poisonQuery = db.queries.find(({ text }) => /update outbox\s+set dead_at/i.test(text));
     expect(poisonQuery?.text).toMatch(/last_error\s*=\s*\$5/i);
     expect(poisonQuery?.values.slice(0, 4)).toEqual(["1", "evt-1", expect.any(String), "dedupe-1"]);

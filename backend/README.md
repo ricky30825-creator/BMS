@@ -224,3 +224,13 @@ battery ID as the record key and the durable outbox `event_id` in the
 record `attempts`/`last_error`, and schedule capped exponential backoff.
 Malformed rows are retained with `dead_at` and a `POISON:` error (never marked
 sent), allowing later commands in that battery partition to proceed.
+
+For a PostgreSQL Fail-Safe `RELAY_CUT`, the worker requires both a `reasonCode`
+starting with `FAILSAFE_` and the durable `failsafe-relay-cut:<batteryId>:<reasonCode>:`
+dedupe-key prefix. It emits `relay.autoCut` only after Kafka publish succeeds
+and the database confirms the row's `sent_at` acknowledgement. Manual cuts do
+not emit that event. Publish, retry, poison, and sent-ack failures emit no
+Fail-Safe WS event. This confirms delivery to Kafka only; it does not confirm
+physical relay actuation, which remains a Task 7 acceptance boundary. If the
+WS callback fails after the row is acknowledged, the worker logs it and does
+not republish the command.

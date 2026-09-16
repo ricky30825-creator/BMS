@@ -9,8 +9,9 @@ export type FailsafeDeps = {
   onAutoCut(relay: DemoRelay, verdict: NonNullable<FailsafeVerdict>): void;
 };
 
-// RawMetricsConsumer가 전달한 시간순 sample을 판정한다. PostgreSQL edge
-// command는 outbox에 저장하며, relay.autoCut WS는 신규 interlock commit 뒤에만 보낸다.
+// RawMetricsConsumer가 전달한 시간순 sample을 판정한다. PostgreSQL runtime은
+// relay.autoCut을 즉시 보내지 않고, outbox Kafka publish와 sent ACK 뒤로 미룬다.
+// Memory demo는 DeviceCommandPort 성공 뒤 기존 relay.autoCut 동작을 유지한다.
 export async function evaluateFailsafe(
   deps: FailsafeDeps,
   batteryId: string,

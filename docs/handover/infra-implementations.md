@@ -286,7 +286,7 @@ export async function runFailsafe(
 ): Promise<FailsafeVerdict>
 ```
 
-판정(`judgeFailsafe`)·인터락(`engageFailsafe`)·에지 통보·WS 푸시(`broadcastAutoCut` → `relay.autoCut`)가 이미 그 안에 배선돼 있다(`backend/src/failsafeRunner.ts`의 `evaluateFailsafe`가 실체). PostgreSQL의 `engageFailsafe`는 상태·감사·`RELAY_CUT` outbox를 원자적으로 기록하고, 별도 `OutboxWorker`가 이를 edge에 발행한다. memory demo만 logging `DeviceCommandPort`를 직접 호출한다. Consumer는 callback을 battery별로 직렬화하며, callback과 DB transaction이 끝난 뒤에만 Kafka offset을 commit한다.
+판정(`judgeFailsafe`)·인터락(`engageFailsafe`)은 `backend/src/failsafeRunner.ts`의 `evaluateFailsafe`가 수행한다. PostgreSQL에서는 상태·감사·`RELAY_CUT` outbox를 원자 기록한 직후 WS를 보내지 않는다. 별도 `OutboxWorker`가 `FAILSAFE_*` 사유와 `failsafe-relay-cut:<batteryId>:<reasonCode>:` dedupe identity가 맞는 command를 Kafka에 발행하고 `sent_at` ACK까지 기록한 뒤 `relay.autoCut`을 한 번 발신한다. 이 ACK는 브로커 전달 확인이며 실물 relay actuation ACK가 아니다(Task 7). memory demo는 `DeviceCommandPort` 성공 뒤 기존 WS를 발신한다. Consumer는 callback을 battery별로 직렬화하며, callback과 DB transaction이 끝난 뒤에만 Kafka offset을 commit한다.
 
 #### 14a. Consumer 프로세스 경계 — **결정: backend 프로세스에 embedded (2026-09-14)**
 
@@ -318,23 +318,11 @@ export async function runFailsafe(
 
 **구현은 `RawMetricsConsumer`의 battery-keyed Promise queue다.** DB 적재는 transaction으로 각자 수행하되, 기존 `evaluateFailsafe`의 read-then-act hook은 같은 `batteryId`에서 겹치지 않는다. 이건 PostgreSQL의 UNIQUE 제약처럼 DB가 대신 막아주는 경합이 아니다.
 
-#### 14c. ⚠️ WS 통보가 조용히 사라질 수 있다 — `broadcastAutoCut` 실패를 반드시 로깅할 것
+#### 14c. Fail-Safe WS와 전달 확인의 경계
 
-`runFailsafe`가 넘기는 `onAutoCut` 콜백은 `backend/src/server.ts`에서 fire-and-forget이므로 실패를 로그로 남긴다.
+memory demo는 `DeviceCommandPort` 성공 뒤 기존 `relay.autoCut` 동작을 유지한다. PostgreSQL 경로는 평가/DB commit 시점에 WS를 보내지 않는다. `OutboxWorker`가 `FAILSAFE_*` 사유의 `RELAY_CUT`을 Kafka에 발행하고 DB `sent_at` ACK까지 성공한 뒤 `relay.autoCut`을 발신한다. publish/retry/poison/ACK 실패에는 WS를 보내지 않으며, WS callback 실패는 event identity와 함께 로그로 남기고 이미 ACK된 command를 재발행하지 않는다. 수동 `RELAY_CUT`은 자동 차단 WS로 취급하지 않는다.
 
-```ts
-onAutoCut: (relay, verdict) => {
-  void broadcastAutoCut(battery, relay, verdict.triggerCode).catch((error) => {
-    console.error("[failsafe] relay.autoCut broadcast failed", error);
-  });
-}
-```
-
-`broadcastAutoCut`이 언젠가 reject하면(예: WS `broadcast()` 호출 내부에서 예외가 던져지면) 이건 **unhandled promise rejection**이 되고 어디에도 로깅되지 않는다. 즉 실제 Fail-Safe가 트리거되어 릴레이는 물리적으로 끊겼는데, 대시보드에 뜨는 `relay.autoCut` WS 알림만 아무 흔적 없이 사라질 수 있다 — 릴레이 차단 자체는 `relay_state`·`audit_log`에 남으므로 안전 기능은 정상 동작하지만, 운영자가 화면으로 그 사실을 놓칠 위험이다.
-
-현재 구현은 첫 번째 방법을 사용한다.
-
-둘 중 아무것도 안 하면 이 갭은 코드 리뷰로도 잘 안 보인다 — `void` 키워드가 "의도적으로 무시함"처럼 읽혀서, 실패 시나리오를 실제로 재현해보기 전까지는 아무도 눈치채지 못한다.
+Kafka publish와 outbox `sent_at` ACK는 브로커 전달까지만 확인한다. Edge consumer가 command를 처리했거나 GPIO 릴레이가 물리적으로 OPEN 됐다는 확인이 아니며, 실제 relay actuation ACK와 Raspberry Pi 인수는 Task 7 범위로 남는다.
 
 ### 15. `sessionEnded` 배선 지점 — **결정: 3번(outbox)으로 함께 해결 (2026-08-28)**
 

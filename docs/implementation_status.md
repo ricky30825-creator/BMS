@@ -100,7 +100,7 @@ transaction에서 처리한다. 관리자 API는 작성·수정·임시저장·�
 | 백엔드 인증 골격 | `backend/src/auth.ts`, 세션 미들웨어, 감사 로그, DB 연결, Better Auth `/api/auth/*`. 데모 토큰 인증으로 RBAC·정지 계정 차단까지 실동작 | 골격 구현 / **실인증 전환은 보류(의도적)** |
 | 백엔드 데모 도메인 API | `backend/src/server.ts`: 발급 토큰 인증, 사용자·관리자 REST 라우트(`/health`·`/api/demo/*` 포함), 계약형 대시보드, F21 fail-closed, 릴레이 승인·재인증·멱등성, Raw CSV. 게이트 실동작 확인(`409 BATTERY_BLOCKED`/`NO_ACTIVE_SESSION`, `401 REAUTH_REQUIRED`, `ACK_REQUIRED`, 관리자 `403`) | **데모 런타임 구현·실 REST 브라우저 검증 완료** |
 | 백엔드 도메인 데이터 저장 | `backend/src/store/contract.ts`의 `CellGuardStore`, `memory.ts` 참조 구현, `postgres.ts` PostgreSQL 구현, `store.ts`의 `DATA_MODE` 분기. PostgreSQL은 자산 최신값·릴레이·진단·건강 집계·텔레메트리 CSV를 읽고, 상태+감사 변경을 트랜잭션으로 처리한다 | **구현 완료 / TEST_DATABASE_URL 설정 시 실 DB 계약 검증** |
-| 백엔드 실시간 스트림 (WS 발신) | **C1 완료(2026-08-25).** 프론트가 처리하는 11종 중 `metrics.tick`·`anomaly.score`·`anomaly.gradeChanged`·`relay.changed`·`alert.created`·`event.created`·`session.ended`·`resync.required` 8종이 실제로 발신되고, `subscribe`/`resume`이 1만 건 링버퍼로 실제 재전송을 수행한다. memory 모드의 정적 `metrics.tick`·`anomaly.score`는 기존 데모 동작을 유지하며, PostgreSQL 모드의 anomaly 이벤트는 새로 커밋된 `anomaly_score` 결과에서만 발신한다. `relay.autoCut`은 **구현됨(문턱 미설정이라 휴면)**(B3 완료, §4 C1 참조), `diagnosis.progress`/`.done`/`.aborted`는 여전히 미발신 | **구현됨(부분 휴면)** — 잔여 `diagnosis.*`(→ F21 안전 프로필) |
+| 백엔드 실시간 스트림 (WS 발신) | **C1 완료(2026-08-25).** 프론트가 처리하는 11종 중 `metrics.tick`·`anomaly.score`·`anomaly.gradeChanged`·`relay.changed`·`alert.created`·`event.created`·`session.ended`·`resync.required` 8종이 실제로 발신되고, `subscribe`/`resume`이 1만 건 링버퍼로 실제 재전송을 수행한다. memory 모드의 정적 `metrics.tick`·`anomaly.score`는 기존 데모 동작을 유지하며, PostgreSQL 모드의 anomaly 이벤트는 새로 커밋된 `anomaly_score` 결과에서만 발신한다. `relay.autoCut`은 PostgreSQL에서 Fail-Safe `RELAY_CUT`의 Kafka publish + outbox `sent_at` ACK 뒤 발신하며, 실물 actuation ACK는 미구현(Task 7); 기본 문턱 `0`에서는 휴면이다(B3, §4 C1 참조). `diagnosis.progress`/`.done`/`.aborted`는 여전히 미발신 | **구현됨(부분 휴면)** — 잔여 `diagnosis.*`(→ F21 안전 프로필) |
 | 에지 명령 경로 | `backend/src/device/port.ts`(`DeviceCommandPort` 인터페이스, 메서드 4개) + `backend/src/device/logging.ts`(memory 전용 로깅 스텁) + `backend/src/kafka.ts`(version 1 wire contract·Zod 검증·파티션 키) + `backend/src/device/kafka.ts`(실 producer) + `backend/src/outboxWorker.ts`(lease/claim/retry worker). PostgreSQL 상태·감사·outbox 원자성은 `store/postgres.ts`와 `008_outbox_identity.sql`에 구현됐고, `SESSION_ENDED`도 `batteryId`를 payload·파티션 키에 포함한다. `009_outbox_delivery.sql`은 만료 claim 복구·poison quarantine을 제공한다 | **구현 완료 / 실 Kafka·edge relay 인수 검증 대기** (→ B4) |
 | 백엔드 DB 도메인 provider·Consumer·TimescaleDB | 현재 migration `000_identity.sql`~`012_failsafe_profile_and_baseline.sql`, `postgres.ts`, `telemetryConsumer.ts`, `anomalyConsumer.ts`, `outboxWorker.ts`. Raw/Anomaly Consumer, Fail-Safe sample과 세션 pressure baseline, transactional interlock, Outbox Worker 경계를 구현했다. `TEST_DATABASE_URL`이 없으면 실 DB 계약 테스트는 skip한다. Kafka/Timescale 실측 부하는 별도이며 `AUTH_MODE=betterauth`의 WS 인증은 여전히 보류되고, WS upgrade가 `DATA_MODE`를 별도로 검사하지 않는 갭은 남아 있다 | **기존 Raw/Anomaly/Outbox + Task 2~6 소프트웨어 통합 구현 / 실 Kafka·DB 인수 대기** |
 | 알림 발송 (카카오·SMS·메일) | 채널 ON/OFF 토글과 policy 응답만 있고(`server.ts:405`·`:409`), **실제로 메시지를 보내는 코드는 `backend/src`에 없다** | **보류(의도적)** — 토글 현행 유지, 추가 작업 없음 |
@@ -297,7 +297,7 @@ Timescale 적재, 물리 Fail-Safe는 여전히 별도 범위다.
 
 - `judgeFailsafe`는 AI score/checkpoint 없이 `MODE1_EXTERNAL_CELL_V1`(접촉·IR·온도 상승률·압력), `MODE2_FULL`(IR·온도 상승률·가스), `COMBINED_EXISTING_PARTS_V1`(IR·온도 상승률)에서 실재 센서만 판정한다. `FAILSAFE_TEMP_CONTACT_CAP_C`, `FAILSAFE_TEMP_IR_CAP_C`, `FAILSAFE_TEMP_RISE_RATE_C_PER_MIN`, `FAILSAFE_PRESSURE_RISE_PCT`, `FAILSAFE_GAS_RAW`는 전용 배포 설정이며 현재 기본값은 전부 `0`이다. 사용자 온도 배지 `WARN|CRIT`와 물리 차단 문턱은 별도다.
 - Raw Consumer는 새 Raw row를 PostgreSQL에 먼저 commit한 뒤 해당 세션의 시간순 sample만 Fail-Safe에 전달한다. mode1 pressure는 세션 시작 후 10초 구간 중앙값을 `failsafe_pressure_baseline`에 한 번 고정한다. baseline `<500`이면 `PRESSURE_SENSOR_ATTACHMENT_INVALID` domain event를 기록하고 그 세션의 압력 계층은 비활성화된다. 이전 세션 baseline 재사용·out-of-order 프레임의 안전 판정은 없다.
-- 신규 차단은 `relay_state`·`RELAY_AUTO_CUT` audit·domain event·`RELAY_CUT` outbox를 PostgreSQL transaction 하나로 commit한다. 저장소가 commit 뒤 `newlyEngaged`를 돌려주며, 동시 worker·replay·이미 걸린 interlock은 중복 차단·edge 전달·`relay.autoCut` 발신을 만들지 않는다. edge 명령 publish는 기존 outbox worker의 Kafka 경계에서 수행된다.
+- 신규 차단은 `relay_state`·`RELAY_AUTO_CUT` audit·domain event·`RELAY_CUT` outbox를 PostgreSQL transaction 하나로 commit한다. 저장소가 commit 뒤 `newlyEngaged`를 돌려주며, 동시 worker·replay·이미 걸린 interlock은 중복 차단·edge 전달·`relay.autoCut` 발신을 만들지 않는다. PostgreSQL의 `relay.autoCut`은 `FAILSAFE_*` command와 `failsafe-relay-cut:<batteryId>:<reasonCode>:` dedupe identity가 모두 맞고 Kafka publish 및 outbox `sent_at` ACK까지 성공한 뒤에만 한 번 발신한다. publish/retry/poison/ACK 실패와 수동 `RELAY_CUT`에는 발신하지 않는다. 이 단계는 Kafka 전달 ACK일 뿐 실물 relay actuation ACK는 아니며 Task 7에서 검증한다. WS callback 실패는 로그로 남기고 이미 ACK된 command를 재발행하지 않는다.
 - **검증 경계**: synthetic raw/PG fake/Kafka fake의 비실물 roundtrip과 static/unit 검증은 완료 대상이다. 실제 PostgreSQL/Timescale/Kafka broker 부하, 승인 임계값, 물리 relay/Raspberry Pi 인수는 Task 7 및 하드웨어 실측 전까지 검증되지 않는다. 모든 물리 문턱은 계속 `0`이다.
 
 ### B4. 릴레이 차단 → 에지 실제 전달 — **outbox·Kafka worker 구현 완료(2026-09-14) / 실 인프라 인수 대기**
@@ -321,14 +321,14 @@ Timescale 적재, 물리 Fail-Safe는 여전히 별도 범위다.
 | `anomaly.score` | `:255` | `:1625` | ✓ (휴면 — 위 참조) |
 | `anomaly.gradeChanged` | `:266` | `:1626` | ✓ (휴면 — 위 참조) |
 | `relay.changed` | `:271` | — | ✓ |
-| `relay.autoCut` | `:285` | `:1628` (B3) | ✓ (문턱 미설정이라 휴면) |
+| `relay.autoCut` | `:285` | `:1628` / Outbox ACK (B3) | ✓ (Kafka publish + `sent_at` ACK 뒤; 실물 actuation ACK는 Task 7, 문턱 `0`이라 휴면) |
 | `alert.created` | `:290` | `:1629` | ✓ (휴면 — 위 참조) |
 | `event.created` | `:291` | `:1630` | ✓ |
 | `session.ended` | `:292` | `:1631` | ✓ |
 | `diagnosis.progress`/`.done`/`.aborted` | `:297` | `:1633` | ✗ |
 | `resync.required` | `:309` | `:1638` | ✓ |
 
-- **`relay.autoCut`은 2026-08-25 시점에는 시도하지 않았으나, B3(Fail-Safe 판정 로직)가 2026-08-27에 완료돼 지금은 배선돼 있다.** `judgeFailsafe`·`evaluateFailsafe`·`runFailsafe`(§3 B3 참조)가 조건 충족 시 이 이벤트를 실제로 발신한다. 단 **문턱값이 전부 `0`(미설정)이라 실행 경로는 있어도 실제로 트리거되지는 않는 휴면 상태**다 — Raw Consumer 구독 배선은 완료됐고 하드웨어 실측 문턱값이 갖춰져야 관찰 가능하다.
+- **`relay.autoCut`은 Fail-Safe 전용 이벤트다.** memory 경로는 `DeviceCommandPort` 성공 뒤 발신하고, PostgreSQL 경로는 `evaluateFailsafe`에서 즉시 발신하지 않는다. `FAILSAFE_*` 사유의 `RELAY_CUT`이 Kafka에 publish되고 outbox `sent_at` ACK가 성공한 뒤에만 발신한다. 이는 브로커 전달 확인이며 실물 relay actuation ACK가 아니다(Task 7). 기본 문턱값이 모두 `0`(미설정)이라 실행 경로는 현재 휴면 상태다.
 - **`diagnosis.progress`/`.done`/`.aborted`도 시도하지 않았다** — 당시 `store.ts`의 `F21_THRESHOLDS.configured`가 하드코딩 `false`라 `startDiagnosis`가 `409 SAFETY_PROFILE_NOT_READY`를 던지던 구현 스냅샷이다. Task 1 계약에서는 F21 실행 capability와 별개로 Fail-Safe 프로필 문턱을 배포 설정으로 분리했으며, 이 이벤트 경로는 후속 구현 대상이다.
 - **`metrics.tick`은 100ms 원본을 그대로 흘리지 않는다.** 서버가 **1초 단위로 다운샘플링**해 푸시한다(`:1643`). 페이로드는 `GET /api/dashboard`의 `metrics`와 **동일 구조**(각 지표 `{ value, status }` + `measuredAt`).
 - **`relay.autoCut`을 `relay.changed`에 섞지 않는다**(`:1646`) — 사용자 차단과 구분이 안 된다.

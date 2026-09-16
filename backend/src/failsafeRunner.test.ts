@@ -21,11 +21,15 @@ function deps(interlockEngaged = false) {
 describe("evaluateFailsafe", () => {
   it("조건이 걸리면 인터락을 걸고 에지에 알리고 autoCut을 푸시한다", async () => {
     const d = deps();
+    const trace: string[] = [];
+    d.relayCut.mockImplementation(async () => { trace.push("devicePort.relayCut"); });
+    d.onAutoCut.mockImplementation(() => { trace.push("ws.relay.autoCut"); });
     const verdict = await evaluateFailsafe(d, "B1", "MODE1_EXTERNAL_CELL_V1", tripping, thresholds);
     expect(verdict?.triggerCode).toBe("FAILSAFE_TEMP_IR_OVER_CAP");
     expect(d.engageFailsafe).toHaveBeenCalledWith("B1", "FAILSAFE_TEMP_IR_OVER_CAP", "TEMP_OVER_CAP");
     expect(d.relayCut).toHaveBeenCalledWith("B1", "FAILSAFE_TEMP_IR_OVER_CAP");
     expect(d.onAutoCut).toHaveBeenCalledOnce();
+    expect(trace).toEqual(["devicePort.relayCut", "ws.relay.autoCut"]);
   });
 
   it("조건이 없으면 아무것도 하지 않는다", async () => {
@@ -59,5 +63,6 @@ describe("evaluateFailsafe", () => {
     d.relayCut.mockRejectedValue(new Error("broker down"));
     await expect(evaluateFailsafe(d, "B1", "MODE1_EXTERNAL_CELL_V1", tripping, thresholds)).rejects.toThrow("broker down");
     expect(d.engageFailsafe).toHaveBeenCalledOnce();
+    expect(d.onAutoCut).not.toHaveBeenCalled();
   });
 });

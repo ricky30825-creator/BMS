@@ -1629,6 +1629,26 @@ async function broadcastAutoCut(battery: DemoBattery, relay: DemoRelay, triggerC
   }, null, battery.id);
 }
 
+async function broadcastAutoCutAfterOutboxAcknowledgement(input: {
+  eventId: string;
+  dedupeKey: string;
+  batteryId: string;
+  reasonCode: string;
+}): Promise<void> {
+  if (!input.dedupeKey.startsWith(`failsafe-relay-cut:${input.batteryId}:${input.reasonCode}:`)) {
+    throw new Error(`FAILSAFE_OUTBOX_IDENTITY_MISMATCH:${input.eventId}`);
+  }
+  const [battery, relay] = await Promise.all([
+    batteryById(input.batteryId),
+    relayByBattery(input.batteryId),
+  ]);
+  if (!battery) throw new Error("FAILSAFE_OUTBOX_BATTERY_NOT_FOUND");
+  if (!relay.interlockEngaged || relay.state !== "OPEN" || relay.reasonCode !== input.reasonCode) {
+    throw new Error("FAILSAFE_OUTBOX_INTERLOCK_MISMATCH");
+  }
+  await broadcastAutoCut(battery, relay, input.reasonCode);
+}
+
 // RawMetricsConsumer의 durable-frame callback이 프레임마다 이 함수를 부른다.
 // docs/handover/infra-implementations.md가 이 함수를 Fail-Safe 진입점으로 명시한다.
 export async function runFailsafe(
@@ -1649,6 +1669,10 @@ export async function runFailsafe(
       ? devicePort.relayCut(id, code)
       : Promise.resolve(),
     onAutoCut: (relay, verdict) => {
+      // In PostgreSQL mode the transactional outbox owns this event. The
+      // OutboxWorker emits relay.autoCut only after Kafka publish and sent_at
+      // acknowledgement; that still is not a physical relay actuation ACK.
+      if (env.DATA_MODE !== "memory") return;
       void broadcastAutoCut(battery, relay, verdict.triggerCode).catch((error) => {
         console.error("[failsafe] relay.autoCut broadcast failed", error);
       });
@@ -1695,6 +1719,7 @@ async function startOutboxWorker(): Promise<void> {
     db,
     publisher: commandPort,
     workerId: `cellguard-outbox-${process.pid}`,
+    onFailsafeCutOutboxAcknowledged: broadcastAutoCutAfterOutboxAcknowledgement,
     ...kafkaConfig.outbox,
   });
   outboxWorker = worker;

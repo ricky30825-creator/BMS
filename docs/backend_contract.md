@@ -357,7 +357,7 @@ const locked = gated && r !== 'battery';
 - 현재 지원 trigger code는 `FAILSAFE_TEMP_CONTACT_OVER_CAP`, `FAILSAFE_TEMP_IR_OVER_CAP`, `FAILSAFE_TEMP_RISE_RATE`, `FAILSAFE_GAS_OVER_THRESHOLD`, `FAILSAFE_PRESSURE_RISE`다. 해당 센서가 없는 하드웨어 프로필의 코드는 발생시키지 않으며, 음향 센서는 도입하지 않으므로 `FAILSAFE_ACOUSTIC_OVER_THRESHOLD`는 계약에 없다.
 - 가스·압력·음향 임계 초과 또는 온도 상한/상승률 초과 시, **AI 판정과 무관하게** 즉시 릴레이 차단한다. `[PLAN]`
 - 인터락이 걸린 상태에서 사용자의 릴레이 복구 요청은 `409 INTERLOCK_LOCKED`.
-- 자동 차단이 발생하면 `relay.autoCut`을 즉시 푸시한다. 프론트는 **이 타입을 수신했을 때만** trigger code와 대표 온도를 포함한 자동 차단 모달을 띄운다.
+- 프론트는 **`relay.autoCut`을 수신했을 때만** trigger code와 대표 온도를 포함한 자동 차단 모달을 띄운다. PostgreSQL에서는 신규 Fail-Safe `RELAY_CUT`의 Kafka publish와 outbox `sent_at` ACK 성공 뒤에 발신하며, 이는 실물 릴레이 actuation ACK가 아니다(Task 7). memory 경로는 기존 `DeviceCommandPort` 성공 뒤 발신한다.
 
 ### 3.4 위험 제어 승인 절차 `[v3]` `[REQ-WEB-062/063]`
 
@@ -372,7 +372,7 @@ const locked = gated && r !== 'battery';
 - 모든 요청은 `Idempotency-Key` 헤더가 필수다. 같은 키·같은 본문은 같은 결과를 반환하고, 같은 키·다른 본문은 `409 IDEMPOTENCY_CONFLICT`다.
 - 성공 응답은 `decision: "APPROVED"`, `requestId`, 갱신 릴레이 객체를 포함한다. 정책 거부 응답은 에러 code와 `decision: "REJECTED"`를 포함한다.
 - 성공 시 감사 로그에 `{ actorId, action, targetId, reason, requestId, ip, userAgent, at }`를 기록한다.
-- `DATA_MODE=postgres`에서는 릴레이·세션·Fail-Safe 명령을 저장소 transaction 안의 `outbox`에 함께 기록한다. `outbox.event_id`는 durable command identity이고 `dedupe_key`는 Idempotency-Key 재처리의 유일성 근거다. PostgreSQL 경로는 commit 뒤 `DeviceCommandPort`를 직접 호출하지 않으며, 별도 producer가 `battery-events` 발행 후 `sent_at`을 갱신한다. `OutboxWorker`는 `FOR UPDATE SKIP LOCKED`와 만료 lease를 사용해 같은 `partition_key`의 선행 미전송 row를 건너뛰지 않고, publish 성공 전에는 `sent_at`을 쓰지 않는다. Kafka record key는 `params.batteryId`, durable identity는 `x-cellguard-event-id` header다. 버전-1 payload/topic/partition key가 맞지 않는 poison row는 `dead_at`으로 보존하며 `sent_at`은 null이다.
+- `DATA_MODE=postgres`에서는 릴레이·세션·Fail-Safe 명령을 저장소 transaction 안의 `outbox`에 함께 기록한다. `outbox.event_id`는 durable command identity이고 `dedupe_key`는 Idempotency-Key 재처리의 유일성 근거다. PostgreSQL 경로는 commit 뒤 `DeviceCommandPort`를 직접 호출하지 않으며, 별도 producer가 `battery-events` 발행 후 `sent_at`을 갱신한다. `OutboxWorker`는 `FOR UPDATE SKIP LOCKED`와 만료 lease를 사용해 같은 `partition_key`의 선행 미전송 row를 건너뛰지 않고, publish 성공 전에는 `sent_at`을 쓰지 않는다. Kafka record key는 `params.batteryId`, durable identity는 `x-cellguard-event-id` header다. 버전-1 payload/topic/partition key가 맞지 않는 poison row는 `dead_at`으로 보존하며 `sent_at`은 null이다. PostgreSQL Fail-Safe의 `relay.autoCut`은 `FAILSAFE_*` 사유와 `failsafe-relay-cut:<batteryId>:<reasonCode>:` durable dedupe identity가 모두 맞는 `RELAY_CUT`이 Kafka에 발행되고 DB `sent_at` ACK까지 성공한 뒤에만 발신한다. 이것은 Kafka/outbox 전달 확인이며 실물 릴레이 actuation ACK는 아니다(Task 7 범위). 수동 `RELAY_CUT`, publish/retry/poison/ACK 실패는 이 이벤트를 만들지 않는다.
 
 ### 3.5 감사 로그 불변성 `[v3]` `[REQ-WEB-136]`
 
@@ -564,8 +564,12 @@ out-of-order/older frame은 적재만 하며 현재 안전 상태를 되감지 �
   `recordAudit`는 별도 감사 정본으로 유지한다.
 - `engageFailsafe`는 relay interlock 상태·domain event·`audit_log`·outbox를
   하나의 PostgreSQL transaction으로 성공/실패시킨 뒤 `newlyEngaged`를 반환한다.
-  `relay.autoCut` WS는 실제 신규 차단 commit 뒤에만 발신한다. 이미 interlock인
-  배터리는 새 차단 event/outbox/WS를 만들지 않는다. memory
+  PostgreSQL의 `relay.autoCut` WS는 `FAILSAFE_*` 사유와 `failsafe-relay-cut:` durable
+  dedupe identity가 맞는 신규 outbox command가 Kafka에 발행되고 `sent_at` ACK까지 성공한 뒤 발신한다. 이는 실물 릴레이 actuation ACK를
+  뜻하지 않으며 그 확인은 Task 7 범위다. publish 실패·retry 대기·poison·sent ACK
+  실패에는 발신하지 않고, 재시도 성공 때 한 번만 발신한다. callback 실패는 로그로
+  남기되 이미 ACK된 command를 재발행하지 않는다. 수동 `RELAY_CUT`은 자동 차단 WS를
+  발생시키지 않는다. 이미 interlock인 배터리는 새 차단 event/outbox/WS를 만들지 않는다. memory
   provider는 테스트·데모 계약을 유지할 수 있지만 `DATA_MODE=postgres`의
   production 경로에는 `demoNotices`나 고정 event/trend 배열을 사용하지 않는다.
 
@@ -1843,7 +1847,7 @@ F21 화면이 실행 전에 잠금 사유를 알 수 있도록 `GET /api/batteri
 | `anomaly.score` | 추론 결과 도착 시 | `{ score, grade, aeScore, informerScore, evaluatedAt }` |
 | `anomaly.gradeChanged` | 등급 전이 시에만 | `{ from, to, score, batteryId, batteryLabel }` |
 | `relay.changed` | 상태 변경 시 | `{ state, reason, changedBy, interlock, changedAt }` |
-| `relay.autoCut` | Fail-Safe 발동 시 | `{ batteryId, batteryLabel, representativeTempC, representativeTempSource, triggerCode, cutAt }` |
+| `relay.autoCut` | Fail-Safe `RELAY_CUT`의 Kafka publish + outbox `sent_at` ACK 성공 뒤(PostgreSQL); memory에서는 `DeviceCommandPort` 성공 뒤 | `{ batteryId, batteryLabel, representativeTempC, representativeTempSource, triggerCode, cutAt }` |
 | `alert.created` | 새 알림 | `Alert` 객체 (§4.8) |
 | `event.created` | 새 이벤트 | `Event` 객체 (§4.6) |
 | `session.ended` | 세션 종료 | `{ sessionId, endReason }` — `TIMEOUT`\|`SUPERSEDED`\|`BLOCKED` (§4.3) |

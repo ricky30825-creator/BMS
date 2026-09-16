@@ -1,7 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 import type { KafkaDeviceCommandPublisher } from "./device/kafka.js";
 import { evaluateFailsafe } from "./failsafeRunner.js";
-import { createOutboxWorker, type OutboxDbClient, type OutboxDbPool } from "./outboxWorker.js";
+import {
+  createOutboxWorker,
+  type FailsafeCutOutboxAcknowledgement,
+  type OutboxDbClient,
+  type OutboxDbPool,
+} from "./outboxWorker.js";
 
 import {
   RawMetricsConsumer,
@@ -752,7 +757,8 @@ describe("raw telemetry ingestion", () => {
           return { relay: { ...relay }, newlyEngaged: true };
         },
         relayCut: async () => undefined,
-        onAutoCut: () => { trace.push("ws.relay.autoCut"); },
+        // PostgreSQL evaluation must not broadcast before the outbox delivery boundary.
+        onAutoCut: () => undefined,
       }, batteryId, hardwareProfile, safetySample, {
         tempContactCapC: 0,
         tempIrCapC: 60,
@@ -772,7 +778,7 @@ describe("raw telemetry ingestion", () => {
     expect(relay).toMatchObject({ state: "OPEN", interlockEngaged: true, reasonCode: "FAILSAFE_TEMP_IR_OVER_CAP" });
     expect(auditLog).toEqual([{ action: "RELAY_AUTO_CUT", resource: "battery-1" }]);
     expect(domainEvents).toEqual([{ eventType: "RELAY_AUTO_CUT", batteryId: "battery-1", triggerCode: "FAILSAFE_TEMP_IR_OVER_CAP" }]);
-    expect(trace).toEqual(["postgres.commit", "ws.relay.autoCut"]);
+    expect(trace).toEqual(["postgres.commit"]);
     expect(onDurableFrame).toHaveBeenCalledTimes(2);
     expect(kafka.commitOffsets).toHaveBeenCalledTimes(2);
 
@@ -831,6 +837,7 @@ describe("raw telemetry ingestion", () => {
         outboxRow.claim_token = null;
         outboxRow.claimed_at = null;
         outboxRow.lease_until = null;
+        trace.push("outbox.sent");
         return { rows: [{ id: "1" }] as Row[], rowCount: 1 };
       }
       return { rows: [] as Row[] };
@@ -847,12 +854,29 @@ describe("raw telemetry ingestion", () => {
         expect(route).toEqual({ topic: "battery-events", partitionKey: "battery-1" });
       }),
     };
-    const outbox = createOutboxWorker({ db: outboxDb, publisher, workerId: "test", batchSize: 1, leaseMs: 30_000, logger: vi.fn() });
+    const onFailsafeCutOutboxAcknowledged = vi.fn(({ eventId, dedupeKey, batteryId, reasonCode }: FailsafeCutOutboxAcknowledgement) => {
+      expect(eventId).toBe(command.eventId);
+      expect(dedupeKey).toBe(command.dedupeKey);
+      expect(batteryId).toBe("battery-1");
+      expect(reasonCode).toBe("FAILSAFE_TEMP_IR_OVER_CAP");
+      trace.push("ws.relay.autoCut");
+    });
+    const outbox = createOutboxWorker({
+      db: outboxDb,
+      publisher,
+      workerId: "test",
+      batchSize: 1,
+      leaseMs: 30_000,
+      logger: vi.fn(),
+      onFailsafeCutOutboxAcknowledged,
+    });
     const delivery = await outbox.processOnce();
-    if (outboxRow.sent_at) trace.push("outbox.sent");
+    const replay = await outbox.processOnce();
 
     expect(delivery).toMatchObject({ claimed: 1, published: 1, acknowledged: 1, retried: 0, poisoned: 0 });
+    expect(replay).toMatchObject({ claimed: 0, published: 0, acknowledged: 0, retried: 0, poisoned: 0 });
     expect(outboxRow.sent_at).toBeInstanceOf(Date);
-    expect(trace).toEqual(["postgres.commit", "ws.relay.autoCut", "kafka.publish", "outbox.sent"]);
+    expect(onFailsafeCutOutboxAcknowledged).toHaveBeenCalledOnce();
+    expect(trace).toEqual(["postgres.commit", "kafka.publish", "outbox.sent", "ws.relay.autoCut"]);
   });
 });
