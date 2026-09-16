@@ -117,17 +117,17 @@
 
 ## Task 7 — 실물 임계값·릴레이 인수
 
-- 현재 상태: `IN_PROGRESS`
+- 현재 상태: `REVIEW_REQUIRED`
 - 담당 에이전트: `/root/task7_hardware_acceptance`
 - 기준 커밋: `4c4bcd4`
-- 결과 커밋: 미정
-- 변경 파일: 미정
-- 구현 결과: 실측 기록 양식·외부 차단 조건 정리 진행 중
-- 부모 검토 결과: 미착수
-- 서브에이전트 테스트: 미실행
+- 결과 커밋: `f66d47d`
+- 변경 파일: `docs/hardware/failsafe_threshold_relay_acceptance.md` 및 mode1/mode2 하드웨어 정본·구현 상태·검증 matrix·mode1 README 링크
+- 구현 결과: 하드웨어 프로필별 임계값 실측 기록표, 승인 필드, 실제 Kafka→Pi→relay 증거 절차와 성공·중단 조건 문서화; production 임계값은 0 유지
+- 부모 검토 결과: 검토 대기
+- 서브에이전트 테스트: 관련 backend 92개·edge 21개 통과, env 0 sentinel·migration 000~012·문서 링크·YAML parse·`git diff --check` 확인
 - 부모 독립 테스트: 미실행
 - 실환경 검증 여부: 미실행
-- 남은 문제 또는 외부 차단 조건: 실측 장비·하드웨어 프로필·승인 임계값·실물 릴레이 경로 필요
+- 남은 문제 또는 외부 차단 조건: 부모 독립 검토 필요; Pi·센서·Kafka/PostgreSQL runtime/자격증명·승인 임계값·물리 actuation ACK 부재
 
 ## Task 8 — 메인 Sol 최종 통합 검토
 
