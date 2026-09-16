@@ -155,13 +155,19 @@ export function runStoreContractTests(name: string, makeStore: () => Promise<Cel
     it("engageFailsafe는 인터락을 걸고 릴레이를 연다", async () => {
       const battery = (await store.batteries()).find((item) => item.opsStatus === "NORMAL")!;
       const before = (await store.audits()).length;
-      const relay = await store.engageFailsafe(battery.id, "FAILSAFE_TEMP_IR_OVER_CAP", "TEMP_OVER_CAP");
+      const engagement = await store.engageFailsafe(battery.id, "FAILSAFE_TEMP_IR_OVER_CAP", "TEMP_OVER_CAP");
+      const relay = engagement.relay;
+      expect(engagement.newlyEngaged).toBe(true);
       expect(relay.state).toBe("OPEN");
       expect(relay.interlockEngaged).toBe(true);
       expect(relay.reasonCode).toBe("FAILSAFE_TEMP_IR_OVER_CAP");
       expect(relay.changedBy).toBe("SYSTEM");
       expect((await store.audits()).length).toBe(before + 1);
       expect((await store.audits())[0].action).toBe("RELAY_AUTO_CUT");
+      const replay = await store.engageFailsafe(battery.id, "FAILSAFE_TEMP_IR_OVER_CAP", "TEMP_OVER_CAP");
+      expect(replay.newlyEngaged).toBe(false);
+      expect((await store.audits()).length).toBe(before + 1);
+      expect((await store.domainEvents()).filter((event) => event.eventType === "RELAY_AUTO_CUT" && event.batteryId === battery.id)).toHaveLength(1);
     });
 
     it("Fail-Safe로 걸린 인터락은 사용자가 복구할 수 없다", async () => {

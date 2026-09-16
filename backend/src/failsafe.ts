@@ -6,7 +6,7 @@
 // sentinel로 두고 그 계층을 비활성화한다 — F21의 Q36 확정 방식과 같다.
 // backend_contract.md:746의 55/60°C는 지표 배지 표시용이지 차단 문턱이 아니다.
 
-export type HardwareProfile = "MODE1_EXTERNAL_CELL_V1" | "COMBINED_EXISTING_PARTS_V1";
+export type HardwareProfile = "MODE1_EXTERNAL_CELL_V1" | "MODE2_FULL" | "COMBINED_EXISTING_PARTS_V1";
 
 export type FailsafeTriggerCode =
   | "FAILSAFE_TEMP_CONTACT_OVER_CAP"
@@ -53,6 +53,11 @@ const AVAILABLE: Record<HardwareProfile, ReadonlySet<FailsafeTriggerCode>> = {
     "FAILSAFE_TEMP_RISE_RATE",
     "FAILSAFE_PRESSURE_RISE",
   ]),
+  MODE2_FULL: new Set([
+    "FAILSAFE_TEMP_IR_OVER_CAP",
+    "FAILSAFE_TEMP_RISE_RATE",
+    "FAILSAFE_GAS_OVER_THRESHOLD",
+  ]),
   COMBINED_EXISTING_PARTS_V1: new Set([
     "FAILSAFE_TEMP_IR_OVER_CAP",
     "FAILSAFE_TEMP_RISE_RATE",
@@ -77,7 +82,7 @@ export function judgeFailsafe(profile: HardwareProfile, sample: FailsafeSample, 
   // 압력은 절대값이 무의미하다 — FSR은 예압에 따라 baseline이 매번 달라진다.
   // baseline은 세션마다 시작 10초 중앙값으로 새로 잡는다(CLAUDE.md).
   if (active("FAILSAFE_PRESSURE_RISE", thresholds.pressureRisePct)
-    && sample.pressureRaw !== null && sample.pressureBaseline !== null && sample.pressureBaseline > 0) {
+    && sample.pressureRaw !== null && sample.pressureBaseline !== null && sample.pressureBaseline >= 500) {
     const risePct = ((sample.pressureRaw - sample.pressureBaseline) / sample.pressureBaseline) * 100;
     if (risePct >= thresholds.pressureRisePct) return { triggerCode: "FAILSAFE_PRESSURE_RISE", condition: "PRESSURE_RISE" };
   }

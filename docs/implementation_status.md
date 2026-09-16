@@ -64,11 +64,12 @@ DB를 초기화해 실행한다. 현재 실행 환경에는 이 변수가 없어
   공유하고, PDF 지표는 `volt|curr|temp|soc|anomaly`(기본 전체), 집계는
   `temp/anomaly=max`, `volt/curr/soc=avg`, 결측은 `null`이다.
 - Fail-Safe는 AI와 독립이며 하드웨어 프로필 가용 센서만 판정한다. 문턱은
-  배포 `config/env`의 `0=미설정 sentinel`이고, mode1 압력은 baseline 수집 중
-  비활성·baseline 500 미만 부착불량 처리다. 실측·승인 전 수치 활성화는 금지한다.
+  배포 `config/env`의 전용 `FAILSAFE_*` 값이며 모두 `0=미설정 sentinel`이다.
+  mode1 압력 10초 baseline은 세션별 DB에 고정되고, 500 미만이면 부착불량
+  domain event를 남긴 뒤 그 세션의 압력 계층을 끈다. 실측·승인 전 수치 활성화는 금지한다.
 - 다음 schema/store 변경을 예약했다: `010_domain_events.sql`,
-  `011_notices.sql`, 필요 시 기존 profile CHECK를 확장하는
-  `012_device_profile_mode2_full.sql`. 수치 문턱은 DB migration에 넣지 않는다.
+  `011_notices.sql`, `012_failsafe_profile_and_baseline.sql`. 수치 문턱은 DB
+  migration에 넣지 않는다.
 
 ## 2026-09-15 Task 3 공지사항 생산 기능
 
@@ -101,7 +102,7 @@ transaction에서 처리한다. 관리자 API는 작성·수정·임시저장·�
 | 백엔드 도메인 데이터 저장 | `backend/src/store/contract.ts`의 `CellGuardStore`, `memory.ts` 참조 구현, `postgres.ts` PostgreSQL 구현, `store.ts`의 `DATA_MODE` 분기. PostgreSQL은 자산 최신값·릴레이·진단·건강 집계·텔레메트리 CSV를 읽고, 상태+감사 변경을 트랜잭션으로 처리한다 | **구현 완료 / TEST_DATABASE_URL 설정 시 실 DB 계약 검증** |
 | 백엔드 실시간 스트림 (WS 발신) | **C1 완료(2026-08-25).** 프론트가 처리하는 11종 중 `metrics.tick`·`anomaly.score`·`anomaly.gradeChanged`·`relay.changed`·`alert.created`·`event.created`·`session.ended`·`resync.required` 8종이 실제로 발신되고, `subscribe`/`resume`이 1만 건 링버퍼로 실제 재전송을 수행한다. memory 모드의 정적 `metrics.tick`·`anomaly.score`는 기존 데모 동작을 유지하며, PostgreSQL 모드의 anomaly 이벤트는 새로 커밋된 `anomaly_score` 결과에서만 발신한다. `relay.autoCut`은 **구현됨(문턱 미설정이라 휴면)**(B3 완료, §4 C1 참조), `diagnosis.progress`/`.done`/`.aborted`는 여전히 미발신 | **구현됨(부분 휴면)** — 잔여 `diagnosis.*`(→ F21 안전 프로필) |
 | 에지 명령 경로 | `backend/src/device/port.ts`(`DeviceCommandPort` 인터페이스, 메서드 4개) + `backend/src/device/logging.ts`(memory 전용 로깅 스텁) + `backend/src/kafka.ts`(version 1 wire contract·Zod 검증·파티션 키) + `backend/src/device/kafka.ts`(실 producer) + `backend/src/outboxWorker.ts`(lease/claim/retry worker). PostgreSQL 상태·감사·outbox 원자성은 `store/postgres.ts`와 `008_outbox_identity.sql`에 구현됐고, `SESSION_ENDED`도 `batteryId`를 payload·파티션 키에 포함한다. `009_outbox_delivery.sql`은 만료 claim 복구·poison quarantine을 제공한다 | **구현 완료 / 실 Kafka·edge relay 인수 검증 대기** (→ B4) |
-| 백엔드 DB 도메인 provider·Consumer·TimescaleDB | 현재 migration `000_identity.sql`~`011_notices.sql`, `postgres.ts`, `telemetryConsumer.ts`, `anomalyConsumer.ts`, `outboxWorker.ts`. Raw/Anomaly Consumer와 Outbox Worker의 기존 경계는 유지하며, domain event·공지 store/API·추세 aggregate/PDF가 구현됐다. `TEST_DATABASE_URL`이 없으면 실 DB 계약 테스트는 skip한다. Kafka/Timescale 실측 부하는 별도이며 `AUTH_MODE=betterauth`의 WS 인증은 여전히 보류되고, WS upgrade가 `DATA_MODE`를 별도로 검사하지 않는 갭은 남아 있다 | **기존 Raw/Anomaly/Outbox + Task 2~5 구현 / 실 Kafka·DB 인수 대기** |
+| 백엔드 DB 도메인 provider·Consumer·TimescaleDB | 현재 migration `000_identity.sql`~`012_failsafe_profile_and_baseline.sql`, `postgres.ts`, `telemetryConsumer.ts`, `anomalyConsumer.ts`, `outboxWorker.ts`. Raw/Anomaly Consumer, Fail-Safe sample과 세션 pressure baseline, transactional interlock, Outbox Worker 경계를 구현했다. `TEST_DATABASE_URL`이 없으면 실 DB 계약 테스트는 skip한다. Kafka/Timescale 실측 부하는 별도이며 `AUTH_MODE=betterauth`의 WS 인증은 여전히 보류되고, WS upgrade가 `DATA_MODE`를 별도로 검사하지 않는 갭은 남아 있다 | **기존 Raw/Anomaly/Outbox + Task 2~6 소프트웨어 통합 구현 / 실 Kafka·DB 인수 대기** |
 | 알림 발송 (카카오·SMS·메일) | 채널 ON/OFF 토글과 policy 응답만 있고(`server.ts:405`·`:409`), **실제로 메시지를 보내는 코드는 `backend/src`에 없다** | **보류(의도적)** — 토글 현행 유지, 추가 작업 없음 |
 | AI 로컬 추론 프로세스 | `ai/`에 v1 raw/anomaly 계약 validator, fail-closed bundle loader, 외부 adapter/broker 경계, raw timestamp 기반 결정적 replay identity, 수동 offset lifecycle과 표준 테스트가 있다. 실제 checkpoint·scaler·권위 feature metadata와 외부 모델 adapter는 없다 | **외부 차단(`EXTERNALLY_BLOCKED`)** — 실제 추론·점수 품질을 주장하지 않음 (`docs/ai_inference.md`) |
 | 로컬 실행 패키징 | **C8 완료(2026-08-25)** — 단일 오리진(`:3005`), `start-local.bat`(Windows, 수동 실행), `docs/local_run.md`. **Task 7 구성 추가** — pinned TimescaleDB/Kafka Compose, ordered migration/topic bootstrap, backend healthcheck, localhost/LAN listener 분리, 선택 AI profile | memory 경로 완료 / Compose 실기동·Kafka·Timescale 인수 검증 대기 |
@@ -292,12 +293,12 @@ Timescale 적재, 물리 Fail-Safe는 여전히 별도 범위다.
 - **남은 일**: `TEST_DATABASE_URL`을 가진 PostgreSQL/Timescale과 실제 Kafka에서 migration 000~009 적용 후 세션 경계·재시작·부하 인수를 수행한다.
 - **완료 판정**: 세션 시작→종료 사이 프레임의 `battery_id`가 100% 채워지고, 세션 밖 프레임이 잘못 귀속되지 않음(문서 §5의 SQL 검증 2건).
 
-### B3. Fail-Safe 판정 주체 — **판정 엔진·구독 배선 완료(2026-09-14) / 문턱 실측 대기**
+### B3. Fail-Safe 판정 주체 — **비실물 소프트웨어 통합 완료(2026-09-16) / 실측 문턱·실물 인수 대기**
 
-- **완료된 것(백엔드)**: 순수 판정 함수 `judgeFailsafe`(`backend/src/failsafe.ts`) — 절대온도(IR·접촉) → 가스 → 압력 상대상승률 → 온도 상승률 순으로 검사하고, 현재 구현 프로필(`MODE1_EXTERNAL_CELL_V1`/`COMBINED_EXISTING_PARTS_V1`)의 실재 센서만 활성화한다. Task 1 계약은 `MODE2_FULL`을 추가 목표로 고정했으며 Task 6에서 구현한다. 이걸 저장소·에지·WS에 잇는 `evaluateFailsafe`(`backend/src/failsafeRunner.ts`) — 인터락 중복 방지(이미 걸려 있으면 재차단 안 함) → `engageFailsafe`(PostgreSQL에서는 릴레이 전이+`RELAY_AUTO_CUT` 감사+outbox 원자적 기록, memory에서는 logging port) → `OutboxWorker`/logging port 에지 통보 → `broadcastAutoCut`(WS `relay.autoCut` 푸시) 순서로 실행하며, `backend/src/server.ts`가 `runFailsafe(batteryId, profile, sample, thresholds)`로 이 전체를 노출한다. 프로필별 수치 문턱은 배포 `config/env`에서만 공급한다.
-- **⚠️ 문턱값이 전부 `0`이라 현재 어떤 계층도 차단하지 않는다.** `failsafe.ts`의 `UNSET_THRESHOLDS`가 미설정 sentinel이며, `judgeFailsafe`는 `threshold > 0`일 때만 그 계층을 활성화한다. 하드웨어 실측(`mode1_backend_spec.md` §13 H8, `mode2_powerbank_diagnosis_spec.md` §8 H2) 전까지 의도된 휴면 상태다.
-- **구독 배선**: PostgreSQL + `KAFKA_CONSUMER_ENABLED=true`일 때 Consumer가 frame별 `runFailsafe` hook을 호출한다. 배터리별 Promise queue로 TOCTOU 경합을 직렬화하고, `relay.autoCut` WS broadcast 실패는 로그로 남긴다. memory/test 모드에서는 Kafka 연결을 만들지 않는다.
-- **완료 판정**: 문턱값 설정 후 — 조건 충족 시 모달이 뜨고, 릴레이가 `OPEN`으로 남고, 재인증·사유 없이는 복구되지 않음(자동 복구 없음).
+- `judgeFailsafe`는 AI score/checkpoint 없이 `MODE1_EXTERNAL_CELL_V1`(접촉·IR·온도 상승률·압력), `MODE2_FULL`(IR·온도 상승률·가스), `COMBINED_EXISTING_PARTS_V1`(IR·온도 상승률)에서 실재 센서만 판정한다. `FAILSAFE_TEMP_CONTACT_CAP_C`, `FAILSAFE_TEMP_IR_CAP_C`, `FAILSAFE_TEMP_RISE_RATE_C_PER_MIN`, `FAILSAFE_PRESSURE_RISE_PCT`, `FAILSAFE_GAS_RAW`는 전용 배포 설정이며 현재 기본값은 전부 `0`이다. 사용자 온도 배지 `WARN|CRIT`와 물리 차단 문턱은 별도다.
+- Raw Consumer는 새 Raw row를 PostgreSQL에 먼저 commit한 뒤 해당 세션의 시간순 sample만 Fail-Safe에 전달한다. mode1 pressure는 세션 시작 후 10초 구간 중앙값을 `failsafe_pressure_baseline`에 한 번 고정한다. baseline `<500`이면 `PRESSURE_SENSOR_ATTACHMENT_INVALID` domain event를 기록하고 그 세션의 압력 계층은 비활성화된다. 이전 세션 baseline 재사용·out-of-order 프레임의 안전 판정은 없다.
+- 신규 차단은 `relay_state`·`RELAY_AUTO_CUT` audit·domain event·`RELAY_CUT` outbox를 PostgreSQL transaction 하나로 commit한다. 저장소가 commit 뒤 `newlyEngaged`를 돌려주며, 동시 worker·replay·이미 걸린 interlock은 중복 차단·edge 전달·`relay.autoCut` 발신을 만들지 않는다. edge 명령 publish는 기존 outbox worker의 Kafka 경계에서 수행된다.
+- **검증 경계**: synthetic raw/PG fake/Kafka fake의 비실물 roundtrip과 static/unit 검증은 완료 대상이다. 실제 PostgreSQL/Timescale/Kafka broker 부하, 승인 임계값, 물리 relay/Raspberry Pi 인수는 Task 7 및 하드웨어 실측 전까지 검증되지 않는다. 모든 물리 문턱은 계속 `0`이다.
 
 ### B4. 릴레이 차단 → 에지 실제 전달 — **outbox·Kafka worker 구현 완료(2026-09-14) / 실 인프라 인수 대기**
 

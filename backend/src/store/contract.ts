@@ -6,6 +6,7 @@ import type {
   DemoBattery,
   DemoDiagnosis,
   DemoRelay,
+  FailsafeEngagementResult,
   DemoSession,
   DemoStatus,
   DemoUser,
@@ -121,11 +122,10 @@ export interface CellGuardStore {
   // PostgreSQL provider uses it as the durable outbox dedupe basis; memory
   // keeps its existing logging behavior and may ignore it.
   changeRelay(actorId: string, batteryId: string, action: "cut" | "restore", reason: string, idempotencyKey?: string): Promise<DemoRelay>;
-  // 서버 Fail-Safe 전용. 사용자 조작(changeRelay)과 달리 인터락을 **건다**.
-  // 지금 저장소에는 interlockEngaged를 런타임에 true로 만드는 경로가 없어서
-  // (store/memory.ts:51-62의 픽스처가 유일) B3가 이 메서드를 필요로 한다.
-  // 릴레이 상태 전이 + RELAY_AUTO_CUT 감사 기록이 원자적이어야 한다.
-  engageFailsafe(batteryId: string, triggerCode: string, condition: string): Promise<DemoRelay>;
+  // 서버 Fail-Safe 전용. 신규 cut 여부와 relay state를 반환한다.
+  // PostgreSQL에서는 relay state + audit_log + domain_event + outbox가 한
+  // transaction으로 commit되며 이미 걸린 interlock은 멱등 no-op이다.
+  engageFailsafe(batteryId: string, triggerCode: string, condition: string): Promise<FailsafeEngagementResult>;
   /** Insert once for a durable natural key; an existing key is an idempotent replay. */
   recordDomainEvent(input: RecordDomainEventInput): Promise<DomainEvent>;
   acknowledgeDomainEvent(actorId: string, eventId: string): Promise<DomainEvent>;

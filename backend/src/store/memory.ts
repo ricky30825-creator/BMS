@@ -17,6 +17,7 @@ import type {
   DomainEvent,
   DomainEventQuery,
   EventTrendPeriod,
+  FailsafeEngagementResult,
   TrendMetric,
   TrendResponse,
   NoticeCategory,
@@ -706,14 +707,13 @@ export function createMemoryStore(): CellGuardStore & { demoUsers: DemoUser[] } 
 
   // Server Fail-Safe only. Unlike setRelay (user action), this ENGAGES the
   // interlock. It is the only path that sets interlockEngaged at runtime.
-  // The relay transition + RELAY_AUTO_CUT audit are one atomic unit — contract §3.4.
-  // Not idempotent: calling it again on an already-interlocked battery stacks
-  // another audit entry. De-duplication is the caller's (B3) responsibility.
-  const engage = (batteryId: string, triggerCode: string, condition: string): DemoRelay => {
+  // The relay transition, audit, and domain event are one in-memory unit.
+  // An already-engaged interlock is an idempotent no-op.
+  const engage = (batteryId: string, triggerCode: string, condition: string): FailsafeEngagementResult => {
     const battery = findBattery(batteryId);
     if (!battery) throw new Error("NOT_FOUND");
     const current = readRelay(batteryId);
-    if (current.interlockEngaged) return { ...current };
+    if (current.interlockEngaged) return { relay: { ...current }, newlyEngaged: false };
     const next: DemoRelay = {
       ...current,
       state: "OPEN",
@@ -735,7 +735,7 @@ export function createMemoryStore(): CellGuardStore & { demoUsers: DemoUser[] } 
       params: { triggerCode, condition },
       dedupeKey: `failsafe:${batteryId}:${triggerCode}:${condition}`,
     });
-    return { ...next };
+    return { relay: { ...next }, newlyEngaged: true };
   };
 
   // 빠른 진단은 단계 합계(120초), 정밀 용량은 스펙 §4-1 ②의

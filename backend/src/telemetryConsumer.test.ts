@@ -1,8 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
+import type { KafkaDeviceCommandPublisher } from "./device/kafka.js";
+import { evaluateFailsafe } from "./failsafeRunner.js";
+import { createOutboxWorker, type OutboxDbClient, type OutboxDbPool } from "./outboxWorker.js";
 
 import {
   RawMetricsConsumer,
-  createSafetySampleTracker,
   ingestRawMetricsFrame,
   type KafkaRawConsumer,
   type TelemetryDbClient,
@@ -68,11 +70,19 @@ function fakeDb(options: FakeOptions = {}) {
     battery_id: string | null;
     session_started_at: string | null;
     hardware_profile: string | null;
+    measured_at: Date;
+    mode: number;
+    temp_contact: number | null;
+    temp_ir_surface: number | null;
+    gas_raw: number | null;
+    pressure_raw: number | null;
   };
   const telemetryRows = new Map<string, TelemetryRow>();
   const latest = new Map<string, Date>();
   const telemetryHistory: Array<{ device_id: string; session_id: string | null; battery_id: string | null }> = [];
   const auditEvents: Array<{ resource: string; reason: string | null; created_at: string }> = [];
+  const baselineRows = new Map<string, { baseline_raw: number | null; status: "VALID" | "ATTACHMENT_INVALID" | "NO_SAMPLES" }>();
+  const domainEvents: Array<{ event_type: string; dedupe_key: string; params: Record<string, unknown> }> = [];
   let deviceExists = options.registeredDevice !== false;
   let deviceStatus = "OFFLINE";
   let deviceLastSeenAt: Date | null = null;
@@ -83,6 +93,8 @@ function fakeDb(options: FakeOptions = {}) {
     latest: Map<string, Date>;
     telemetryHistory: Array<{ device_id: string; session_id: string | null; battery_id: string | null }>;
     auditEvents: Array<{ resource: string; reason: string | null; created_at: string }>;
+    baselineRows: Map<string, { baseline_raw: number | null; status: "VALID" | "ATTACHMENT_INVALID" | "NO_SAMPLES" }>;
+    domainEvents: Array<{ event_type: string; dedupe_key: string; params: Record<string, unknown> }>;
     deviceExists: boolean;
     deviceStatus: string;
     deviceLastSeenAt: Date | null;
@@ -94,6 +106,8 @@ function fakeDb(options: FakeOptions = {}) {
     latest: new Map([...latest].map(([key, value]) => [key, new Date(value.getTime())])),
     telemetryHistory: telemetryHistory.map((row) => ({ ...row })),
     auditEvents: auditEvents.map((event) => ({ ...event })),
+    baselineRows: new Map([...baselineRows].map(([sessionId, row]) => [sessionId, { ...row }])),
+    domainEvents: domainEvents.map((event) => ({ ...event, params: { ...event.params } })),
     deviceExists,
     deviceStatus,
     deviceLastSeenAt: deviceLastSeenAt ? new Date(deviceLastSeenAt.getTime()) : null,
@@ -107,6 +121,9 @@ function fakeDb(options: FakeOptions = {}) {
     for (const [key, value] of snapshot.latest) latest.set(key, new Date(value.getTime()));
     telemetryHistory.splice(0, telemetryHistory.length, ...snapshot.telemetryHistory.map((row) => ({ ...row })));
     auditEvents.splice(0, auditEvents.length, ...snapshot.auditEvents.map((event) => ({ ...event })));
+    baselineRows.clear();
+    for (const [sessionId, row] of snapshot.baselineRows) baselineRows.set(sessionId, { ...row });
+    domainEvents.splice(0, domainEvents.length, ...snapshot.domainEvents.map((event) => ({ ...event, params: { ...event.params } })));
     deviceExists = snapshot.deviceExists;
     deviceStatus = snapshot.deviceStatus;
     deviceLastSeenAt = snapshot.deviceLastSeenAt ? new Date(snapshot.deviceLastSeenAt.getTime()) : null;
@@ -139,6 +156,33 @@ function fakeDb(options: FakeOptions = {}) {
         if (!deviceLastSeenAt || receivedAt > deviceLastSeenAt) deviceLastSeenAt = receivedAt;
         deviceStatus = "ONLINE";
         return { rows: [{ id: values[0] }] };
+      }
+      if (normalized.includes("select max(measured_at)") && normalized.includes("from telemetry_metric")) {
+        const rows = [...telemetryRows.values()].filter((row) => row.session_id === String(values[0]));
+        const latestMeasuredAt = rows.sort((left, right) => right.measured_at.getTime() - left.measured_at.getTime())[0]?.measured_at ?? null;
+        return { rows: [{ latest_measured_at: latestMeasuredAt }] };
+      }
+      if (normalized.includes("percentile_cont(0.5)") && normalized.includes("from telemetry_metric")) {
+        const sessionId = String(values[0]);
+        const from = values[1] as Date;
+        const to = values[2] as Date;
+        const pressures = [...telemetryRows.values()]
+          .filter((row) => row.session_id === sessionId && row.pressure_raw !== null
+            && row.measured_at >= from && row.measured_at <= to)
+          .map((row) => row.pressure_raw!)
+          .sort((left, right) => left - right);
+        const middle = Math.floor(pressures.length / 2);
+        const median = pressures.length === 0 ? null : pressures.length % 2 === 0
+          ? (pressures[middle - 1] + pressures[middle]) / 2 : pressures[middle];
+        return { rows: [{ baseline_raw: median }] };
+      }
+      if (normalized.includes("select measured_at, temp_ir_surface") && normalized.includes("from telemetry_metric")) {
+        const sessionId = String(values[0]);
+        const before = (values[1] as Date).getTime();
+        const previous = [...telemetryRows.values()]
+          .filter((row) => row.session_id === sessionId && row.temp_ir_surface !== null && row.measured_at.getTime() < before)
+          .sort((left, right) => right.measured_at.getTime() - left.measured_at.getTime())[0];
+        return { rows: previous ? [{ measured_at: previous.measured_at, temp_ir_surface: previous.temp_ir_surface! }] : [] };
       }
       if (normalized.includes("from telemetry_metric")) {
         if (values.length === 1 && normalized.includes("order by t.measured_at")) {
@@ -184,6 +228,12 @@ function fakeDb(options: FakeOptions = {}) {
           battery_id: values[1] as string | null,
           session_started_at: activeSession?.started_at ?? null,
           hardware_profile: activeSession?.hardware_profile ?? null,
+          measured_at: values[3] as Date,
+          mode: values[17] as number,
+          temp_contact: values[7] as number | null,
+          temp_ir_surface: values[8] as number | null,
+          gas_raw: values[9] as number | null,
+          pressure_raw: values[10] as number | null,
         });
         telemetryHistory.push({
           device_id: String(values[2]),
@@ -191,6 +241,24 @@ function fakeDb(options: FakeOptions = {}) {
           battery_id: values[1] as string | null,
         });
         return { rows: [{ device_id: values[2], measured_at: values[3] }] };
+      }
+      if (normalized.includes("from failsafe_pressure_baseline")) {
+        const row = baselineRows.get(String(values[0]));
+        return { rows: row ? [{ ...row }] : [] };
+      }
+      if (normalized.startsWith("insert into failsafe_pressure_baseline")) {
+        const sessionId = String(values[0]);
+        if (!baselineRows.has(sessionId)) {
+          baselineRows.set(sessionId, { baseline_raw: values[1] as number | null, status: values[2] as "VALID" | "ATTACHMENT_INVALID" | "NO_SAMPLES" });
+        }
+        return { rows: baselineRows.has(sessionId) ? [{ session_id: sessionId }] : [] };
+      }
+      if (normalized.startsWith("insert into domain_event")) {
+        const dedupeKey = String(values[6]);
+        if (!domainEvents.some((event) => event.dedupe_key === dedupeKey)) {
+          domainEvents.push({ event_type: "PRESSURE_SENSOR_ATTACHMENT_INVALID", params: JSON.parse(String(values[5])) as Record<string, unknown>, dedupe_key: dedupeKey });
+        }
+        return { rows: [] };
       }
       if (normalized.startsWith("insert into audit_log")) {
         if (options.failOn === "audit") throw new Error("audit insert failed");
@@ -216,6 +284,8 @@ function fakeDb(options: FakeOptions = {}) {
     queries,
     latest,
     auditEvents,
+    baselineRows,
+    domainEvents,
     setDeviceState(status: string, lastSeenAt: Date | null) {
       deviceStatus = status;
       deviceLastSeenAt = lastSeenAt;
@@ -469,6 +539,7 @@ describe("raw telemetry ingestion", () => {
 
   it("serializes safety hooks by battery and shuts down Kafka cleanly", async () => {
     const fake = fakeDb();
+    await ingestRawMetricsFrame(fake.pool, mode1Frame);
     const kafka = fakeKafka();
     let active = 0;
     let maximum = 0;
@@ -483,7 +554,7 @@ describe("raw telemetry ingestion", () => {
     await consumer.start();
     await Promise.all([
       consumer.handleMessage(message(mode1Frame, "7")),
-      consumer.handleMessage(message({ ...mode1Frame, timestamp: "2026-09-14T04:00:00.200Z" }, "8")),
+      consumer.handleMessage(message(mode1Frame, "8")),
     ]);
     await consumer.stop();
 
@@ -497,6 +568,7 @@ describe("raw telemetry ingestion", () => {
 
   it("does not commit a later same-battery frame past a failed safety hook", async () => {
     const fake = fakeDb();
+    await ingestRawMetricsFrame(fake.pool, mode1Frame);
     const kafka = fakeKafka();
     const onDurableFrame = vi.fn()
       .mockRejectedValueOnce(new Error("safety failed"))
@@ -505,47 +577,282 @@ describe("raw telemetry ingestion", () => {
 
     const outcomes = await Promise.allSettled([
       consumer.handleMessage(message(mode1Frame, "7")),
-      consumer.handleMessage(message({ ...mode1Frame, timestamp: "2026-09-14T04:00:00.200Z" }, "8")),
+      consumer.handleMessage(message(mode1Frame, "8")),
     ]);
 
     expect(outcomes.every((outcome) => outcome.status === "rejected")).toBe(true);
     expect(kafka.commitOffsets).not.toHaveBeenCalled();
   });
 
-  it("does not rewind safety slope or pressure baseline for an older accepted frame", () => {
-    const tracker = createSafetySampleTracker();
-    const attribution = {
-      sessionId: "session-1",
-      batteryId: "battery-1",
-      hardwareProfile: "MODE1_EXTERNAL_CELL_V1" as const,
-      sessionStartedAt: "2026-09-14T04:00:00.000Z",
-    };
-    const result = (timestamp: string, temperature: number, pressure: number) => ({
-      kind: "accepted" as const,
-      frame: {
-        ...mode1Frame,
-        timestamp,
-        temp_ir_surface: temperature,
-        temp_points: { ...mode1Frame.temp_points, ir: [temperature, 35.9] },
-        pressure_raw: pressure,
-      },
-      measuredAt: new Date(timestamp),
-      attribution,
-      latestCandidate: true,
-      unassignedEvent: null,
+  it("mode1은 세션 시작 10초 구간의 DB 중앙값으로 pressure baseline을 고정한다", async () => {
+    const fake = fakeDb({ activeSession: { started_at: "2026-09-14T04:00:00.000Z" } });
+    const beforeWindowEnd = await ingestRawMetricsFrame(fake.pool, {
+      ...mode1Frame,
+      timestamp: "2026-09-14T04:00:02.000Z",
+      pressure_raw: 600,
+    });
+    await ingestRawMetricsFrame(fake.pool, {
+      ...mode1Frame,
+      timestamp: "2026-09-14T04:00:09.000Z",
+      pressure_raw: 800,
+    });
+    const afterWindow = await ingestRawMetricsFrame(fake.pool, {
+      ...mode1Frame,
+      timestamp: "2026-09-14T04:00:10.100Z",
+      pressure_raw: 1100,
     });
 
-    expect(tracker.sampleFor(result("2026-09-14T04:00:00.100Z", 30, 100))).toMatchObject({
-      tempRiseRateCPerMin: null,
-      pressureBaseline: null,
+    expect(beforeWindowEnd.safetySample?.pressureBaseline).toBeNull();
+    expect(afterWindow.safetySample?.pressureBaseline).toBe(700);
+    expect(fake.baselineRows.get("session-1")).toEqual({ baseline_raw: 700, status: "VALID" });
+    expect(fake.domainEvents).toHaveLength(0);
+  });
+
+  it("baseline 500 미만은 세션당 한 번 이벤트로 남기고 압력 차단을 끈다", async () => {
+    const fake = fakeDb({ activeSession: { started_at: "2026-09-14T04:00:00.000Z" } });
+    await ingestRawMetricsFrame(fake.pool, { ...mode1Frame, timestamp: "2026-09-14T04:00:02.000Z", pressure_raw: 300 });
+    await ingestRawMetricsFrame(fake.pool, { ...mode1Frame, timestamp: "2026-09-14T04:00:09.000Z", pressure_raw: 400 });
+    const frame = { ...mode1Frame, timestamp: "2026-09-14T04:00:10.100Z", pressure_raw: 5000 };
+    const result = await ingestRawMetricsFrame(fake.pool, frame);
+    await ingestRawMetricsFrame(fake.pool, frame);
+
+    expect(result.safetySample?.pressureBaseline).toBeNull();
+    expect(fake.baselineRows.get("session-1")).toEqual({ baseline_raw: 350, status: "ATTACHMENT_INVALID" });
+    expect(fake.domainEvents).toEqual([expect.objectContaining({
+      event_type: "PRESSURE_SENSOR_ATTACHMENT_INVALID",
+      dedupe_key: "pressure-baseline-invalid:session-1",
+      params: { baselineRaw: 350, minimumBaselineRaw: 500 },
+    })]);
+  });
+
+  it("새 세션은 이전 세션의 baseline을 재사용하지 않는다", async () => {
+    const options: FakeOptions = { activeSession: { started_at: "2026-09-14T04:00:00.000Z" } };
+    const fake = fakeDb(options);
+    await ingestRawMetricsFrame(fake.pool, { ...mode1Frame, timestamp: "2026-09-14T04:00:02.000Z", pressure_raw: 900 });
+    await ingestRawMetricsFrame(fake.pool, { ...mode1Frame, timestamp: "2026-09-14T04:00:10.100Z", pressure_raw: 1000 });
+    options.activeSession = { id: "session-2", started_at: "2026-09-14T04:00:20.000Z" };
+    await ingestRawMetricsFrame(fake.pool, { ...mode1Frame, timestamp: "2026-09-14T04:00:22.000Z", pressure_raw: 1200 });
+    const secondSession = await ingestRawMetricsFrame(fake.pool, { ...mode1Frame, timestamp: "2026-09-14T04:00:30.100Z", pressure_raw: 1400 });
+
+    expect(secondSession.attribution.sessionId).toBe("session-2");
+    expect(secondSession.safetySample?.pressureBaseline).toBe(1200);
+    expect(fake.baselineRows.get("session-1")?.baseline_raw).toBe(900);
+    expect(fake.baselineRows.get("session-2")?.baseline_raw).toBe(1200);
+  });
+
+  it("older accepted frame is stored but excluded from the safety hook", async () => {
+    const fake = fakeDb({ activeSession: { started_at: "2026-09-14T04:00:00.000Z" } });
+    const kafka = fakeKafka();
+    const onDurableFrame = vi.fn(async () => undefined);
+    const consumer = new RawMetricsConsumer({ db: fake.pool, topic: "battery-raw-metrics", consumer: kafka, onDurableFrame, logger: vi.fn() });
+
+    await consumer.handleMessage(message({ ...mode1Frame, timestamp: "2026-09-14T04:00:10.100Z" }, "7"));
+    await consumer.handleMessage(message({ ...mode1Frame, timestamp: "2026-09-14T04:00:09.900Z" }, "8"));
+
+    expect(onDurableFrame).toHaveBeenCalledOnce();
+    expect(fake.queries.filter((query) => query.text.trimStart().toLowerCase().startsWith("insert into telemetry_metric"))).toHaveLength(2);
+    expect(kafka.commitOffsets).toHaveBeenCalledTimes(2);
+  });
+
+  it("duplicate latest replay rebuilds a durable Fail-Safe sample; older duplicates do not", async () => {
+    const fake = fakeDb({ activeSession: { started_at: "2026-09-14T04:00:00.000Z" } });
+    const newest = { ...mode1Frame, timestamp: "2026-09-14T04:00:10.100Z" };
+    const first = await ingestRawMetricsFrame(fake.pool, newest);
+    const replay = await ingestRawMetricsFrame(fake.pool, newest);
+    await ingestRawMetricsFrame(fake.pool, { ...mode1Frame, timestamp: "2026-09-14T04:00:10.200Z" });
+    const oldReplay = await ingestRawMetricsFrame(fake.pool, newest);
+
+    expect(first.safetySample).not.toBeNull();
+    expect(replay.kind).toBe("duplicate");
+    expect(replay.safetySample).toEqual(first.safetySample);
+    expect(oldReplay.kind).toBe("duplicate");
+    expect(oldReplay.safetySample).toBeNull();
+  });
+
+  it("duplicate natural-key conflict evaluates the committed raw row, not replacement sensor values", async () => {
+    const fake = fakeDb({ activeSession: { started_at: "2026-09-14T04:00:00.000Z" } });
+    const timestamp = "2026-09-14T04:00:10.100Z";
+    await ingestRawMetricsFrame(fake.pool, { ...mode1Frame, timestamp });
+    const replay = await ingestRawMetricsFrame(fake.pool, {
+      ...mode1Frame,
+      timestamp,
+      temp_contact: 99,
+      temp_ir_surface: 88,
+      temp_points: { contact: [99, 35.2, 34.1], ir: [88, 35.9] },
+      pressure_raw: 99_999,
     });
-    expect(tracker.sampleFor(result("2026-09-14T04:00:00.050Z", 90, 999))).toMatchObject({
-      tempRiseRateCPerMin: null,
-      pressureBaseline: null,
+
+    expect(replay.kind).toBe("duplicate");
+    expect(replay.safetySample).toMatchObject({ tempContact: 36.8, tempIrSurface: 38.1, pressureRaw: 420 });
+  });
+
+  it("MODE2_FULL keeps only IR, slope, and gas in the durable sample", async () => {
+    const fake = fakeDb({ activeSession: {
+      id: "session-mode2",
+      battery_id: "battery-mode2",
+      started_at: "2026-09-14T04:00:00.000Z",
+      hardware_profile: "MODE2_FULL",
+      target_mode: 2,
+      battery_target_mode: 2,
+    } });
+    const result = await ingestRawMetricsFrame(fake.pool, {
+      ...mode2Frame,
+      gas_raw: 900,
+      pressure_raw: null,
+      temp_contact: null,
     });
-    expect(tracker.sampleFor(result("2026-09-14T04:00:10.100Z", 35, 110))).toMatchObject({
-      tempRiseRateCPerMin: 30,
-      pressureBaseline: 100,
+
+    expect(result.attribution.hardwareProfile).toBe("MODE2_FULL");
+    expect(result.safetySample).toMatchObject({ tempContact: null, pressureRaw: null, gasRaw: 900 });
+  });
+
+  it("synthetic raw frame reaches Fail-Safe, one committed cut, outbox Kafka publish, and one relay.autoCut without AI", async () => {
+    const fake = fakeDb();
+    const kafka = fakeKafka();
+    const trace: string[] = [];
+    let relay = {
+      batteryId: "battery-1",
+      state: "CLOSED" as "CLOSED" | "OPEN",
+      interlockEngaged: false,
+      interlockCondition: null as string | null,
+      reasonCode: null as string | null,
+      reason: null as string | null,
+      changedAt: "",
+      changedBy: "SYSTEM",
+    };
+    const auditLog: Array<{ action: string; resource: string }> = [];
+    const domainEvents: Array<{ eventType: string; batteryId: string; triggerCode: string }> = [];
+    let durableCommand: { eventId: string; dedupeKey: string; payload: unknown } | null = null;
+    const onDurableFrame = vi.fn(async ({ batteryId, hardwareProfile, safetySample }) => {
+      expect(fake.queries.some(({ text }) => text.trim().toLowerCase() === "commit")).toBe(true);
+      expect(safetySample.tempIrSurface).toBe(60);
+      expect(hardwareProfile).toBe("MODE1_EXTERNAL_CELL_V1");
+      const alreadyCut = relay.interlockEngaged;
+      const verdict = await evaluateFailsafe({
+        relayByBattery: async () => ({ ...relay }),
+        engageFailsafe: async (id, triggerCode, condition) => {
+          if (relay.interlockEngaged) return { relay: { ...relay }, newlyEngaged: false };
+          relay = {
+            ...relay,
+            batteryId: id,
+            state: "OPEN",
+            interlockEngaged: true,
+            interlockCondition: condition,
+            reasonCode: triggerCode,
+            changedAt: "2026-09-14T04:10:00.000Z",
+          };
+          auditLog.push({ action: "RELAY_AUTO_CUT", resource: id });
+          domainEvents.push({ eventType: "RELAY_AUTO_CUT", batteryId: id, triggerCode });
+          durableCommand = {
+            eventId: "evt_failsafe_cut_1",
+            dedupeKey: `failsafe-relay-cut:${id}:${triggerCode}:${condition}`,
+            payload: { version: 1, code: "RELAY_CUT", params: { batteryId: id, reasonCode: triggerCode } },
+          };
+          trace.push("postgres.commit");
+          return { relay: { ...relay }, newlyEngaged: true };
+        },
+        relayCut: async () => undefined,
+        onAutoCut: () => { trace.push("ws.relay.autoCut"); },
+      }, batteryId, hardwareProfile, safetySample, {
+        tempContactCapC: 0,
+        tempIrCapC: 60,
+        tempRiseRateCPerMin: 0,
+        pressureRisePct: 0,
+        gasRaw: 0,
+      });
+      if (alreadyCut) expect(verdict).toBeNull();
+      else expect(verdict?.triggerCode).toBe("FAILSAFE_TEMP_IR_OVER_CAP");
     });
+    const consumer = new RawMetricsConsumer({ db: fake.pool, topic: "battery-raw-metrics", consumer: kafka, onDurableFrame, logger: vi.fn() });
+
+    const trippingFrame = { ...mode1Frame, temp_ir_surface: 60, temp_points: { ...mode1Frame.temp_points, ir: [60, 35.9] } };
+    await consumer.handleMessage(message(trippingFrame, "7"));
+    await consumer.handleMessage(message(trippingFrame, "8"));
+
+    expect(relay).toMatchObject({ state: "OPEN", interlockEngaged: true, reasonCode: "FAILSAFE_TEMP_IR_OVER_CAP" });
+    expect(auditLog).toEqual([{ action: "RELAY_AUTO_CUT", resource: "battery-1" }]);
+    expect(domainEvents).toEqual([{ eventType: "RELAY_AUTO_CUT", batteryId: "battery-1", triggerCode: "FAILSAFE_TEMP_IR_OVER_CAP" }]);
+    expect(trace).toEqual(["postgres.commit", "ws.relay.autoCut"]);
+    expect(onDurableFrame).toHaveBeenCalledTimes(2);
+    expect(kafka.commitOffsets).toHaveBeenCalledTimes(2);
+
+    type FakeOutboxRow = {
+      id: number;
+      topic: string;
+      partition_key: string;
+      payload: unknown;
+      event_id: string;
+      dedupe_key: string;
+      created_at: Date;
+      sent_at: Date | null;
+      attempts: number;
+      last_error: string | null;
+      next_attempt_at: Date;
+      claimed_by: string | null;
+      claim_token: string | null;
+      claimed_at: Date | null;
+      lease_until: Date | null;
+      dead_at: Date | null;
+    };
+    const command = durableCommand!;
+    const outboxRow: FakeOutboxRow = {
+      id: 1,
+      topic: "battery-events",
+      partition_key: "battery-1",
+      payload: command.payload,
+      event_id: command.eventId,
+      dedupe_key: command.dedupeKey,
+      created_at: new Date("2026-09-14T04:10:00.000Z"),
+      sent_at: null,
+      attempts: 0,
+      last_error: null,
+      next_attempt_at: new Date(Date.now() - 1),
+      claimed_by: null,
+      claim_token: null,
+      claimed_at: null,
+      lease_until: null,
+      dead_at: null,
+    };
+    const outboxQuery = async <Row = Record<string, unknown>>(text: string, values: unknown[] = []) => {
+      const normalized = text.replace(/\s+/g, " ").trim().toLowerCase();
+      if (normalized === "begin" || normalized === "commit" || normalized === "rollback") return { rows: [] as Row[] };
+      if (normalized.startsWith("with eligible as")) {
+        if (outboxRow.sent_at || outboxRow.dead_at || outboxRow.claimed_by) return { rows: [] as Row[] };
+        outboxRow.attempts = 1;
+        outboxRow.claimed_by = String(values[1]);
+        outboxRow.claim_token = String(values[2]);
+        outboxRow.claimed_at = new Date();
+        outboxRow.lease_until = new Date(Date.now() + Number(values[3]));
+        return { rows: [{ ...outboxRow }] as Row[] };
+      }
+      if (normalized.startsWith("update outbox set sent_at")) {
+        outboxRow.sent_at = new Date();
+        outboxRow.claimed_by = null;
+        outboxRow.claim_token = null;
+        outboxRow.claimed_at = null;
+        outboxRow.lease_until = null;
+        return { rows: [{ id: "1" }] as Row[], rowCount: 1 };
+      }
+      return { rows: [] as Row[] };
+    };
+    const outboxClient: OutboxDbClient = { query: outboxQuery, release: vi.fn() };
+    const outboxDb: OutboxDbPool = { query: outboxQuery, connect: async () => outboxClient };
+    const publisher: KafkaDeviceCommandPublisher = {
+      connect: vi.fn(async () => undefined),
+      disconnect: vi.fn(async () => undefined),
+      publish: vi.fn(async (event, eventId, route) => {
+        trace.push("kafka.publish");
+        expect(event).toMatchObject({ code: "RELAY_CUT", params: { batteryId: "battery-1" } });
+        expect(eventId).toBe(command.eventId);
+        expect(route).toEqual({ topic: "battery-events", partitionKey: "battery-1" });
+      }),
+    };
+    const outbox = createOutboxWorker({ db: outboxDb, publisher, workerId: "test", batchSize: 1, leaseMs: 30_000, logger: vi.fn() });
+    const delivery = await outbox.processOnce();
+    if (outboxRow.sent_at) trace.push("outbox.sent");
+
+    expect(delivery).toMatchObject({ claimed: 1, published: 1, acknowledged: 1, retried: 0, poisoned: 0 });
+    expect(outboxRow.sent_at).toBeInstanceOf(Date);
+    expect(trace).toEqual(["postgres.commit", "ws.relay.autoCut", "kafka.publish", "outbox.sent"]);
   });
 });

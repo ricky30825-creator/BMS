@@ -527,6 +527,10 @@ Fail-Safe는 AI score/checkpoint가 없어도 독립 실행한다. 물리 차단
 `tempContactCapC`, `tempIrCapC`, `tempRiseRateCPerMin`, `pressureRisePct`,
 `gasRaw`의 숫자 `0`은 **미설정 sentinel**이다. 0인 계층만 비활성화하며 다른
 계층은 계속 판정한다. 화면 표시용 `WARN|CRIT` 배지는 물리 차단 문턱이 아니다.
+환경변수는 `FAILSAFE_TEMP_CONTACT_CAP_C`, `FAILSAFE_TEMP_IR_CAP_C`,
+`FAILSAFE_TEMP_RISE_RATE_C_PER_MIN`, `FAILSAFE_PRESSURE_RISE_PCT`,
+`FAILSAFE_GAS_RAW`이며 기본값은 모두 `0`이다. 실측·승인 전 배포에서 값을
+활성화하지 않는다.
 
 | hardware profile | Fail-Safe에서 사용 가능한 센서 | 금지된 센서·산식 |
 |---|---|---|
@@ -534,28 +538,34 @@ Fail-Safe는 AI score/checkpoint가 없어도 독립 실행한다. 물리 차단
 | `MODE2_FULL` | MLX90614 IR 온도, 온도 상승률, MQ-2 가스 raw | 접촉 온도·압력·음향은 `null` |
 | `COMBINED_EXISTING_PARTS_V1` | 실제 배선의 MLX90614 IR 온도와 상승률만 | MQ-2·접촉 온도·압력·음향은 `null`; F21 실물 게이트는 별도 |
 
-모드 1 압력은 세션별 10초 baseline 중앙값 대비 상대 상승률이며 baseline
-수집 중에는 차단하지 않는다. baseline이 500 미만이면 부착 불량으로 보고
-압력 계층을 비활성화한다. 숫자 문턱은 `mode1_backend_spec.md` §13 H8과
+모드 1 압력은 세션 시작 후 첫 10초 구간의 `pressure_raw` 중앙값을 세션별로
+한 번 고정한 뒤 상대 상승률로 판단한다. baseline 수집 중에는 차단하지 않는다.
+baseline이 500 미만이면 `PRESSURE_SENSOR_ATTACHMENT_INVALID` domain event를
+기록하고 해당 세션의 압력 계층을 비활성화한다. 이전 세션 baseline은 재사용하지
+않는다. 숫자 문턱은 `mode1_backend_spec.md` §13 H8과
 실측 기록·승인 없이는 활성화하지 않으며, 모드 2 온도·상승률·가스는
 `mode2_powerbank_diagnosis_spec.md` §8의 H2/H3/H6/H11/H15 실측이 출처다.
 실측 전 값·AI 추정값·인터넷 일반값을 production 문턱으로 넣지 않는다.
+Raw frame의 PostgreSQL commit이 먼저다. 같은 natural key의 newest-frame replay는
+저장된 원본 센서값으로 Fail-Safe sample을 재구성해 offset 복구를 허용하고,
+out-of-order/older frame은 적재만 하며 현재 안전 상태를 되감지 않는다.
 
 #### migration·`CellGuardStore` 범위
 
-- 신규 migration은 `010_domain_events.sql`(domain event·dedupe·ack·집계 인덱스),
-  `011_notices.sql`(공지·조회 dedupe·delivery intent)로 예약한다. 기존
-  `device.hardware_profile` CHECK에 `MODE2_FULL`을 추가해야 하면 기존 파일을
-  수정하지 말고 `012_device_profile_mode2_full.sql`에서 별도로 변경한다.
-  수치 문턱은 DB migration/공지 UI에 넣지 않는다.
+- `010_domain_events.sql`(domain event·dedupe·ack·집계 인덱스),
+  `011_notices.sql`(공지·조회 dedupe·delivery intent),
+  `012_failsafe_profile_and_baseline.sql`(`MODE2_FULL` profile CHECK와
+  세션별 pressure baseline 저장)을 적용한다. 수치 문턱은 DB migration/공지 UI에
+  넣지 않는다.
 - `CellGuardStore`에는 idempotent `recordDomainEvent`, event list/ack 및
   `getAdminEventTrend`, 소유권 범위를 받는 `aggregateTrend`(REST와 PDF 공용),
   사용자/관리자 공지 목록·상세, 공지 create/update/publish/archive/delete,
   24시간 조건부 조회수 기록, delivery intent 기록 메서드를 추가한다.
   `recordAudit`는 별도 감사 정본으로 유지한다.
-- `engageFailsafe`와 센서 적재 경로는 relay interlock 상태·domain event·
-  `audit_log`·outbox를 하나의 PostgreSQL transaction으로 성공/실패시킨다.
-  이미 interlock인 배터리는 새 차단 event/outbox를 만들지 않는다. memory
+- `engageFailsafe`는 relay interlock 상태·domain event·`audit_log`·outbox를
+  하나의 PostgreSQL transaction으로 성공/실패시킨 뒤 `newlyEngaged`를 반환한다.
+  `relay.autoCut` WS는 실제 신규 차단 commit 뒤에만 발신한다. 이미 interlock인
+  배터리는 새 차단 event/outbox/WS를 만들지 않는다. memory
   provider는 테스트·데모 계약을 유지할 수 있지만 `DATA_MODE=postgres`의
   production 경로에는 `demoNotices`나 고정 event/trend 배열을 사용하지 않는다.
 

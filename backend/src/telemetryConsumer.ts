@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { Kafka, type EachMessagePayload } from "kafkajs";
 import { ZodError } from "zod";
 
@@ -47,7 +48,17 @@ type PersistedTelemetryRow = {
   battery_id: string | null;
   session_started_at: string | Date | null;
   hardware_profile: string | null;
+  mode: number | string;
+  temp_contact: number | string | null;
+  temp_ir_surface: number | string | null;
+  gas_raw: number | string | null;
+  pressure_raw: number | string | null;
 };
+
+type LatestSessionTelemetryRow = { latest_measured_at: string | Date | null };
+type PriorTemperatureRow = { measured_at: string | Date; temp_ir_surface: number | string };
+type PressureBaselineRow = { baseline_raw: number | string | null; status: "VALID" | "ATTACHMENT_INVALID" | "NO_SAMPLES" };
+type PressureMedianRow = { baseline_raw: number | string | null };
 
 export type TelemetryAttribution = {
   sessionId: string | null;
@@ -78,9 +89,11 @@ export type TelemetryIngestResult = {
   attribution: TelemetryAttribution;
   latestCandidate: boolean;
   unassignedEvent: UnassignedTelemetryEvent | null;
+  /** Null for unattributed or out-of-order frames; only latest session frames enter Fail-Safe. */
+  safetySample: FailsafeSample | null;
 };
 
-export type DurableTelemetryFrame = TelemetryIngestResult & {
+export type DurableTelemetryFrame = Omit<TelemetryIngestResult, "safetySample"> & {
   batteryId: string;
   hardwareProfile: HardwareProfile;
   safetySample: FailsafeSample;
@@ -124,12 +137,13 @@ export type CreateKafkaRawConsumerOptions = Omit<KafkaRawConsumerOptions, "consu
 };
 
 const BASELINE_WINDOW_MS = 10_000;
+const MIN_PRESSURE_BASELINE_RAW = 500;
 const DEFAULT_LOGGER: TelemetryLogger = (message, details) => {
   console.error(`[telemetry-consumer] ${message}`, details ?? "");
 };
 
 function isHardwareProfile(value: string): value is HardwareProfile {
-  return value === "MODE1_EXTERNAL_CELL_V1" || value === "COMBINED_EXISTING_PARTS_V1";
+  return value === "MODE1_EXTERNAL_CELL_V1" || value === "MODE2_FULL" || value === "COMBINED_EXISTING_PARTS_V1";
 }
 
 function hardwareProfileOrNull(value: string | null): HardwareProfile | null {
@@ -160,13 +174,138 @@ function nextOffset(offset: string): string {
   return (BigInt(offset) + 1n).toString();
 }
 
-function median(values: number[]): number | null {
-  if (values.length === 0) return null;
-  const sorted = [...values].sort((a, b) => a - b);
-  const middle = Math.floor(sorted.length / 2);
-  return sorted.length % 2 === 0
-    ? (sorted[middle - 1] + sorted[middle]) / 2
-    : sorted[middle];
+function numberOrNull(value: number | string | null | undefined): number | null {
+  if (value === null || value === undefined) return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+async function persistedPressureBaseline(
+  client: TelemetryDbClient,
+  frame: BatteryRawMetrics,
+  measuredAt: Date,
+  attribution: TelemetryAttribution,
+): Promise<number | null> {
+  if (frame.mode !== 1 || attribution.hardwareProfile !== "MODE1_EXTERNAL_CELL_V1"
+    || !attribution.sessionId || attribution.sessionStartedAt === null) return null;
+
+  const sessionStartedAt = dateValue(attribution.sessionStartedAt, "invalid measurement session start");
+  if (measuredAt.getTime() - sessionStartedAt.getTime() < BASELINE_WINDOW_MS) return null;
+
+  let result = await client.query<PressureBaselineRow>(`
+    select baseline_raw, status
+    from failsafe_pressure_baseline
+    where session_id = $1
+    limit 1
+  `, [attribution.sessionId]);
+  let baseline = result.rows[0];
+  if (!baseline) {
+    const windowEnd = new Date(sessionStartedAt.getTime() + BASELINE_WINDOW_MS);
+    const medianResult = await client.query<PressureMedianRow>(`
+      select percentile_cont(0.5) within group (order by pressure_raw)::numeric as baseline_raw
+      from telemetry_metric
+      where session_id = $1
+        and measured_at >= $2
+        and measured_at <= $3
+        and pressure_raw is not null
+    `, [attribution.sessionId, sessionStartedAt, windowEnd]);
+    const baselineRaw = numberOrNull(medianResult.rows[0]?.baseline_raw);
+    const status: PressureBaselineRow["status"] = baselineRaw === null
+      ? "NO_SAMPLES"
+      : baselineRaw < MIN_PRESSURE_BASELINE_RAW ? "ATTACHMENT_INVALID" : "VALID";
+    await client.query(`
+      insert into failsafe_pressure_baseline (session_id, baseline_raw, status)
+      values ($1, $2, $3)
+      on conflict (session_id) do nothing
+    `, [attribution.sessionId, baselineRaw, status]);
+    result = await client.query<PressureBaselineRow>(`
+      select baseline_raw, status
+      from failsafe_pressure_baseline
+      where session_id = $1
+      limit 1
+    `, [attribution.sessionId]);
+    baseline = result.rows[0];
+    if (!baseline) throw new Error("pressure baseline could not be finalized");
+
+    if (baseline.status === "ATTACHMENT_INVALID") {
+      const dedupeKey = `pressure-baseline-invalid:${attribution.sessionId}`;
+      const eventId = `evt_${createHash("sha256").update(dedupeKey).digest("hex").slice(0, 32)}`;
+      await client.query(`
+        insert into domain_event (
+          id, event_type, severity, source, device_id, battery_id, session_id,
+          occurred_at, score, params, dedupe_key
+        ) values ($1, 'PRESSURE_SENSOR_ATTACHMENT_INVALID', 'CAUTION', 'INGEST', $2, $3, $4,
+          $5, null, $6::jsonb, $7)
+        on conflict do nothing
+      `, [
+        eventId,
+        frame.device_id,
+        attribution.batteryId,
+        attribution.sessionId,
+        measuredAt,
+        JSON.stringify({ baselineRaw: numberOrNull(baseline.baseline_raw), minimumBaselineRaw: MIN_PRESSURE_BASELINE_RAW }),
+        dedupeKey,
+      ]);
+    }
+  }
+  return baseline.status === "VALID" ? numberOrNull(baseline.baseline_raw) : null;
+}
+
+async function safetySampleForLatestFrame(
+  client: TelemetryDbClient,
+  frame: BatteryRawMetrics,
+  measuredAt: Date,
+  attribution: TelemetryAttribution,
+): Promise<FailsafeSample | null> {
+  if (!attribution.batteryId || !attribution.sessionId || !attribution.hardwareProfile) return null;
+
+  // Serialize session state and refuse to evaluate an older event-time frame.
+  // Raw telemetry remains durable, while late data cannot rewind the safety view.
+  await client.query(`
+    select id
+    from measurement_session
+    where id = $1
+    for update
+  `, [attribution.sessionId]);
+  const latestResult = await client.query<LatestSessionTelemetryRow>(`
+    select max(measured_at) as latest_measured_at
+    from telemetry_metric
+    where session_id = $1
+  `, [attribution.sessionId]);
+  const latestMeasuredAt = latestResult.rows[0]?.latest_measured_at;
+  if (latestMeasuredAt == null
+    || dateValue(latestMeasuredAt, "invalid latest telemetry timestamp").getTime() !== measuredAt.getTime()) return null;
+
+  let tempRiseRateCPerMin: number | null = null;
+  if (frame.temp_ir_surface !== null) {
+    const previousResult = await client.query<PriorTemperatureRow>(`
+      select measured_at, temp_ir_surface
+      from telemetry_metric
+      where session_id = $1
+        and measured_at < $2
+        and temp_ir_surface is not null
+      order by measured_at desc
+      limit 1
+    `, [attribution.sessionId, measuredAt]);
+    const previous = previousResult.rows[0];
+    if (previous) {
+      const previousAt = dateValue(previous.measured_at, "invalid previous temperature timestamp").getTime();
+      const seconds = (measuredAt.getTime() - previousAt) / 1000;
+      if (seconds > 0) {
+        tempRiseRateCPerMin = (frame.temp_ir_surface - Number(previous.temp_ir_surface)) * 60 / seconds;
+      }
+    }
+  }
+
+  const pressureBaseline = await persistedPressureBaseline(client, frame, measuredAt, attribution);
+  return {
+    tempContact: frame.temp_contact,
+    tempIrSurface: frame.temp_ir_surface,
+    tempRiseRateCPerMin,
+    pressureRaw: frame.pressure_raw,
+    pressureBaseline,
+    gasRaw: frame.gas_raw,
+  };
 }
 
 /**
@@ -205,6 +344,7 @@ export async function ingestRawMetricsFrame(
         where s.device_id = $1 and s.status = 'ACTIVE'
         order by s.started_at desc
         limit 1
+        for update of s
       `, [frame.device_id]);
       session = sessionResult.rows[0];
     }
@@ -304,10 +444,12 @@ export async function ingestRawMetricsFrame(
     }
 
     let effectiveAttribution = attribution;
+    let safetyFrame = frame;
     let unassignedEvent: UnassignedTelemetryEvent | null = null;
     if (!inserted) {
       const existingResult = await client.query<PersistedTelemetryRow>(`
-        select t.session_id, t.battery_id, s.started_at as session_started_at, d.hardware_profile
+        select t.session_id, t.battery_id, s.started_at as session_started_at, d.hardware_profile,
+               t.mode, t.temp_contact, t.temp_ir_surface, t.gas_raw, t.pressure_raw
         from telemetry_metric t
         left join measurement_session s on s.id = t.session_id
         left join device d on d.id = t.device_id
@@ -321,6 +463,16 @@ export async function ingestRawMetricsFrame(
         batteryId: existing.battery_id ? String(existing.battery_id) : null,
         hardwareProfile: hardwareProfileOrNull(existing.hardware_profile),
         sessionStartedAt: existing.session_started_at,
+      };
+      // A natural-key conflict is an acknowledgement/replay of the committed
+      // row. Never make a safety decision from conflicting duplicate payload.
+      safetyFrame = {
+        ...frame,
+        mode: modeOrNull(existing.mode) ?? frame.mode,
+        temp_contact: numberOrNull(existing.temp_contact),
+        temp_ir_surface: numberOrNull(existing.temp_ir_surface),
+        gas_raw: numberOrNull(existing.gas_raw),
+        pressure_raw: numberOrNull(existing.pressure_raw),
       };
     }
 
@@ -380,6 +532,8 @@ export async function ingestRawMetricsFrame(
       ]);
     }
 
+    const safetySample = await safetySampleForLatestFrame(client, safetyFrame, measuredAt, effectiveAttribution);
+
     await client.query("commit");
     committed = true;
     return {
@@ -389,6 +543,7 @@ export async function ingestRawMetricsFrame(
       attribution: effectiveAttribution,
       latestCandidate: inserted && Boolean(effectiveAttribution.batteryId),
       unassignedEvent,
+      safetySample,
     };
   } catch (error) {
     if (!committed) {
@@ -402,101 +557,6 @@ export async function ingestRawMetricsFrame(
   } finally {
     client.release();
   }
-}
-
-type SafetyState = {
-  sessionId: string;
-  sessionStartedAtMs: number | null;
-  pressureSamples: number[];
-  pressureBaseline: number | null;
-  previousTemperature: { atMs: number; value: number } | null;
-  latestMeasuredAtMs: number | null;
-};
-
-/** Maintains only the state needed by the existing per-frame Fail-Safe hook. */
-export function createSafetySampleTracker() {
-  const states = new Map<string, SafetyState>();
-  const samples = new Map<string, FailsafeSample>();
-
-  return {
-    sampleFor(result: TelemetryIngestResult): FailsafeSample {
-      const { attribution, frame, measuredAt } = result;
-      if (!attribution.batteryId || !attribution.sessionId) {
-        return {
-          tempContact: frame.temp_contact,
-          tempIrSurface: frame.temp_ir_surface,
-          tempRiseRateCPerMin: null,
-          pressureRaw: frame.pressure_raw,
-          pressureBaseline: null,
-          gasRaw: frame.gas_raw,
-        };
-      }
-
-      const frameKey = `${attribution.sessionId}:${frame.device_id}:${measuredAt.toISOString()}`;
-      const priorSample = samples.get(frameKey);
-      if (priorSample) return { ...priorSample };
-
-      const sessionStartedAtMs = attribution.sessionStartedAt === null
-        ? null
-        : new Date(attribution.sessionStartedAt).getTime();
-      let state = states.get(attribution.batteryId);
-      if (!state || state.sessionId !== attribution.sessionId) {
-        state = {
-          sessionId: attribution.sessionId,
-          sessionStartedAtMs: Number.isFinite(sessionStartedAtMs) ? sessionStartedAtMs : null,
-          pressureSamples: [],
-          pressureBaseline: null,
-          previousTemperature: null,
-          latestMeasuredAtMs: null,
-        };
-        states.set(attribution.batteryId, state);
-      }
-
-      const atMs = measuredAt.getTime();
-      // The raw row is retained even when it arrives out of order, but safety
-      // state is a time-ordered view. Do not let a late frame rewind the
-      // temperature predecessor or alter the pressure baseline window.
-      if (state.latestMeasuredAtMs !== null && atMs <= state.latestMeasuredAtMs) {
-        return {
-          tempContact: frame.temp_contact,
-          tempIrSurface: frame.temp_ir_surface,
-          tempRiseRateCPerMin: null,
-          pressureRaw: frame.pressure_raw,
-          pressureBaseline: state.pressureBaseline,
-          gasRaw: frame.gas_raw,
-        };
-      }
-      state.latestMeasuredAtMs = atMs;
-      const elapsedMs = state.sessionStartedAtMs === null ? null : atMs - state.sessionStartedAtMs;
-      if (frame.pressure_raw !== null && (elapsedMs === null || (elapsedMs >= 0 && elapsedMs <= BASELINE_WINDOW_MS))) {
-        state.pressureSamples.push(frame.pressure_raw);
-      }
-      if (state.pressureBaseline === null && elapsedMs !== null && elapsedMs >= BASELINE_WINDOW_MS) {
-        state.pressureBaseline = median(state.pressureSamples);
-      }
-
-      let tempRiseRateCPerMin: number | null = null;
-      if (frame.temp_ir_surface !== null && state.previousTemperature && atMs > state.previousTemperature.atMs) {
-        tempRiseRateCPerMin = (frame.temp_ir_surface - state.previousTemperature.value)
-          / ((atMs - state.previousTemperature.atMs) / 60_000);
-      }
-      if (frame.temp_ir_surface !== null) {
-        state.previousTemperature = { atMs, value: frame.temp_ir_surface };
-      }
-
-      const sample: FailsafeSample = {
-        tempContact: frame.temp_contact,
-        tempIrSurface: frame.temp_ir_surface,
-        tempRiseRateCPerMin,
-        pressureRaw: frame.pressure_raw,
-        pressureBaseline: state.pressureBaseline,
-        gasRaw: frame.gas_raw,
-      };
-      samples.set(frameKey, sample);
-      if (samples.size > 2048) samples.delete(samples.keys().next().value as string);
-      return { ...sample };
-    },
-  };
 }
 
 function serializeByKey(
@@ -521,7 +581,6 @@ class PoisonTelemetryMessageError extends Error {
 
 export class RawMetricsConsumer {
   private readonly logger: TelemetryLogger;
-  private readonly tracker = createSafetySampleTracker();
   private readonly pendingByBattery = new Map<string, Promise<unknown>>();
   private connected = false;
   private stopping = false;
@@ -590,12 +649,12 @@ export class RawMetricsConsumer {
           });
         }
       }
-      if (result.attribution.batteryId && result.attribution.hardwareProfile && this.options.onDurableFrame) {
+      if (result.attribution.batteryId && result.attribution.hardwareProfile && result.safetySample && this.options.onDurableFrame) {
         const durableFrame: DurableTelemetryFrame = {
           ...result,
           batteryId: result.attribution.batteryId,
           hardwareProfile: result.attribution.hardwareProfile,
-          safetySample: this.tracker.sampleFor(result),
+          safetySample: result.safetySample,
         };
         await serializeByKey(this.pendingByBattery, result.attribution.batteryId, () => this.options.onDurableFrame!(durableFrame));
       }

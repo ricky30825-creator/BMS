@@ -54,6 +54,7 @@ const diagnosis = {
 type FakeOptions = {
   failAudit?: boolean;
   failOutbox?: boolean;
+  failDomainEvent?: boolean;
   failSessionUnique?: boolean;
   failDiagnosisUnique?: boolean;
   emptyTelemetry?: boolean;
@@ -87,6 +88,7 @@ function fakePool(options: FakeOptions = {}) {
     if (normalized === "begin" || normalized === "commit" || normalized === "rollback") return { rows: [] };
     if (options.failAudit && normalized.includes("insert into audit_log")) throw new Error("audit insert failed");
     if (options.failOutbox && normalized.includes("insert into outbox")) throw new Error("outbox insert failed");
+    if (options.failDomainEvent && normalized.includes("insert into domain_event")) throw new Error("domain event insert failed");
     if (options.failSessionUnique && normalized.includes("insert into measurement_session")) {
       throw Object.assign(new Error("duplicate active session"), { code: "23505", constraint: "uq_active_session_global" });
     }
@@ -475,7 +477,9 @@ describe("PostgreSQL store query mapping", () => {
       },
     });
     const store = createPostgresStore(fake.pool);
-    await store.engageFailsafe("b1", "TEMP_ABSOLUTE", "IR_SURFACE");
+    const engagement = await store.engageFailsafe("b1", "TEMP_ABSOLUTE", "IR_SURFACE");
+    expect(engagement.newlyEngaged).toBe(true);
+    expect(engagement.relay.interlockEngaged).toBe(true);
     const event = fake.queries
       .filter(({ text }) => text.toLowerCase().includes("insert into outbox"))
       .map(({ values }) => values[4] as { code: string; params: Record<string, unknown> });
@@ -488,5 +492,53 @@ describe("PostgreSQL store query mapping", () => {
       .filter(({ text }) => text.toLowerCase().includes("insert into audit_log"))
       .map(({ values }) => values.slice(1, 5));
     expect(audit).toContainEqual(["RELAY_AUTO_CUT", "b1", "SUCCESS", "TEMP_ABSOLUTE"]);
+    expect(fake.domainEventRows).toHaveLength(1);
+    const transactionCommands = fake.queries.map(({ text }) => text.trim().toLowerCase());
+    expect(transactionCommands.indexOf("begin")).toBeLessThan(transactionCommands.findIndex((text) => text.includes("update relay_state")));
+    expect(transactionCommands.findIndex((text) => text.includes("insert into audit_log"))).toBeLessThan(transactionCommands.findIndex((text) => text.includes("insert into domain_event")));
+    expect(transactionCommands.findIndex((text) => text.includes("insert into domain_event"))).toBeLessThan(transactionCommands.findIndex((text) => text.includes("insert into outbox")));
+    expect(transactionCommands.indexOf("commit")).toBeGreaterThan(transactionCommands.findIndex((text) => text.includes("insert into outbox")));
+
+    const replay = await store.engageFailsafe("b1", "TEMP_ABSOLUTE", "IR_SURFACE");
+    expect(replay.newlyEngaged).toBe(false);
+    expect(fake.queries.filter(({ text }) => text.toLowerCase().includes("insert into audit_log"))).toHaveLength(1);
+    expect(fake.domainEventRows).toHaveLength(1);
+    expect(fake.queries.filter(({ text }) => text.toLowerCase().includes("insert into outbox"))).toHaveLength(1);
+  });
+
+  it.each([
+    ["audit", { failAudit: true }],
+    ["domain event", { failDomainEvent: true }],
+    ["outbox", { failOutbox: true }],
+  ] as const)("rolls back a Fail-Safe engagement when the %s write fails", async (_name, options) => {
+    const fake = fakePool({
+      ...options,
+      relayState: {
+        battery_id: "b1", state: "CLOSED", interlock_engaged: false,
+        interlock_condition: null, reason_code: null, reason_params: null,
+        changed_at: "2026-08-06T01:20:00.000Z", changed_by: "SYSTEM",
+      },
+    });
+    const store = createPostgresStore(fake.pool);
+    await expect(store.engageFailsafe("b1", "TEMP_ABSOLUTE", "IR_SURFACE")).rejects.toThrow("INTERNAL_ERROR");
+    const commands = fake.queries.map(({ text }) => text.trim().toLowerCase());
+    expect(commands).toContain("rollback");
+    expect(commands).not.toContain("commit");
+  });
+
+  it("does not append a second durable cut when the PostgreSQL interlock is already latched", async () => {
+    const fake = fakePool({
+      relayState: {
+        battery_id: "b1", state: "OPEN", interlock_engaged: true,
+        interlock_condition: "TEMP_OVER_CAP", reason_code: "TEMP_ABSOLUTE", reason_params: null,
+        changed_at: "2026-08-06T01:20:00.000Z", changed_by: "SYSTEM",
+      },
+    });
+    const engagement = await createPostgresStore(fake.pool).engageFailsafe("b1", "TEMP_ABSOLUTE", "IR_SURFACE");
+
+    expect(engagement.newlyEngaged).toBe(false);
+    expect(fake.queries.some(({ text }) => text.toLowerCase().includes("insert into audit_log"))).toBe(false);
+    expect(fake.domainEventRows).toHaveLength(0);
+    expect(fake.queries.some(({ text }) => text.toLowerCase().includes("insert into outbox"))).toBe(false);
   });
 });

@@ -1,9 +1,10 @@
 import "dotenv/config";
 import { z } from "zod";
 import type { DiagnosisSafetyThresholds } from "../diagnosis/safety.js";
+import type { FailsafeThresholds } from "../failsafe.js";
 import { KAFKA_TOPICS } from "../kafka.js";
 
-const envSchema = z.object({
+export const envSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   PORT: z.coerce.number().int().positive().default(3005),
   AUTH_MODE: z.enum(["demo", "betterauth"]).default("demo"),
@@ -51,6 +52,13 @@ const envSchema = z.object({
   // 하한이 3인 이유: 표본 2개에서 최소자승은 두 점 차분과 수학적으로 같아져,
   // IR 노이즈에 취약해서 최소자승을 쓰기로 한 이유가 사라진다(스펙 §3-2 ②).
   DIAG_TEMP_SLOPE_MIN_SAMPLES: z.coerce.number().int().min(3).default(5),
+  // 물리 Fail-Safe 문턱. 각각 독립된 0 sentinel이며 실측·승인 전에는
+  // 어느 안전 계층도 임의 기본값으로 활성화하지 않는다.
+  FAILSAFE_TEMP_CONTACT_CAP_C: z.coerce.number().min(0).default(0),
+  FAILSAFE_TEMP_IR_CAP_C: z.coerce.number().min(0).default(0),
+  FAILSAFE_TEMP_RISE_RATE_C_PER_MIN: z.coerce.number().min(0).default(0),
+  FAILSAFE_PRESSURE_RISE_PCT: z.coerce.number().min(0).default(0),
+  FAILSAFE_GAS_RAW: z.coerce.number().min(0).default(0),
   GOOGLE_CLIENT_SECRET: z.string().optional()
 });
 
@@ -64,6 +72,14 @@ export const diagnosisSafetyThresholds: DiagnosisSafetyThresholds = Object.freez
   surfaceCutoffC: env.DIAG_SURFACE_CUTOFF_C,
   tempSlopeCPerMin: env.DIAG_TEMP_SLOPE_C_PER_MIN,
   gasRaw: env.DIAG_GAS_RAW,
+});
+
+export const failsafeThresholds: FailsafeThresholds = Object.freeze({
+  tempContactCapC: env.FAILSAFE_TEMP_CONTACT_CAP_C,
+  tempIrCapC: env.FAILSAFE_TEMP_IR_CAP_C,
+  tempRiseRateCPerMin: env.FAILSAFE_TEMP_RISE_RATE_C_PER_MIN,
+  pressureRisePct: env.FAILSAFE_PRESSURE_RISE_PCT,
+  gasRaw: env.FAILSAFE_GAS_RAW,
 });
 
 // 발열 기울기 상한. 스펙 §3-4가 "판정의 형태만 확정"이라 실측 전에는 0이며,

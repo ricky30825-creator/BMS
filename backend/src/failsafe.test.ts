@@ -47,6 +47,12 @@ describe("judgeFailsafe", () => {
     expect(judgeFailsafe("COMBINED_EXISTING_PARTS_V1", sample({ tempContact: 200 }), configured)).toBeNull();
   });
 
+  it("MODE2_FULL은 IR·기울기·가스만 사용하고 접촉·압력은 무시한다", () => {
+    expect(judgeFailsafe("MODE2_FULL", sample({ tempContact: 200, pressureRaw: 10_000, pressureBaseline: 500 }), configured)).toBeNull();
+    expect(judgeFailsafe("MODE2_FULL", sample({ tempIrSurface: 60 }), configured)?.triggerCode).toBe("FAILSAFE_TEMP_IR_OVER_CAP");
+    expect(judgeFailsafe("MODE2_FULL", sample({ gasRaw: 800 }), configured)?.triggerCode).toBe("FAILSAFE_GAS_OVER_THRESHOLD");
+  });
+
   it("모드 2 프로필에도 IR은 살아 있다", () => {
     const verdict = judgeFailsafe("COMBINED_EXISTING_PARTS_V1", sample({ tempIrSurface: 70 }), configured);
     expect(verdict?.triggerCode).toBe("FAILSAFE_TEMP_IR_OVER_CAP");
@@ -76,14 +82,28 @@ describe("judgeFailsafe", () => {
     expect(judgeFailsafe("MODE1_EXTERNAL_CELL_V1", sample({ pressureRaw: 500, pressureBaseline: 0 }), configured)).toBeNull();
   });
 
+  it("500 미만 baseline은 부착 불량으로 압력 계층을 비활성화한다", () => {
+    expect(judgeFailsafe("MODE1_EXTERNAL_CELL_V1", sample({ pressureRaw: 9000, pressureBaseline: 499 }), configured)).toBeNull();
+    expect(judgeFailsafe("MODE1_EXTERNAL_CELL_V1", sample({ pressureRaw: 650, pressureBaseline: 500 }), configured)?.triggerCode).toBe("FAILSAFE_PRESSURE_RISE");
+  });
+
   it("측정값이 null인 계층은 건너뛴다", () => {
     expect(judgeFailsafe("MODE1_EXTERNAL_CELL_V1", sample(), configured)).toBeNull();
   });
 
   it("문턱이 0인 계층만 개별로 비활성화된다", () => {
-    const onlyIr: FailsafeThresholds = { ...UNSET_THRESHOLDS, tempIrCapC: 60 };
-    expect(judgeFailsafe("MODE1_EXTERNAL_CELL_V1", sample({ tempContact: 200 }), onlyIr)).toBeNull();
-    expect(judgeFailsafe("MODE1_EXTERNAL_CELL_V1", sample({ tempIrSurface: 60 }), onlyIr)).not.toBeNull();
+    const cases: Array<["MODE1_EXTERNAL_CELL_V1" | "MODE2_FULL", keyof FailsafeThresholds, FailsafeSample]> = [
+      ["MODE1_EXTERNAL_CELL_V1", "tempContactCapC", sample({ tempContact: 90 })],
+      ["MODE1_EXTERNAL_CELL_V1", "tempIrCapC", sample({ tempIrSurface: 90 })],
+      ["MODE1_EXTERNAL_CELL_V1", "tempRiseRateCPerMin", sample({ tempRiseRateCPerMin: 90 })],
+      ["MODE1_EXTERNAL_CELL_V1", "pressureRisePct", sample({ pressureRaw: 1000, pressureBaseline: 500 })],
+      ["MODE2_FULL", "gasRaw", sample({ gasRaw: 900 })],
+    ];
+    expect(judgeFailsafe("MODE1_EXTERNAL_CELL_V1", sample({ tempContact: 200, tempIrSurface: 200 }), UNSET_THRESHOLDS)).toBeNull();
+    for (const [profile, key, onlySample] of cases) {
+      expect(judgeFailsafe(profile, onlySample, { ...UNSET_THRESHOLDS, [key]: 0 })).toBeNull();
+      expect(judgeFailsafe(profile, onlySample, { ...UNSET_THRESHOLDS, [key]: configured[key] })).not.toBeNull();
+    }
   });
 
   it("여러 계층이 동시에 걸리면 절대온도를 우선 보고한다", () => {

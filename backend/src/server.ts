@@ -8,7 +8,7 @@ import cors from "cors";
 import express, { type NextFunction, type Request, type Response } from "express";
 import { fromNodeHeaders, toNodeHandler } from "better-auth/node";
 import { auth } from "./auth.js";
-import { corsOrigins, diagnosisAssumedEfficiency, diagnosisS1CPerMin, diagnosisSafetyThresholds, diagnosisTempSlopeMinSamples, diagnosisTempSlopeWindowMs, env, kafkaConfig, kafkaConsumerConfig } from "./config/env.js";
+import { corsOrigins, diagnosisAssumedEfficiency, diagnosisS1CPerMin, diagnosisSafetyThresholds, diagnosisTempSlopeMinSamples, diagnosisTempSlopeWindowMs, env, failsafeThresholds, kafkaConfig, kafkaConsumerConfig } from "./config/env.js";
 import { applyAbort, stepDiagnosis } from "./diagnosis/runner.js";
 import { demoPasswordMatches, demoUserForToken, issueDemoToken, requireRole, requireSession, revokeDemoToken, setDemoPassword } from "./auth/middleware.js";
 import { resolveDemoUser } from "./demoLogin.js";
@@ -24,7 +24,7 @@ import { createOutboxWorker, shouldStartOutboxWorker, type OutboxWorker } from "
 import { diagnosisJson as buildDiagnosisJson } from "./diagnosis/routes.js";
 import { evaluateFailsafe } from "./failsafeRunner.js";
 import { measurementPhaseFor } from "./measurementState.js";
-import { UNSET_THRESHOLDS, type FailsafeSample, type FailsafeThresholds, type FailsafeVerdict, type HardwareProfile } from "./failsafe.js";
+import { type FailsafeSample, type FailsafeThresholds, type FailsafeVerdict, type HardwareProfile } from "./failsafe.js";
 import { db } from "./db.js";
 import { createKafkaAnomalyAlertsConsumer, type AnomalyAlertsConsumer, type AnomalyIngestResult } from "./anomalyConsumer.js";
 import { createKafkaRawMetricsConsumer, type RawMetricsConsumer, type UnassignedTelemetryEvent } from "./telemetryConsumer.js";
@@ -1726,9 +1726,9 @@ async function startTelemetryConsumer(): Promise<void> {
     groupId: kafkaConfig.groupId,
     topic: kafkaConfig.topics.rawMetrics,
     onDurableFrame: async ({ batteryId, hardwareProfile, safetySample }) => {
-      // Thresholds are intentionally the existing fail-closed sentinel until
-      // hardware measurements establish production values.
-      await runFailsafe(batteryId, hardwareProfile, safetySample, UNSET_THRESHOLDS);
+      // Dedicated deployment values remain at their zero sentinel until
+      // hardware measurements establish approved physical thresholds.
+      await runFailsafe(batteryId, hardwareProfile, safetySample, failsafeThresholds);
     },
     onUnassignedData: async (event: UnassignedTelemetryEvent) => {
       // The durable audit row is always written. Live WS delivery is scoped to

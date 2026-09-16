@@ -710,7 +710,7 @@ ADS1115          LAN          battery-anomaly-alerts ◀─ alerts 발행 ─┤
 ### Phase 6 — 알림 & 차단
 - [ ] ~~카카오톡 알림 연동 (S-EOCLMX, S-UZDNPT)~~ — **보류(2026-08-25 결정).** 설정 화면의 채널 토글은 **현행 유지**한다: 저장은 되지만 발송은 일어나지 않으며, 화면에 별도 미구현 표시를 추가하지 않는다. ⚠️ 시연에서 "알림이 간다"고 설명하지 않도록 주의
 - [ ] 릴레이/Kill-Switch 제어 API (S-ELAUQJ) — **부분 완료: REST(승인·재인증·사유·멱등성)와 감사 기록, PostgreSQL transactional outbox, Kafka producer/worker(`battery-events` 발행·재시도·배터리별 순서)는 구현됐다.** 남은 건 실제 Kafka/edge relay 인수 검증 — `docs/handover/infra-implementations.md` 2부
-- [ ] 긴급 차단 자동화 Fail-Safe (S-VMNNAM) — **부분 완료: 판정 엔진(`judgeFailsafe`)과 인터락·에지통보·WS 배선(`runFailsafe`), Consumer의 프레임별 callback·배터리별 직렬화가 구현됐다.** 프로필별 센서만 사용하며, `tempContactCapC`·`tempIrCapC`·`tempRiseRateCPerMin`·`pressureRisePct`·`gasRaw`의 `0`은 계층별 미설정 sentinel이다. 남은 것은 mode1 H8·mode2 H2/H3/H6/H11/H15 실측·승인과 실 Kafka/DB 인수 검증이다 — `docs/backend_contract.md` §3.8 및 `docs/handover/infra-implementations.md` §14·§14b
+- [ ] 긴급 차단 자동화 Fail-Safe (S-VMNNAM) — **비실물 소프트웨어 통합 완료(2026-09-16).** Raw Consumer가 latest session frame만 AI와 독립 판정하고, mode1 압력 10초 baseline을 session ID별 DB에 고정한다. baseline `<500`은 부착 불량 domain event 후 해당 세션 압력 계층을 끈다. `MODE1_EXTERNAL_CELL_V1`·`MODE2_FULL`·`COMBINED_EXISTING_PARTS_V1` 센서 가용성과 `FAILSAFE_*` 배포 문턱을 분리하며 기본값은 전부 `0`이다. 신규 차단의 relay/audit/domain event/outbox는 PostgreSQL transaction 하나로 기록하고 commit 뒤에만 `relay.autoCut`을 보낸다. 남은 것은 mode1 H8·mode2 H2/H3/H6/H11/H15 실측·승인, 실제 Kafka/DB 및 relay 인수다 — `docs/backend_contract.md` §3.8 및 `docs/handover/infra-implementations.md` §14·§14b
 - [ ] 디바이스 음성 안내 웹 설정 및 백엔드 API (S-VOCALR)
 - [ ] 알림 설정 및 이력 페이지
 

@@ -720,8 +720,10 @@ IR 온도·온도 상승률·MQ-2 가스를 사용할 수 있고, `COMBINED_EXIS
 은 실제 배선의 MLX90614 IR 온도·상승률만 사용한다. 두 프로필 모두 접촉
 온도·압력·음향은 `null`이며, 존재하지 않는 센서의 트리거를 만들지 않는다.
 Fail-Safe 문턱 키는 `tempIrCapC`, `tempRiseRateCPerMin`, `gasRaw` 등을
-프로필별 배포 설정에서 공급하고 숫자 `0`은 해당 계층만 비활성화하는
-미설정 sentinel이다. H2(온도 절대값)·H3(상승률)·H6(가스)와 센서 배치/챔버
+프로필별 배포 설정에서 공급한다. 대응 환경변수는
+`FAILSAFE_TEMP_IR_CAP_C`, `FAILSAFE_TEMP_RISE_RATE_C_PER_MIN`,
+`FAILSAFE_GAS_RAW`이며 기본값 `0`은 해당 계층만 비활성화하는 미설정 sentinel이다.
+H2(온도 절대값)·H3(상승률)·H6(가스)와 센서 배치/챔버
 H11·H15의 실측 기록·승인 전에는 값을 활성화하지 않는다. 이는 F21 진단
 실행 capability와 별개이며, 외부 provider·실물 릴레이 성공을 의미하지 않는다.
 `rated_output_current_a`는 자산 등록 시 **필수 입력**이다. 실제 보유 샘플·

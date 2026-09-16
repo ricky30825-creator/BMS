@@ -24,6 +24,7 @@ const REQUIRED_POSTGRES_TABLES = [
   "battery_health",
   "outbox",
   "domain_event",
+  "failsafe_pressure_baseline",
   "notice",
   "notice_view",
   "notice_delivery_intent",
@@ -93,7 +94,7 @@ export async function initializeStore(): Promise<void> {
   `, [REQUIRED_POSTGRES_TABLES]);
   const schema = result.rows[0];
   if (!schema || Number(schema.table_count) !== REQUIRED_POSTGRES_TABLES.length || !schema.progress_snapshot || !schema.raw_payload || !schema.outbox_event_id || !schema.outbox_dedupe_key || !schema.outbox_next_attempt_at || !schema.outbox_claim_token || !schema.outbox_lease_until || !schema.outbox_dead_at) {
-    throw new Error("PostgreSQL schema is not ready; run npm run db:migrate (including 011_notices.sql)");
+    throw new Error("PostgreSQL schema is not ready; run npm run db:migrate (including 012_failsafe_profile_and_baseline.sql)");
   }
 
   const hypertables = await db.query<{ hypertable_name: string }>(`

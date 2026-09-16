@@ -276,6 +276,11 @@ export type DemoRelay = {
   changedBy: string;
 };
 
+export type FailsafeEngagementResult = {
+  relay: DemoRelay;
+  newlyEngaged: boolean;
+};
+
 export const INPUT_LIMITS = Object.freeze({ reasonChars: 500, memoChars: 2000 });
 
 export const CSV_HEADER = "measured_at,device_id,battery_id,session_id,mode,voltage_v,current_a,power_w,temp_contact,temp_ir_surface,soc_pct,soc_basis,gas_raw,pressure_raw,acoustic_raw,age_ms";

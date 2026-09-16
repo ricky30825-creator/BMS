@@ -9,7 +9,10 @@ const thresholds: FailsafeThresholds = { tempContactCapC: 60, tempIrCapC: 60, te
 function deps(interlockEngaged = false) {
   return {
     relayByBattery: vi.fn().mockResolvedValue({ batteryId: "B1", state: interlockEngaged ? "OPEN" : "CLOSED", interlockEngaged, interlockCondition: null, reasonCode: null, reason: null, changedAt: "", changedBy: "SYSTEM" }),
-    engageFailsafe: vi.fn().mockResolvedValue({ batteryId: "B1", state: "OPEN", interlockEngaged: true, interlockCondition: "TEMP_OVER_CAP", reasonCode: "FAILSAFE_TEMP_IR_OVER_CAP", reason: null, changedAt: "", changedBy: "SYSTEM" }),
+    engageFailsafe: vi.fn().mockResolvedValue({
+      relay: { batteryId: "B1", state: "OPEN", interlockEngaged: true, interlockCondition: "TEMP_OVER_CAP", reasonCode: "FAILSAFE_TEMP_IR_OVER_CAP", reason: null, changedAt: "", changedBy: "SYSTEM" },
+      newlyEngaged: true,
+    }),
     relayCut: vi.fn().mockResolvedValue(undefined),
     onAutoCut: vi.fn(),
   };
@@ -37,6 +40,18 @@ describe("evaluateFailsafe", () => {
     const d = deps(true);
     expect(await evaluateFailsafe(d, "B1", "MODE1_EXTERNAL_CELL_V1", tripping, thresholds)).toBeNull();
     expect(d.engageFailsafe).not.toHaveBeenCalled();
+  });
+
+  it("조회와 차단 사이에 다른 worker가 먼저 차단했으면 edge·WS를 반복하지 않는다", async () => {
+    const d = deps();
+    d.engageFailsafe.mockResolvedValueOnce({
+      relay: { batteryId: "B1", state: "OPEN", interlockEngaged: true, interlockCondition: "TEMP_OVER_CAP", reasonCode: "FAILSAFE_TEMP_IR_OVER_CAP", reason: null, changedAt: "", changedBy: "SYSTEM" },
+      newlyEngaged: false,
+    });
+
+    expect(await evaluateFailsafe(d, "B1", "MODE1_EXTERNAL_CELL_V1", tripping, thresholds)).toBeNull();
+    expect(d.relayCut).not.toHaveBeenCalled();
+    expect(d.onAutoCut).not.toHaveBeenCalled();
   });
 
   it("에지 명령이 실패해도 인터락은 유지된다", async () => {

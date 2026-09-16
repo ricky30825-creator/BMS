@@ -322,7 +322,7 @@ FSR은 **힘이 커질수록 저항이 낮아진다.**
 
 ```
 baseline   = 세션 시작 후 안정화 10초 구간의 pressure_raw 중앙값
-상대상승률 = (pressure_raw − baseline) / baseline
+상대상승률 = ((pressure_raw − baseline) / baseline) × 100%
 ```
 
 - **baseline은 측정 세션마다 새로 잡는다.** 이전 세션 값을 재사용하면 안 된다.
@@ -901,12 +901,17 @@ BW150은 **데이터 경로가 아니다.** 하지만 INA226이 맞게 재고 �
 MQ-2 가스와 음향은 모드 1에 연결하지 않으며 트리거도 만들지 않는다.
 
 - 배포 설정 키는 `tempContactCapC`, `tempIrCapC`, `tempRiseRateCPerMin`,
-  `pressureRisePct`, `gasRaw`다. 숫자 `0`은 **미설정 sentinel**이며 그 계층만
-  비활성화한다. 표시용 `WARN`/`CRIT` 온도와 물리 차단 문턱은 별개다.
+  `pressureRisePct`, `gasRaw`다. 환경변수는 각각 `FAILSAFE_TEMP_CONTACT_CAP_C`,
+  `FAILSAFE_TEMP_IR_CAP_C`, `FAILSAFE_TEMP_RISE_RATE_C_PER_MIN`,
+  `FAILSAFE_PRESSURE_RISE_PCT`, `FAILSAFE_GAS_RAW`이며 기본값 `0`은
+  **미설정 sentinel**로 그 계층만 비활성화한다. 표시용 `WARN`/`CRIT` 온도와
+  물리 차단 문턱은 별개다.
 - 압력은 세션 시작 10초 중앙값 baseline 대비
-  `(pressure_raw - baseline) / baseline`으로 계산한다. baseline 수집 중에는
+  `((pressure_raw - baseline) / baseline) × 100%`로 계산한다. baseline 수집 중에는
   차단하지 않고, baseline이 500 미만이면 부착 불량으로 보고 압력 계층을
-  비활성화한다. 절대 raw 값 문턱을 사용하지 않는다.
+  비활성화하며 `PRESSURE_SENSOR_ATTACHMENT_INVALID` domain event를 한 번
+  기록한다. baseline은 `failsafe_pressure_baseline`에 session ID별로 고정돼
+  process restart 뒤에도 같은 세션에서만 재사용된다. 절대 raw 값 문턱을 사용하지 않는다.
 - 온도 상한·상승률과 압력 상승률의 숫자는 이 문서의 일반값이나 AI 추정값으로
   정하지 않는다. `H8` 실측 기록표에 장비·프로필·날짜·샘플 수·정상/위험
   범위·제안 문턱·승인자를 남기고 승인된 값만 배포 설정에 넣는다. 승인 전에는

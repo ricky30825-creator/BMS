@@ -1705,7 +1705,9 @@ export function createPostgresStore(pool: pg.Pool): CellGuardStore {
         if (!current) throw new Error("NOT_FOUND");
         // A Fail-Safe interlock is latched.  Replayed frames or concurrent
         // safety evaluations must not append another audit/domain/outbox row.
-        if (Boolean(current.interlock_engaged)) return clone(mapRelay(current));
+        if (Boolean(current.interlock_engaged)) {
+          return { relay: clone(mapRelay(current)), newlyEngaged: false };
+        }
         await query(client, `
           update relay_state
           set state = 'OPEN', interlock_engaged = true, interlock_condition = $2,
@@ -1741,7 +1743,7 @@ export function createPostgresStore(pool: pg.Pool): CellGuardStore {
         }, `failsafe-relay-cut:${batteryId}:${triggerCode}:${condition}`);
         const updated = await relayRow(client, batteryId);
         if (!updated) throw new Error("NOT_FOUND");
-        return clone(mapRelay(updated));
+        return { relay: clone(mapRelay(updated)), newlyEngaged: true };
       }));
     },
 
