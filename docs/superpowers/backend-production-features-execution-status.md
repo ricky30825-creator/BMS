@@ -131,14 +131,14 @@
 
 ## Task 8 — 메인 Sol 최종 통합 검토
 
-- 현재 상태: `IN_PROGRESS`
+- 현재 상태: `COMPLETE`
 - 담당 에이전트: 메인 `/root`
 - 기준 커밋: `967654a`
-- 결과 커밋: 미정
-- 변경 파일: 미정
-- 구현 결과: 최종 통합 검토 진행 중
-- 부모 검토 결과: 미착수
-- 서브에이전트 테스트: 해당 없음
-- 부모 독립 테스트: 미실행
-- 실환경 검증 여부: 미실행
-- 남은 문제 또는 외부 차단 조건: Task 1~7 상태와 실행 환경에 따름
+- 결과 커밋: `873ff2f` (최종 상태 기록은 후속 기록 커밋)
+- 변경 파일: `PLAN.md`, `docs/implementation_status.md`, `docs/verification_matrix.md`, `docs/handover/infra-implementations.md`, `docs/superpowers/backend-production-features-execution-status.md`
+- 구현 결과: Task 1~7 전체 commit/diff와 세 기능의 production store 경로를 재검토하고, migration `000`~`012`, 공지·영속 이벤트 추이·aggregate PDF·Fail-Safe 소프트웨어 경계를 최신 정본에 동기화함
+- 부모 검토 결과: Task 0~6 `COMPLETE`, Task 7 `EXTERNALLY_BLOCKED`가 실제 코드·계약·테스트와 일치함을 확인; production 경로에 공지 `demoNotices`, 고정 event-trend 0 배열, PDF 503 스텁, Raw Consumer의 `UNSET_THRESHOLDS` 직접 전달이 남지 않았음을 확인; `relay.autoCut`은 Kafka publish/outbox `sent_at` ACK이지 물리 actuation ACK가 아님을 유지
+- 서브에이전트 테스트: Task 8 문서 수정 — contract lint 위반 0건, tools unittest 48 passed, `git diff --check` 통과
+- 부모 독립 테스트: backend typecheck/build 및 전체 Vitest 361 passed/1 skipped, 기능 집중 22 passed와 Fail-Safe 집중 92 passed, store contract 42 passed/1 skipped; frontend typecheck/build 및 Vitest 81 passed, Playwright 34 passed; tools 48 passed·contract lint 위반 0건, AI 20 passed, edge 21 passed·py_compile; migration `000`~`012` 연속, Compose YAML 정적 파싱, Fail-Safe 환경값 5개 모두 0, 전체 `git diff --check` 통과
+- 실환경 검증 여부: memory/unit/MSW/Chromium/PDF parse-render와 synthetic Fail-Safe 경로 완료; `TEST_DATABASE_URL`, Docker/Podman, psql, Kafka CLI가 없어 실제 PostgreSQL/TimescaleDB/Kafka/Compose roundtrip은 미실행; Pi·센서·릴레이 실물 인수도 미실행
+- 남은 문제 또는 외부 차단 조건: Task 7의 승인 임계값·물리 relay actuation ACK·독립 전기 계측과 실제 Kafka→Pi 인수, Kakao/WebPush provider·자격증명, 실 PostgreSQL/TimescaleDB/Kafka 환경 검증은 외부 조건이 제공될 때 수행
