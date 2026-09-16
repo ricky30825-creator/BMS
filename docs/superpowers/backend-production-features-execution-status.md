@@ -117,26 +117,26 @@
 
 ## Task 7 — 실물 임계값·릴레이 인수
 
-- 현재 상태: `REVIEW_REQUIRED`
-- 담당 에이전트: `/root/task7_hardware_acceptance`
+- 현재 상태: `EXTERNALLY_BLOCKED`
+- 담당 에이전트: `/root/task7_acceptance_docs_fix` (최초 문서화 `/root/task7_hardware_acceptance`)
 - 기준 커밋: `4c4bcd4`
-- 결과 커밋: `f66d47d`
+- 결과 커밋: `f66d47d`, `967654a`
 - 변경 파일: `docs/hardware/failsafe_threshold_relay_acceptance.md` 및 mode1/mode2 하드웨어 정본·구현 상태·검증 matrix·mode1 README 링크
 - 구현 결과: 하드웨어 프로필별 임계값 실측 기록표, 승인 필드, 실제 Kafka→Pi→relay 증거 절차와 성공·중단 조건 문서화; production 임계값은 0 유지
-- 부모 검토 결과: 검토 대기
+- 부모 검토 결과: 기록표와 인수 절차 통과 — 필수 장비·프로필·날짜·표본·범위·제안·승인·env·증거 필드를 확인하고 migration/제품 계약의 물리 ACK 과장 표현을 별도 수정함; 실물 인수는 외부 차단
 - 서브에이전트 테스트: 관련 backend 92개·edge 21개 통과, env 0 sentinel·migration 000~012·문서 링크·YAML parse·`git diff --check` 확인
-- 부모 독립 테스트: 미실행
-- 실환경 검증 여부: 미실행
-- 남은 문제 또는 외부 차단 조건: 부모 독립 검토 필요; Pi·센서·Kafka/PostgreSQL runtime/자격증명·승인 임계값·물리 actuation ACK 부재
+- 부모 독립 테스트: 관련 backend 92 passed, edge unittest 21 passed, contract lint 위반 0건, migration 000~012 연속, Compose Fail-Safe 5개 모두 0, `git diff --check` 통과
+- 실환경 검증 여부: 미실행 — 문서·정적 검증만 완료
+- 남은 문제 또는 외부 차단 조건: Pi·센서·안전 시험 설비·Kafka/PostgreSQL runtime/자격증명·승인 임계값·물리 actuation ACK·독립 전기 계측 부재; 값을 제공·승인하고 실물 인수를 실행해야 해제
 
 ## Task 8 — 메인 Sol 최종 통합 검토
 
-- 현재 상태: `PENDING`
+- 현재 상태: `IN_PROGRESS`
 - 담당 에이전트: 메인 `/root`
-- 기준 커밋: 미정
+- 기준 커밋: `967654a`
 - 결과 커밋: 미정
 - 변경 파일: 미정
-- 구현 결과: 미착수
+- 구현 결과: 최종 통합 검토 진행 중
 - 부모 검토 결과: 미착수
 - 서브에이전트 테스트: 해당 없음
 - 부모 독립 테스트: 미실행
