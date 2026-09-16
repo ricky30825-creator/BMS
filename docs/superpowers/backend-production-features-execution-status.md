@@ -104,8 +104,8 @@
 ## Task 6 — Fail-Safe 설정 및 비실물 통합
 
 - 현재 상태: `IN_PROGRESS`
-- 담당 에이전트: `/root/task6_failsafe`
-- 기준 커밋: `cb991e0`
+- 담당 에이전트: `/root/task6_failsafe_resume` (이전 `/root/task6_failsafe`는 사용자 요청으로 변경 없이 중단)
+- 기준 커밋: `bba50a4`
 - 결과 커밋: 미정
 - 변경 파일: 미정
 - 구현 결과: 구현 진행 중
