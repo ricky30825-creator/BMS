@@ -14,6 +14,11 @@
 > **2026-09-14 Task 4 갱신:** `OutboxWorker`와 Kafka DeviceCommand producer가
 > `009_outbox_delivery.sql`의 lease·retry·poison 상태를 사용한다. 실제 Kafka
 > broker/Timescale 인수 검증만 남았다.
+> **2026-09-16 현재 상태:** migrations `000`~`012`가 연속 적용 대상이다.
+> 영속 domain event·관리자 추이, 공지 DB CRUD·대시보드 연결, aggregate PDF,
+> Fail-Safe 환경 설정·세션별 압력 baseline 소프트웨어 경로가 구현됐다. 다만
+> `TEST_DATABASE_URL` 기반 PostgreSQL 검증과 Docker/Kafka/Timescale 실환경,
+> 물리 relay actuation ACK는 미검증이다. Fail-Safe 설정 기본값은 모두 `0`이다.
 
 ---
 
@@ -54,9 +59,9 @@ runStoreContractTests("postgres", async () => createPostgresStore(testPool));
 
 > **✅ 비어 있던 스키마와 진단 진행 스냅샷은 마이그레이션에 반영됐다** — 추론 결과 적재 테이블(`anomaly_score`), `age_ms`·`temp_points`·`mode`·`soc_basis`, TimescaleDB 하이퍼테이블, 진단기(`device`) 테이블, 중복 방지 키, `battery_asset.memo`는 `migrations/002`~`005`에, `diagnosis.progress_snapshot`은 `006`에, `telemetry_metric.raw_payload`는 `007`에 있다. 결정 기록과 "왜 그 안이었나"는 [`docs/handover/schema-open-questions.md`](schema-open-questions.md)에 있다.
 >
-> **테이블은 이제 8개가 아니라 14개다** — 위 8개 + `"user"`·`device`·`anomaly_score`·`battery_latest`·`battery_health`·`outbox`. PostgreSQL provider는 새 테이블을 기존 `CellGuardStore` 반환 타입으로 매핑하므로 별도 조회 메서드 델타가 필요하지 않다.
+> **기존 14개 테이블에 migration 010~012가 5개를 더했다** — `domain_event`, `notice`, `notice_view`, `notice_delivery_intent`, `failsafe_pressure_baseline`. `device`에는 Fail-Safe 프로필 제약도 반영된다.
 
-> `battery_latest`·`battery_health`·`anomaly_score`의 현재 화면 소비 범위는 기존 `DemoBattery`와 `mode1Health`에 매핑되는 값이다. `telemetry_metric`의 원본 행은 CSV 경로에서 필요한 컬럼만 읽는다. 향후 집계 API가 추가되면 그때 `CellGuardStore` 계약과 타입을 함께 확장한다.
+> `battery_latest`·`battery_health`·`anomaly_score`는 기존 `DemoBattery`와 `mode1Health` 화면 매핑에 쓰인다. `telemetry_metric`은 Raw CSV와 `/api/trends` 집계를 제공하며 PDF도 같은 aggregate 경로를 사용한다. `domain_event`는 관리자 이벤트 추이의 영속 원천이다.
 
 ### 3-1. 처음 DB를 올리는 순서 — **막힘은 2026-08-28에 해소됐다**
 
@@ -72,7 +77,7 @@ runStoreContractTests("postgres", async () => createPostgresStore(testPool));
 | 5 | `DATA_MODE` 게이트 열기 (§9) | ✅ 구현 완료(2026-09-14) |
 | 6 | `TEST_DATABASE_URL`로 계약·동시성·재시작 검증 | 실 DB 인수 환경에서 수행 |
 
-**마이그레이션 10개 파일** — 순서가 곧 의존성이다.
+**마이그레이션 13개 파일** — 순서가 곧 의존성이다.
 
 | 파일 | 내용 |
 |---|---|
@@ -86,12 +91,15 @@ runStoreContractTests("postgres", async () => createPostgresStore(testPool));
 | `007_telemetry_raw_payload.sql` | version-1 edge raw payload 보존용 `raw_payload jsonb` |
 | `008_outbox_identity.sql` | outbox durable `event_id`, replay `dedupe_key`와 유일성 제약 |
 | `009_outbox_delivery.sql` | outbox lease·retry 시각·claim token·poison `dead_at` |
+| `010_domain_events.sql` | 영속 `domain_event`와 replay dedupe |
+| `011_notices.sql` | 공지, 사용자별 조회 dedupe, delivery intent |
+| `012_failsafe_profile_and_baseline.sql` | `MODE2_FULL` 프로필 제약과 세션별 pressure baseline |
 
 > **TimescaleDB는 필수다.** `005` 또는 migration runner의 extension/hypertable
 > 확인이 실패하면 `TIMESCALEDB_REQUIRED`로 전체 PostgreSQL 경로를 닫는다.
 > `telemetry_metric`을 평범한 PostgreSQL 테이블로 사용하거나 memory 데이터로
 > 대체하지 않는다. `DATA_MODE=postgres`를 열려면 TimescaleDB를 설치한 뒤
-> `npm run db:migrate`가 `009`까지 완료되고 두 hypertable 확인을 통과해야 한다.
+> `npm run db:migrate`가 `012`까지 완료되고 두 hypertable 확인을 통과해야 한다.
 
 **예전에 2단계를 막던 것과, 어떻게 풀었는지:**
 
@@ -308,9 +316,10 @@ export async function runFailsafe(
 
 **embedded wiring을 채택한다** — 현재 요청이 backend startup/shutdown과 기존 server safety/WS hook을 같은 프로세스에서 닫도록 명시하기 때문이다.
 
-- **`thresholds`는 인자로 받는다.** 현재 값(`backend/src/failsafe.ts`의 `UNSET_THRESHOLDS`)은 전부 `0`(미설정 sentinel)이라 어떤 계층도 차단하지 않는다. 하드웨어 실측 후(`mode1_backend_spec.md` §13 H8, `mode2_powerbank_diagnosis_spec.md` §8 H2) 나온 값을 설정에서 주입한다 — 값을 추정해 미리 채우지 않는다.
-- **`sample`(`FailsafeSample`)의 6개 필드**를 프레임에서 채운다: `tempContact`, `tempIrSurface`, `tempRiseRateCPerMin`, `pressureRaw`, `pressureBaseline`, `gasRaw`. 그중 **`pressureBaseline`은 프레임에 없는 값이다** — **세션마다 시작 10초 중앙값으로 새로 계산해 Consumer가 직접 들고 있어야 한다**(CLAUDE.md — FSR은 예압에 따라 baseline이 매번 달라져 절대값이 무의미하다). 세션이 바뀌면 이 값도 다시 계산한다.
-- **`profile`(`HardwareProfile`)**은 `"MODE1_EXTERNAL_CELL_V1"` 또는 `"COMBINED_EXISTING_PARTS_V1"`이며, 어느 트리거 코드가 활성인지(`AVAILABLE` 맵, `failsafe.ts:49`)를 결정한다 — 존재하지 않는 센서의 코드는 발생시키지 않는다.
+- **`thresholds`는 Raw Consumer에 전용 환경 설정으로 전달한다.** `FAILSAFE_TEMP_CONTACT_CAP_C`, `FAILSAFE_TEMP_IR_CAP_C`, `FAILSAFE_TEMP_RISE_RATE_C_PER_MIN`, `FAILSAFE_PRESSURE_RISE_PCT`, `FAILSAFE_GAS_RAW` 다섯 값은 기본 `0` sentinel이라 계층별 차단을 비활성화한다. 하드웨어 실측·승인 전에는 값을 활성화하지 않는다.
+- **`sample`(`FailsafeSample`)에는** `tempContact`, `tempIrSurface`, `tempRiseRateCPerMin`, `pressureRaw`, `pressureBaseline`, `gasRaw`가 있다. `pressureBaseline`은 edge 프레임에 없으며 DB의 세션별 baseline 상태에서 읽는다.
+- mode1 pressure baseline은 `failsafe_pressure_baseline`에 세션별로 영속화된다. 최초 10초 sample 중앙값을 한 번 고정하고, baseline `<500`이면 `PRESSURE_SENSOR_ATTACHMENT_INVALID` domain event를 기록한 뒤 그 세션의 압력 계층을 비활성화한다. 이 규칙은 세션 간 baseline 재사용을 막는다.
+- **`profile`(`HardwareProfile`)**은 `"MODE1_EXTERNAL_CELL_V1"`, `"MODE2_FULL"` 또는 `"COMBINED_EXISTING_PARTS_V1"`이며, 어느 트리거 코드가 활성인지(`AVAILABLE` 맵)를 결정한다 — 존재하지 않는 센서의 코드는 발생시키지 않는다.
 
 #### 14b. ⚠️ TOCTOU 경합 — Consumer는 배터리별로 `runFailsafe` 호출을 직렬화할 것
 
@@ -373,15 +382,16 @@ worker를 시작하며, memory/test 경로는 Kafka client를 만들거나 연�
 
 ## 인계 후 남는 것 (요약)
 
-> **2026-09-14 갱신** — Raw Consumer wiring, PostgreSQL transactional outbox,
-> Kafka DeviceCommand producer와 leased outbox worker까지 추가됐다. 남은 것은
-> 실제 Kafka·PostgreSQL/Timescale 인수 검증이다.
+> **2026-09-16 현재 상태** — PostgreSQL store·Raw/Anomaly Consumer·outbox worker와
+> 영속 domain event·공지·관리자 추이·aggregate PDF·Fail-Safe software wiring이
+> 구현됐다. 남은 것은 TEST_DATABASE_URL을 이용한 실 DB 계약/동시성 검증과
+> Docker/Kafka/Timescale·물리 relay 인수다.
 
-- ✅ **스키마** — `migrations/000`~`009`, `npm run db:migrate`로 적용. 결정 근거는 `schema-open-questions.md`와 §13·§16.
+- ✅ **스키마** — `migrations/000`~`012`, `npm run db:migrate`로 적용. 결정 근거는 `schema-open-questions.md`와 §13·§16.
 - ✅ **PostgreSQL 구현체** — 본 문서 1부. `backend/src/store/postgres.ts`, 계약 테스트 wiring, 전역 active-session unique 경합 테스트를 추가했다. `TEST_DATABASE_URL`이 없으면 실제 DB 테스트는 명시적으로 skip한다.
 - ✅ **`advanceDiagnosis`의 `progress` 영속화 방침** — 본 문서 §8-1. 런타임 메모리 + phase 경계 `progress_snapshot` 저장으로 결정했고 `006`에 반영했다.
 - ✅ **`store/types.ts`·`contract.ts` 델타** — CSV의 선택적 날짜 범위를 계약에 추가하고, 최신값·건강·텔레메트리 매핑을 기존 반환 타입에 연결했다.
 - ✅ **Kafka 구현체** — `backend/src/device/kafka.ts`의 version-1 producer와 `backend/src/outboxWorker.ts`의 polling/claim/retry/lease 복구. 발행 성공 뒤에만 `sent_at`을 갱신하고 durable `event_id`를 Kafka header로 전달한다. 실 broker 인수 검증은 남았다.
 - ✅ **Raw Consumer의 `battery_id` 태깅** — `backend/src/telemetryConsumer.ts`와 `docs/handover/b2-session-tagging.md`; 실 Kafka·DB 인수 검증은 남았다.
 - **모드 1 SOH/RUL 산출 주체** — `battery_health` 테이블은 만들었지만 **누가 계산해 넣는지는 아직 미정**이다(`backend_contract.md` §9 Q6은 모드 2만 확정). DB는 저장만 맡는다.
-- **Fail-Safe 문턱값** — 하드웨어 실측 후 결정. `mode1_backend_spec.md` §13 H8(압력 baseline·상승률), `mode2_powerbank_diagnosis_spec.md` §8 H2(모드 2 표면온도 상승률). `runFailsafe` 호출은 배선됐지만 `UNSET_THRESHOLDS`가 전부 0이라 현재 자동 차단은 휴면 상태다.
+- **Fail-Safe 문턱값** — `FAILSAFE_*` 환경 설정 5개는 Raw Consumer에 전달되고 기본값 `0`은 미설정 sentinel이다. 실제 승인값은 mode1 `mode1_backend_spec.md` §13 H8, mode2 `mode2_powerbank_diagnosis_spec.md` §8 H2 실측 후 정한다. 현재 코드 통합은 완료됐지만 기본값에서는 해당 계층이 비활성화되며 실물 relay actuation ACK는 미검증이다.

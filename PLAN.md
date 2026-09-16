@@ -383,7 +383,7 @@ ADS1115          LAN          battery-anomaly-alerts ◀─ alerts 발행 ─┤
 
 > `battery_asset`, `measurement_session` 관계 테이블은 PostgreSQL(비시계열)에 두고, 시계열 하이퍼테이블은 `battery_id` FK로 참조한다.
 >
-> **⚠️ 위 두 스펙은 "설계"가 아니라 "이미 있는 스키마 위의 남은 작업"이다.** 실제 컬럼·제약의 정본은 `backend/migrations/000_identity.sql`~`009_outbox_delivery.sql`이며, 기존 8개 테이블에 더해 `002`~`005`가 추론 결과·Raw 보조 필드·하이퍼테이블·진단기·중복 방지·`battery_asset.memo`를, `006`이 진단 phase 경계 스냅샷을, `007`이 raw wire payload 보존을, `008`~`009`가 outbox identity·delivery 상태를 반영했다. **이 문서가 "시계열 하이퍼테이블"이라 부르는 테이블의 실제 이름은 `telemetry_metric`이다.** 과거 결정 기록은 `docs/handover/schema-open-questions.md`에서 확인한다.
+> **⚠️ 위 두 스펙은 "설계"가 아니라 "이미 있는 스키마 위의 남은 작업"이다.** 실제 컬럼·제약의 정본은 `backend/migrations/000_identity.sql`~`012_failsafe_profile_and_baseline.sql`이다. `002`~`005`는 추론 결과·Raw 보조 필드·하이퍼테이블·진단기·중복 방지·`battery_asset.memo`를, `006`은 진단 phase 경계 스냅샷을, `007`은 raw wire payload를, `008`~`009`는 outbox identity·delivery 상태를, `010`은 영속 domain event를, `011`은 공지·조회 기록·발송 의도를, `012`는 Fail-Safe 프로필과 세션별 압력 baseline을 반영한다. **이 문서가 "시계열 하이퍼테이블"이라 부르는 테이블의 실제 이름은 `telemetry_metric`이다.** 과거 결정 기록은 `docs/handover/schema-open-questions.md`에서 확인한다.
 
 ### AI 모델 (4개)
 | ID | 스펙 |
@@ -610,7 +610,7 @@ ADS1115          LAN          battery-anomaly-alerts ◀─ alerts 발행 ─┤
 
 ## Task 1 공통 생산 계약 결정 (2026-09-15)
 
-구현 전에 다음 경계를 확정한다. 상세 요청·응답과 불변식의 정본은
+다음 경계의 공통 구현 계약을 확정했다. 상세 요청·응답과 불변식의 정본은
 [`docs/backend_contract.md` §3.8](docs/backend_contract.md#38-task-1-공통-생산-계약-결정-2026-09-15)이다.
 
 - 관리자 이벤트 추이는 PostgreSQL `domain_event`의
@@ -629,10 +629,10 @@ ADS1115          LAN          battery-anomaly-alerts ◀─ alerts 발행 ─┤
   `config/env`에서만 공급하며 0은 해당 계층만 끄는 sentinel이다. mode1
   압력은 10초 baseline 상대 상승률·baseline 500 미만 부착불량 규칙을 쓰고,
   숫자는 실측·승인 전까지 활성화하지 않는다.
-- schema/store 확장은 `010_domain_events.sql`, `011_notices.sql`로 예약한다.
-  기존 profile CHECK에 `MODE2_FULL`을 추가해야 할 때만 `012`를 별도 migration으로
-  만들며, 수치 문턱은 DB에 저장하지 않는다. memory provider는 테스트 호환용이고
-  PostgreSQL production 경로에는 고정 demo notice/event/trend를 두지 않는다.
+- schema/store 확장은 `010_domain_events.sql`, `011_notices.sql`,
+  `012_failsafe_profile_and_baseline.sql`에 반영했다. 수치 문턱은 DB에 저장하지
+  않고 배포 설정에서 공급한다. memory provider는 테스트 호환용이며 PostgreSQL
+  production 경로에는 고정 demo notice/event/trend를 두지 않는다.
 
 ## 8. 개발 로드맵
 
@@ -649,7 +649,7 @@ ADS1115          LAN          battery-anomaly-alerts ◀─ alerts 발행 ─┤
 > | 5 | `docs/handover/schema-open-questions.md` | **과거 미결정 6건의 결정 기록.** 해당 DDL은 `backend/migrations/002`~`005`에 반영됐고, Consumer 착수 시 실제 컬럼·제약과 함께 확인한다 |
 > | 6 | `docs/verification_matrix.md` | 무엇을 어떻게 검증하면 끝난 것으로 치는지. 백엔드 typecheck·빌드·`/health`·테스트 명령이 여기 있다 |
 >
-> ✅ **DB는 `npm run db:migrate` 하나로 올라간다(2026-08-28).** 현재 `backend/migrations/000`~`009`가 연속된 파일명 순서로 적용되며, Task 2~3에서 `010_domain_events.sql`·`011_notices.sql`, 필요 시 Task 6에서 `012_device_profile_mode2_full.sql`을 같은 순서로 추가한다. 실행기는 advisory lock, TimescaleDB 가용성 사전 확인, 완료 후 두 hypertable 확인을 수행한다. 예전에 `psql -f 001_app_auth.sql`이 첫 구문에서 멈추던 문제(`"user"` 테이블 DDL 부재)는 `000_identity.sql`이 해결했다. **`psql -f`로 001만 직접 돌리지 마라** — 순서가 있는 migration 묶음이다. plain PostgreSQL로 강등하지 않는다. `npm run auth:generate`·`auth:migrate`는 CLI 패키지가 없어 실패하니 부르지 않는다(Better Auth는 지금 미사용).
+> ✅ **DB는 `npm run db:migrate` 하나로 올라간다(2026-08-28).** 현재 `backend/migrations/000`~`012`가 연속된 파일명 순서로 적용된다. `010_domain_events.sql`, `011_notices.sql`, `012_failsafe_profile_and_baseline.sql`을 포함하며, 실행기는 advisory lock, TimescaleDB 가용성 사전 확인, 완료 후 두 hypertable 확인을 수행한다. 예전에 `psql -f 001_app_auth.sql`이 첫 구문에서 멈추던 문제(`"user"` 테이블 DDL 부재)는 `000_identity.sql`이 해결했다. **`psql -f`로 001만 직접 돌리지 마라** — 순서가 있는 migration 묶음이다. plain PostgreSQL로 강등하지 않는다. `npm run auth:generate`·`auth:migrate`는 CLI 패키지가 없어 실패하니 부르지 않는다(Better Auth는 지금 미사용).
 >
 > 세부 계약이 필요해지면 — 에러 코드는 `docs/backend_contract.md` §1.10, 원자성 요구는 §3.4, 에지 프레임 정의와 `battery-events`의 code+params는 `docs/hardware/mode1_backend_spec.md` §9·§11이다.
 >
@@ -661,7 +661,7 @@ ADS1115          LAN          battery-anomaly-alerts ◀─ alerts 발행 ─┤
 
 - [ ] 호스트 PC에 Kafka 설치·토픽 3개 생성, LAN 한정 PLAINTEXT 구성 (S-BYYPVQ) — `docker-compose.local.yml`에 KRaft·세 토픽·INTERNAL/LOCALHOST/LAN listener 구성을 추가했다. 실제 호스트 실행과 `advertised.listeners` LAN 주소 적용은 인수에서 수행한다
 - [ ] 브로커·DB 포트를 방화벽에서 LAN으로 제한 — Compose는 DB/localhost listener/backend를 loopback에 bind하고 LAN listener는 방화벽 제한이 필요하다
-- [ ] PostgreSQL + TimescaleDB **설치** (S-NFEETD) — `docker-compose.local.yml`의 pinned TimescaleDB 이미지와 fail-closed migration/backend 검사를 추가했다. 실제 설치·hypertable 적재 인수는 남았다. ⚠️ **스키마를 새로 설계하지 않는다.** `backend/migrations/000`~`009`가 테이블·진단 progress·raw payload·outbox delivery를 정의하고 `npm run db:migrate`가 적용한다. 하이퍼테이블 전환·보존정책(60일)은 `005_timescale.sql`에 있다. 압축 정책은 재처리 창과 충돌해 **일부러 걸지 않았다**(되살리는 두 줄이 `005` 주석에 있다). 결정 근거는 `docs/handover/schema-open-questions.md`
+- [ ] PostgreSQL + TimescaleDB **설치** (S-NFEETD) — `docker-compose.local.yml`의 pinned TimescaleDB 이미지와 fail-closed migration/backend 검사를 추가했다. 실제 설치·hypertable 적재 인수는 남았다. ⚠️ **스키마를 새로 설계하지 않는다.** `backend/migrations/000`~`012`가 핵심 테이블·진단 progress·raw payload·outbox delivery·domain event·notice·Fail-Safe profile/baseline을 정의하고 `npm run db:migrate`가 적용한다. 하이퍼테이블 전환·보존정책(60일)은 `005_timescale.sql`에 있다. 압축 정책은 재처리 창과 충돌해 **일부러 걸지 않았다**(되살리는 두 줄이 `005` 주석에 있다). 결정 근거는 `docs/handover/schema-open-questions.md`
 - [x] 백엔드 프로젝트 초기화 (Node.js + TypeScript + Express)
 - [x] Better Auth 기반 사용자 인증 골격 구현 (R-HBLCDS — F-SDSVND, F-TFJKKF, F-HUYIXC)
 - [ ] ~~Better Auth 실인증 전환~~ — **보류(2026-08-25 결정).** 코드는 그대로 두고 `AUTH_MODE=demo`로 꺼둔다. 나중에 환경변수만 바꿔 켠다. 데모 계정에 ADMIN이 있어 RBAC·감사로그 시연에는 지장이 없다
@@ -679,7 +679,7 @@ ADS1115          LAN          battery-anomaly-alerts ◀─ alerts 발행 ─┤
 - [x] Consumer 적재 시 active 세션 조회 → `battery_id` 태깅 (S-MSESSN) — 처리 시점 DB 조회·세션 밖 `null` 귀속은 `docs/handover/b2-session-tagging.md` 정본과 일치한다.
 - [x] 오프셋 커밋 및 재처리 전략 (S-SBCSJU) — DB transaction + safety hook 뒤 manual commit, `(device_id, measured_at)` replay 무해. DB/Kafka 원자성은 주장하지 않는다.
 - [ ] 대시보드용 조회 뷰 생성 (S-ROGPIB)
-- [ ] 오류/예외 이벤트 기록 (S-MVDKKZ) — Task 2에서 영속 `domain_event`와 Kafka replay dedupe를 추가하며 `audit_log`(감사)와 분리한다
+- [x] 오류/예외 이벤트 기록 (S-MVDKKZ) — 영속 `domain_event`와 Kafka replay dedupe를 추가해 `audit_log`(감사)와 분리했다. 실제 Kafka/DB 인수 검증은 별도다.
 
 ### Phase 4 — AI 이상 탐지
 - [ ] 정상 데이터 수집 및 라벨링 (S-LUTREM)
