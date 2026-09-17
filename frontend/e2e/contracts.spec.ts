@@ -123,6 +123,7 @@ test.describe("CellGuard contract flows (MSW)", () => {
     await signIn(page, "hong@cellguard.io");
     await connectBattery(page, "PACK-004");
     await page.locator("aside").getByRole("button", { name: "보조배터리 진단" }).click();
+    await expect(page.getByRole("heading", { name: "보조배터리 진단" })).toBeVisible();
     const cases = [
       { id: "dg_e2e_healthy", grade: "HEALTHY", title: "빠른 진단 완료 · 양호" },
       { id: "dg_e2e_caution", grade: "CAUTION", title: "빠른 진단 완료 · 주의" },
@@ -141,6 +142,11 @@ test.describe("CellGuard contract flows (MSW)", () => {
         const method = init?.method ?? request?.method ?? "GET";
         const id = url.pathname.match(/^\/api\/diagnoses\/([^/]+)$/)?.[1];
         const diagnosis = id ? details.get(id) : undefined;
+        if (method === "GET" && url.pathname === "/api/batteries/b_pack_004") {
+          const response = await originalFetch(input, init);
+          const battery = await response.json() as { latest?: Record<string, unknown> };
+          return new Response(JSON.stringify({ ...battery, latest: { ...battery.latest, score: 0.82, grade: "DANGER", measuredAt: "2026-09-16T00:01:30.000Z" } }), { status: 200, headers: { "Content-Type": "application/json" } });
+        }
         if (method === "GET" && id && diagnosis) {
           state.__diagnosisDetailRequests[id] = (state.__diagnosisDetailRequests[id] ?? 0) + 1;
           return new Response(JSON.stringify(diagnosis), { status: 200, headers: { "Content-Type": "application/json" } });
@@ -164,6 +170,10 @@ test.describe("CellGuard contract flows (MSW)", () => {
       await expect(result).toContainText("레귤레이션 이탈 전류");
       await expect(result).toContainText("발열 기울기");
       await expect(result).toContainText("스펙 도달률");
+      await expect(result.getByText("현재 안전 상태")).toBeVisible();
+      await expect(result.locator('[data-anomaly-score="82"]')).toBeVisible();
+      await expect(result).toContainText("진단 완료 시점 점수가 아니라");
+      if (diagnosisCase.grade === "SUSPECT_DEGRADED") await result.screenshot({ path: "test-results/powerbank-diagnosis-abnormal.png" });
       await expect(page.getByRole("dialog")).toHaveCount(1);
       await result.getByRole("button", { name: "닫기" }).click();
     }

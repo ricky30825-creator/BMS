@@ -143,6 +143,21 @@
 .diagnosis-confidence-note > svg { flex: 0 0 auto; margin-top: 1px; }
 .diagnosis-confidence-note p { color: inherit; font-size: 12px; line-height: 1.6; }
 .diagnosis-source-note { color: var(--fg-muted); font-size: 11px; }
+.diagnosis-anomaly-state { display: grid; gap: 10px; padding: 16px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface-sunken); }
+.diagnosis-anomaly-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.diagnosis-anomaly-heading > div { display: grid; gap: 3px; min-width: 0; }
+.diagnosis-anomaly-heading small { color: var(--fg-muted); font-size: 11px; font-weight: 800; }
+.diagnosis-anomaly-heading h3 { font-size: 16px; }
+.diagnosis-anomaly-value { display: flex; align-items: baseline; gap: 8px; }
+.diagnosis-anomaly-value strong { font-size: 30px; line-height: 1; letter-spacing: -.045em; }
+.diagnosis-anomaly-value span { color: var(--fg-muted); font-size: 11px; }
+.diagnosis-anomaly-note { color: var(--fg-muted); font-size: 12px; line-height: 1.6; }
+.diagnosis-anomaly-note .mono { color: var(--fg); }
+.diagnosis-anomaly-normal { border-color: color-mix(in srgb, var(--grade-normal) 32%, var(--border)); }
+.diagnosis-anomaly-caution { border-color: color-mix(in srgb, var(--grade-caution) 42%, var(--border)); }
+.diagnosis-anomaly-warning { border-color: color-mix(in srgb, var(--grade-warning) 42%, var(--border)); }
+.diagnosis-anomaly-danger { border-color: color-mix(in srgb, var(--grade-danger) 42%, var(--border)); }
+.diagnosis-anomaly-unavailable-label { padding: 4px 8px; border-radius: 999px; color: var(--fg-muted); background: var(--surface); font-size: 11px; font-weight: 800; }
 .diagnosis-degradation-hero, .diagnosis-terminal-error { display: flex; align-items: flex-start; gap: 14px; padding: 16px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface-sunken); }
 .diagnosis-degradation-hero > div, .diagnosis-terminal-error > div { display: grid; gap: 5px; min-width: 0; }
 .diagnosis-degradation-hero small, .diagnosis-terminal-error small { color: var(--fg-muted); }
@@ -204,6 +219,7 @@
   .dashboard-trend-card .metric-selector button { min-width: 64px; flex: 1; }
   .dashboard-trend-action-row { justify-content: flex-start; }
   .connection-progress-content .modal-actions { align-items: stretch; flex-direction: column-reverse; }
+  .diagnosis-anomaly-heading { align-items: flex-start; flex-direction: column; }
 }
 
 @media (max-width: 480px) {

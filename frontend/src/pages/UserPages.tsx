@@ -347,12 +347,27 @@ export function NoticesPage() {
 }
 function categoryLabel(value: NoticeCategory): string { return ({ IMPORTANT: "중요", MAINTENANCE: "점검", FEATURE: "기능", INFO: "안내" } as Record<NoticeCategory, string>)[value]; }
 
-function DiagnosisResultDetails({ diagnosis }: { diagnosis: Diagnosis }) {
+function DiagnosisAnomalyState({ latest }: { latest: Battery["latest"] }) {
+  const snapshot = latest?.score != null && latest.grade != null ? { score: latest.score, grade: latest.grade } : null;
+  return <section className={`diagnosis-anomaly-state ${snapshot ? `diagnosis-anomaly-${snapshot.grade.toLowerCase()}` : "diagnosis-anomaly-unavailable"}`} aria-label="현재 안전 상태">
+    <div className="diagnosis-anomaly-heading">
+      <div><small>현재 안전 상태</small><h3>최근 이상점수</h3></div>
+      {snapshot ? <StatusBadge grade={snapshot.grade} score={snapshot.score} /> : <span className="diagnosis-anomaly-unavailable-label">측정값 없음</span>}
+    </div>
+    {snapshot ? <>
+      <div className="diagnosis-anomaly-value"><strong className="mono" data-anomaly-score={score100(snapshot.score)}>{score100(snapshot.score)}</strong><span>점 · 0–100 표시</span></div>
+      <p className="diagnosis-anomaly-note">열화 진단 등급과 별개의 위험 축입니다. 진단 완료 시점 점수가 아니라 서버의 최근 측정값이며, <span className="mono">{formatDateTime(latest?.measuredAt, true)}</span>에 실측됐습니다.</p>
+    </> : <p className="diagnosis-anomaly-note">서버가 최근 이상점수와 등급을 함께 제공하지 않아 표시할 수 없습니다. 진단 열화 등급과 혼동하지 마세요.</p>}
+  </section>;
+}
+
+function DiagnosisResultDetails({ diagnosis, latest }: { diagnosis: Diagnosis; latest: Battery["latest"] }) {
   const quick = diagnosis.quick;
   const knee = quick?.regulationKneeA == null ? "—" : `${quick.kneeIsUpperBound ? "≥ " : ""}${metricValue(quick.regulationKneeA, 2)} A`;
   return <div className="diagnosis-detail">
     {(diagnosis.confidence === "LOW" || diagnosis.kind === "QUICK") && <div className="diagnosis-confidence-note" role="note"><AlertTriangle size={18} aria-hidden="true" /><p>낮은 신뢰도의 참고용 선별 결과입니다. 최종 건강도나 절대 SOH 판정이 아닙니다.</p></div>}
     {diagnosis.dataSource === "SIMULATED" && <p className="diagnosis-source-note">시뮬레이션 기반 진단 결과</p>}
+    <DiagnosisAnomalyState latest={latest} />
     <div className="detail-summary">
       <span>상태<strong>{statusLabel(diagnosis.status)}</strong></span>
       <span>종류<strong>{diagnosis.kind === "QUICK" ? "빠른 진단" : "정밀 용량 테스트"}</strong></span>
@@ -392,13 +407,13 @@ function diagnosisNextAction(diagnosis: Diagnosis): string {
   return "안전 상태를 확인한 뒤 필요하면 진단을 다시 시작하세요.";
 }
 
-function DiagnosisTerminalContent({ diagnosis, automatic }: { diagnosis: Diagnosis; automatic: boolean }) {
+function DiagnosisTerminalContent({ diagnosis, latest, automatic }: { diagnosis: Diagnosis; latest: Battery["latest"]; automatic: boolean }) {
   if (diagnosis.status === "ABORTED" || diagnosis.status === "FAILED") return <div className="diagnosis-terminal-error" role="alert"><div className="diagnosis-terminal-icon"><AlertTriangle size={26} aria-hidden="true" /></div><div><h3>{diagnosis.status === "ABORTED" ? "진단이 중단되었습니다" : "진단을 완료하지 못했습니다"}</h3><p><strong>원인</strong> {diagnosis.status === "ABORTED" ? abortReasonLabel(diagnosis.abortReason) : "진단 처리 실패"}</p><p><strong>다음 조치</strong> {diagnosisNextAction(diagnosis)}</p>{automatic && <small>완료 결과로 저장하거나 건강도 판정에 사용하지 않습니다.</small>}</div></div>;
   if (diagnosis.kind === "QUICK") {
     const presentation = degradationPresentation(diagnosis.quick?.grade);
-    return <><div className={`diagnosis-degradation-hero degradation-${presentation.grade.toLowerCase()}`} data-degradation-grade={presentation.grade}><span className="diagnosis-terminal-icon" aria-hidden="true">{presentation.icon}</span><div><small>최종 열화 판정</small><h3>{presentation.title}</h3><p>{presentation.message}</p></div></div><DiagnosisResultDetails diagnosis={diagnosis} /></>;
+    return <><div className={`diagnosis-degradation-hero degradation-${presentation.grade.toLowerCase()}`} data-degradation-grade={presentation.grade}><span className="diagnosis-terminal-icon" aria-hidden="true">{presentation.icon}</span><div><small>최종 열화 판정</small><h3>{presentation.title}</h3><p>{presentation.message}</p></div></div><DiagnosisResultDetails diagnosis={diagnosis} latest={latest} /></>;
   }
-  return <DiagnosisResultDetails diagnosis={diagnosis} />;
+  return <DiagnosisResultDetails diagnosis={diagnosis} latest={latest} />;
 }
 
 export function PowerbankDiagnosisPage({ me }: { me: MeResponse }) {
@@ -443,6 +458,7 @@ export function PowerbankDiagnosisPage({ me }: { me: MeResponse }) {
     const notice = completionNotice.data;
     if (!notice || consumedCompletionId.current === notice.diagnosisId) return;
     consumedCompletionId.current = notice.diagnosisId;
+    void battery.refetch();
     setAutomaticDiagnosisId(notice.diagnosisId);
     setSelectedDiagnosisId(notice.diagnosisId);
     queryClient.setQueryData<DiagnosisCompletionNotice | null>(["diagnosis-completion"], null);
@@ -462,7 +478,7 @@ export function PowerbankDiagnosisPage({ me }: { me: MeResponse }) {
   if (!batteryId) return <div className="page-stack"><PageHeading eyebrow="F21 · POWER-BANK DIAGNOSIS" title="보조배터리 진단" description="모드 2 자산의 열화 진단을 실행합니다." /><GateCard /></div>;
   return <div className="page-stack">
     <PageHeading eyebrow="F21 · POWER-BANK DIAGNOSIS" title="보조배터리 진단" description={`${battery.data?.label ?? "—"} · 모드 2 안전 진단`} />
-    <Card className="diagnosis-context"><div><span className="eyebrow">CONNECTED ASSET</span><h2>{battery.data?.label ?? "—"}</h2><p>{battery.data?.maker ?? "제조사 미입력"} · {battery.data?.model ?? "모델 미입력"}</p></div><div className="diagnosis-values"><div><small>상대 SOC</small><strong className="mono">{battery.data?.latest?.socPct == null ? "—" : `${battery.data.latest.socPct}%`}</strong><span>{battery.data?.latest?.socBasis === "RELATIVE_SESSION_START" ? "세션 시작 기준" : "기준 없음"}</span></div><div><small>정격 용량</small><strong className="mono">{battery.data?.capacityWh == null ? "—" : `${battery.data.capacityWh} Wh`}</strong></div></div></Card>
+    <Card className="diagnosis-context"><div><span className="eyebrow">CONNECTED ASSET</span><h2>{battery.data?.label ?? "—"}</h2><p>{battery.data?.maker ?? "제조사 미입력"} · {battery.data?.model ?? "모델 미입력"}</p></div><div className="diagnosis-values"><div><small>상대 SOC</small><strong className="mono">{battery.data?.latest?.socPct == null ? "—" : `${battery.data.latest.socPct}%`}</strong><span>{battery.data?.latest?.socBasis === "RELATIVE_SESSION_START" ? "세션 시작 기준" : "기준 없음"}</span></div><div><small>정격 용량</small><strong className="mono">{battery.data?.capacityWh == null ? "—" : `${battery.data.capacityWh} Wh`}</strong></div><div><small>최근 이상점수</small><strong className="mono">{score100(battery.data?.latest?.score)}</strong><span>{battery.data?.latest?.grade ? `현재 안전 상태 · ${gradeLabel(battery.data.latest.grade)}` : "최근 측정값 없음"}</span></div></div></Card>
     {!supported && <Card className="notice-callout"><LockKeyhole size={20} /><div><strong>모드 2 보조배터리 전용</strong><p>연결된 자산이 모드 1 외부 셀이므로 진단 경로가 잠겨 있습니다.</p></div></Card>}
     {supported && !allowed && <Card className="notice-callout safety-locked"><LockKeyhole size={20} /><div><strong>{capabilityLock(battery.data?.diagnosisCapability?.reasonCode).title}</strong><p>{capabilityLock(battery.data?.diagnosisCapability?.reasonCode).body}</p><span className="mono">{battery.data?.diagnosisCapability?.reasonCode ?? "SAFETY_PROFILE_NOT_READY"}</span></div></Card>}
     <div className="diagnosis-actions">
@@ -472,8 +488,8 @@ export function PowerbankDiagnosisPage({ me }: { me: MeResponse }) {
     <label className="safety-ack"><input type="checkbox" checked={ack} onChange={(event) => setAck(event.target.checked)} disabled={!allowed} /><span>진단 중 이상 알림은 억제되지만 Fail-Safe 자동 차단은 항상 우선함을 확인했습니다.</span></label>
     {(quick.error || capacity.error) && <p className="form-error">{errorMessage(quick.error ?? capacity.error)}</p>}
     {active.data && <Card className="diagnosis-progress"><div className="card-title-row"><div><h2>진단 진행 중</h2><p>{active.data.kind === "QUICK" ? "빠른 진단" : "정밀 용량 테스트"} · {active.data.phase ?? "진행"}</p></div><Button variant="danger-outline" loading={stop.isPending} onClick={() => void stop.mutateAsync()}>진단 중단</Button></div><div className="progress-track"><span style={{ width: `${progressPct(active.data.startedAt, active.data.estimatedEndAt) ?? 0}%` }} /></div><div className="diagnosis-live-values"><span>목표 부하 <strong className="mono">{metricValue(active.data.loadTargetA, 2)} A</strong></span><span>실측 부하 <strong className="mono">{metricValue(active.data.loadActualA, 2)} A</strong></span></div></Card>}
-    <Card><div className="card-title-row"><h2>과거 진단 이력</h2><span className="field-hint">유효한 결과만 건강도에 반영</span></div>{history.isPending ? <TableState state="loading" message="진단 이력을 불러오는 중입니다." /> : history.error ? <TableState state="error" message={errorMessage(history.error)} /> : history.data?.items.length ? <div className="diagnosis-history-list">{history.data.items.map((item) => <div className="diagnosis-history-row" key={item.id}><div><strong>{item.kind === "QUICK" ? "빠른 진단" : "정밀 용량 테스트"}</strong><small>{statusLabel(item.status)} · {formatDateTime(item.measuredAt ?? item.startedAt)}{item.confidence ? ` · ${item.confidence}` : ""}</small></div><span className="mono">{item.summary?.sohRelPct == null ? "—" : `${item.summary.sohRelPct}%`}</span><Button variant="ghost" onClick={() => { setAutomaticDiagnosisId(null); setSelectedDiagnosisId(item.id); }}>상세</Button></div>)}</div> : <TableState state="empty" message="유효한 진단 이력이 없습니다." />}</Card>
-    {selectedDiagnosisId && <Modal title={detail.data?.status === "ABORTED" ? "진단 중단 안내" : detail.data?.status === "FAILED" ? "진단 실패 안내" : automaticDiagnosisId === selectedDiagnosisId ? "진단 최종 결과" : detail.data?.kind === "QUICK" ? "빠른 진단 상세" : detail.data ? "정밀 용량 테스트 상세" : "진단 상세"} description={detail.data ? statusLabel(detail.data.status) + (detail.data.abortReason ? " · " + abortReasonLabel(detail.data.abortReason) : "") + " · 측정 완료 시각 " + (detail.data.measuredAt ? formatDateTime(detail.data.measuredAt, true) : "—") : "진단 결과를 불러오는 중입니다."} onClose={() => { setSelectedDiagnosisId(null); setAutomaticDiagnosisId(null); }} wide>{detail.isPending ? <TableState state="loading" message="진단 상세를 불러오는 중입니다." /> : detail.error ? <><TableState state="error" message={errorMessage(detail.error)} /><div className="modal-actions"><Button variant="secondary" onClick={() => void detail.refetch()}>다시 시도</Button></div></> : detail.data ? <DiagnosisTerminalContent diagnosis={detail.data} automatic={automaticDiagnosisId === selectedDiagnosisId} /> : null}</Modal>}
+    <Card><div className="card-title-row"><h2>과거 진단 이력</h2><span className="field-hint">유효한 결과만 건강도에 반영</span></div>{history.isPending ? <TableState state="loading" message="진단 이력을 불러오는 중입니다." /> : history.error ? <TableState state="error" message={errorMessage(history.error)} /> : history.data?.items.length ? <div className="diagnosis-history-list">{history.data.items.map((item) => <div className="diagnosis-history-row" key={item.id}><div><strong>{item.kind === "QUICK" ? "빠른 진단" : "정밀 용량 테스트"}</strong><small>{statusLabel(item.status)} · {formatDateTime(item.measuredAt ?? item.startedAt)}{item.confidence ? ` · ${item.confidence}` : ""}</small></div><span className="mono">{item.summary?.sohRelPct == null ? "—" : `${item.summary.sohRelPct}%`}</span><Button variant="ghost" onClick={() => { void battery.refetch(); setAutomaticDiagnosisId(null); setSelectedDiagnosisId(item.id); }}>상세</Button></div>)}</div> : <TableState state="empty" message="유효한 진단 이력이 없습니다." />}</Card>
+    {selectedDiagnosisId && <Modal title={detail.data?.status === "ABORTED" ? "진단 중단 안내" : detail.data?.status === "FAILED" ? "진단 실패 안내" : automaticDiagnosisId === selectedDiagnosisId ? "진단 최종 결과" : detail.data?.kind === "QUICK" ? "빠른 진단 상세" : detail.data ? "정밀 용량 테스트 상세" : "진단 상세"} description={detail.data ? statusLabel(detail.data.status) + (detail.data.abortReason ? " · " + abortReasonLabel(detail.data.abortReason) : "") + " · 측정 완료 시각 " + (detail.data.measuredAt ? formatDateTime(detail.data.measuredAt, true) : "—") : "진단 결과를 불러오는 중입니다."} onClose={() => { setSelectedDiagnosisId(null); setAutomaticDiagnosisId(null); }} wide>{detail.isPending ? <TableState state="loading" message="진단 상세를 불러오는 중입니다." /> : detail.error ? <><TableState state="error" message={errorMessage(detail.error)} /><div className="modal-actions"><Button variant="secondary" onClick={() => void detail.refetch()}>다시 시도</Button></div></> : detail.data ? <DiagnosisTerminalContent diagnosis={detail.data} latest={battery.data?.latest ?? null} automatic={automaticDiagnosisId === selectedDiagnosisId} /> : null}</Modal>}
   </div>;
 }
 
