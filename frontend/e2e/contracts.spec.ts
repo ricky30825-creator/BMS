@@ -173,6 +173,9 @@ test.describe("CellGuard contract flows (MSW)", () => {
       await expect(result.getByText("현재 안전 상태")).toBeVisible();
       await expect(result.locator('[data-anomaly-score="82"]')).toBeVisible();
       await expect(result).toContainText("진단 완료 시점 점수가 아니라");
+      const context = page.locator(".diagnosis-context");
+      await expect(context.getByText("위험", { exact: true })).toBeVisible();
+      await expect(context).not.toContainText("DANGER");
       if (diagnosisCase.grade === "SUSPECT_DEGRADED") await result.screenshot({ path: "test-results/powerbank-diagnosis-abnormal.png" });
       await expect(page.getByRole("dialog")).toHaveCount(1);
       await result.getByRole("button", { name: "닫기" }).click();

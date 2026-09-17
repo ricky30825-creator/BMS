@@ -294,6 +294,13 @@ h3 { font-size: 14px; }
 .admin-refresh { padding: 0; border: 0; color: var(--fg-muted); background: transparent; cursor: pointer; }
 .admin-refresh:hover { color: var(--fg); }
 .admin-refresh:disabled { cursor: wait; }
+.detail-summary > span { display: flex; flex-direction: column; gap: 3px; }
+.detail-summary > span > span { color: var(--fg-muted); font-size: 11px; }
+.modal-heading .icon-button { min-width: 44px; min-height: 44px; }
+.diagnosis-context .diagnosis-values .status-badge.grade-normal { color: var(--grade-normal); background: var(--grade-normal-bg); font-size: 10px; }
+.diagnosis-context .diagnosis-values .status-badge.grade-caution { color: var(--grade-caution); background: var(--grade-caution-bg); font-size: 10px; }
+.diagnosis-context .diagnosis-values .status-badge.grade-warning { color: var(--grade-warning); background: var(--grade-warning-bg); font-size: 10px; }
+.diagnosis-context .diagnosis-values .status-badge.grade-danger { color: var(--grade-danger); background: var(--grade-danger-bg); font-size: 10px; }
 .mobile-scrim { position: fixed; inset: 0; z-index: 35; display: block; border: 0; background: rgba(15, 23, 42, .38); }
 @media (max-width: 1023px) {
   .sidebar { width: 76px; }.sidebar .shell-brand .logo span:not(.logo-mark), .sidebar .environment-tag, .sidebar .nav-item span, .sidebar .account-copy { display: none; }.sidebar .nav-item { justify-content: center; padding: 9px; }.main-column { margin-left: 76px; }.dashboard-overview { grid-template-columns: 1fr; }.landing-hero { gap: 28px; }.hero-copy h1 { font-size: 50px; }.topbar { padding: 0 20px; }.content-area { padding: 20px; }

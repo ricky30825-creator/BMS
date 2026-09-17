@@ -347,8 +347,9 @@ export function NoticesPage() {
 }
 function categoryLabel(value: NoticeCategory): string { return ({ IMPORTANT: "중요", MAINTENANCE: "점검", FEATURE: "기능", INFO: "안내" } as Record<NoticeCategory, string>)[value]; }
 
-function DiagnosisAnomalyState({ latest }: { latest: Battery["latest"] }) {
+export function DiagnosisAnomalyState({ latest }: { latest: Battery["latest"] }) {
   const snapshot = latest?.score != null && latest.grade != null ? { score: latest.score, grade: latest.grade } : null;
+  const measuredAt = latest?.measuredAt ? formatDateTime(latest.measuredAt, true) : null;
   return <section className={`diagnosis-anomaly-state ${snapshot ? `diagnosis-anomaly-${snapshot.grade.toLowerCase()}` : "diagnosis-anomaly-unavailable"}`} aria-label="현재 안전 상태">
     <div className="diagnosis-anomaly-heading">
       <div><small>현재 안전 상태</small><h3>최근 이상점수</h3></div>
@@ -356,7 +357,7 @@ function DiagnosisAnomalyState({ latest }: { latest: Battery["latest"] }) {
     </div>
     {snapshot ? <>
       <div className="diagnosis-anomaly-value"><strong className="mono" data-anomaly-score={score100(snapshot.score)}>{score100(snapshot.score)}</strong><span>점 · 0–100 표시</span></div>
-      <p className="diagnosis-anomaly-note">열화 진단 등급과 별개의 위험 축입니다. 진단 완료 시점 점수가 아니라 서버의 최근 측정값이며, <span className="mono">{formatDateTime(latest?.measuredAt, true)}</span>에 실측됐습니다.</p>
+      <p className="diagnosis-anomaly-note">열화 진단 등급과 별개의 위험 축입니다. 진단 완료 시점 점수가 아니라 서버의 최근 측정값이며, {measuredAt ? <><span className="mono">{measuredAt}</span>에 실측됐습니다.</> : "측정 시각은 서버에서 제공되지 않았습니다."}</p>
     </> : <p className="diagnosis-anomaly-note">서버가 최근 이상점수와 등급을 함께 제공하지 않아 표시할 수 없습니다. 진단 열화 등급과 혼동하지 마세요.</p>}
   </section>;
 }
@@ -369,10 +370,10 @@ function DiagnosisResultDetails({ diagnosis, latest }: { diagnosis: Diagnosis; l
     {diagnosis.dataSource === "SIMULATED" && <p className="diagnosis-source-note">시뮬레이션 기반 진단 결과</p>}
     <DiagnosisAnomalyState latest={latest} />
     <div className="detail-summary">
-      <span>상태<strong>{statusLabel(diagnosis.status)}</strong></span>
-      <span>종류<strong>{diagnosis.kind === "QUICK" ? "빠른 진단" : "정밀 용량 테스트"}</strong></span>
-      <span>신뢰도<strong>{diagnosis.confidence === "LOW" ? "낮음" : diagnosis.confidence === "HIGH" ? "높음" : "—"}</strong></span>
-      <span>측정 완료 시각<strong>{diagnosis.measuredAt ? formatDateTime(diagnosis.measuredAt, true) : "—"}</strong></span>
+      <span><span>상태</span><strong>{statusLabel(diagnosis.status)}</strong></span>
+      <span><span>종류</span><strong>{diagnosis.kind === "QUICK" ? "빠른 진단" : "정밀 용량 테스트"}</strong></span>
+      <span><span>신뢰도</span><strong>{diagnosis.confidence === "LOW" ? "낮음" : diagnosis.confidence === "HIGH" ? "높음" : "—"}</strong></span>
+      <span><span>측정 완료 시각</span><strong>{diagnosis.measuredAt ? formatDateTime(diagnosis.measuredAt, true) : "—"}</strong></span>
     </div>
     {diagnosis.kind === "QUICK" ? <div className="raw-list">
       <div><code>최종 열화 판정</code><span>{gradeLabel(quick?.grade)}</span></div>
@@ -478,7 +479,7 @@ export function PowerbankDiagnosisPage({ me }: { me: MeResponse }) {
   if (!batteryId) return <div className="page-stack"><PageHeading eyebrow="F21 · POWER-BANK DIAGNOSIS" title="보조배터리 진단" description="모드 2 자산의 열화 진단을 실행합니다." /><GateCard /></div>;
   return <div className="page-stack">
     <PageHeading eyebrow="F21 · POWER-BANK DIAGNOSIS" title="보조배터리 진단" description={`${battery.data?.label ?? "—"} · 모드 2 안전 진단`} />
-    <Card className="diagnosis-context"><div><span className="eyebrow">CONNECTED ASSET</span><h2>{battery.data?.label ?? "—"}</h2><p>{battery.data?.maker ?? "제조사 미입력"} · {battery.data?.model ?? "모델 미입력"}</p></div><div className="diagnosis-values"><div><small>상대 SOC</small><strong className="mono">{battery.data?.latest?.socPct == null ? "—" : `${battery.data.latest.socPct}%`}</strong><span>{battery.data?.latest?.socBasis === "RELATIVE_SESSION_START" ? "세션 시작 기준" : "기준 없음"}</span></div><div><small>정격 용량</small><strong className="mono">{battery.data?.capacityWh == null ? "—" : `${battery.data.capacityWh} Wh`}</strong></div><div><small>최근 이상점수</small><strong className="mono">{score100(battery.data?.latest?.score)}</strong><span>{battery.data?.latest?.grade ? `현재 안전 상태 · ${gradeLabel(battery.data.latest.grade)}` : "최근 측정값 없음"}</span></div></div></Card>
+    <Card className="diagnosis-context"><div><span className="eyebrow">CONNECTED ASSET</span><h2>{battery.data?.label ?? "—"}</h2><p>{battery.data?.maker ?? "제조사 미입력"} · {battery.data?.model ?? "모델 미입력"}</p></div><div className="diagnosis-values"><div><small>상대 SOC</small><strong className="mono">{battery.data?.latest?.socPct == null ? "—" : `${battery.data.latest.socPct}%`}</strong><span>{battery.data?.latest?.socBasis === "RELATIVE_SESSION_START" ? "세션 시작 기준" : "기준 없음"}</span></div><div><small>정격 용량</small><strong className="mono">{battery.data?.capacityWh == null ? "—" : `${battery.data.capacityWh} Wh`}</strong></div><div><small>최근 이상점수</small><strong className="mono">{score100(battery.data?.latest?.score)}</strong>{battery.data?.latest?.score != null && battery.data.latest.grade != null ? <span>현재 안전 상태 · <StatusBadge grade={battery.data.latest.grade} compact /></span> : <span>현재 안전 상태 측정값 없음</span>}</div></div></Card>
     {!supported && <Card className="notice-callout"><LockKeyhole size={20} /><div><strong>모드 2 보조배터리 전용</strong><p>연결된 자산이 모드 1 외부 셀이므로 진단 경로가 잠겨 있습니다.</p></div></Card>}
     {supported && !allowed && <Card className="notice-callout safety-locked"><LockKeyhole size={20} /><div><strong>{capabilityLock(battery.data?.diagnosisCapability?.reasonCode).title}</strong><p>{capabilityLock(battery.data?.diagnosisCapability?.reasonCode).body}</p><span className="mono">{battery.data?.diagnosisCapability?.reasonCode ?? "SAFETY_PROFILE_NOT_READY"}</span></div></Card>}
     <div className="diagnosis-actions">

@@ -2,6 +2,7 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { Modal, StatusBadge } from "../components/ui";
+import { DiagnosisAnomalyState } from "../pages/UserPages";
 
 describe("status UI", () => {
   it("communicates grade with shape, label, and score", () => {
@@ -10,6 +11,22 @@ describe("status UI", () => {
     expect(screen.getByText("위험")).toBeInTheDocument();
     expect(screen.getByText("82")).toBeInTheDocument();
     expect(document.querySelector(".grade-shape.square")).toBeInTheDocument();
+  });
+
+  it("does not invent a measurement time when the latest anomaly snapshot omits it", () => {
+    render(<DiagnosisAnomalyState latest={{ score: 0.82, grade: "DANGER", voltageV: null, currentA: null, representativeTempC: null, socPct: null, measuredAt: null }} />);
+
+    expect(screen.getByLabelText("위험 82")).toBeInTheDocument();
+    expect(screen.getByText("측정 시각은 서버에서 제공되지 않았습니다.", { exact: false })).toBeInTheDocument();
+    expect(screen.queryByText(/—에 실측됐습니다/)).not.toBeInTheDocument();
+  });
+
+  it("keeps a partial anomaly snapshot unavailable instead of showing a misleading grade", () => {
+    render(<DiagnosisAnomalyState latest={{ score: null, grade: null, voltageV: null, currentA: null, representativeTempC: null, socPct: null, measuredAt: null }} />);
+
+    expect(screen.getByText("측정값 없음")).toBeInTheDocument();
+    expect(screen.getByText("서버가 최근 이상점수와 등급을 함께 제공하지 않아 표시할 수 없습니다.", { exact: false })).toBeInTheDocument();
+    expect(screen.queryByLabelText(/정상|주의|경고|위험/)).not.toBeInTheDocument();
   });
 });
 
