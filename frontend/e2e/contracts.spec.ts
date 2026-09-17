@@ -195,6 +195,27 @@ test.describe("CellGuard contract flows (MSW)", () => {
     await expect(page.getByRole("dialog", { name: "진단 최종 결과" })).toHaveCount(0);
   });
 
+  test("opens the abnormal QUICK MSW history fixture from 상세 and separates current safety", async ({ page }) => {
+    await signIn(page, "hong@cellguard.io");
+    await connectBattery(page, "PACK-004");
+    await page.locator("aside").getByRole("button", { name: "보조배터리 진단" }).click();
+
+    const abnormalHistory = page.locator(".diagnosis-history-row").filter({ hasText: "빠른 진단" }).first();
+    await expect(abnormalHistory).toContainText("완료");
+    await abnormalHistory.getByRole("button", { name: "상세" }).click();
+
+    const result = page.getByRole("dialog", { name: "빠른 진단 상세" });
+    await expect(result).toBeVisible();
+    await expect(result.locator('[data-degradation-grade="SUSPECT_DEGRADED"]')).toBeVisible();
+    await expect(result).toContainText("최종 열화 판정");
+    await expect(result).toContainText("현재 안전 상태");
+    await expect(result.locator('[data-anomaly-score="24"]')).toBeVisible();
+    await expect(result.getByLabel("정상 24")).toBeVisible();
+    await expect(result).toContainText("진단 완료 시점 점수가 아니라 서버의 최근 측정값이며");
+    await expect(result).toContainText("실측됐습니다");
+    await result.screenshot({ path: "test-results/powerbank-diagnosis-msw-abnormal.png" });
+  });
+
   test("shows user abort as an error popup, never as a completion result", async ({ page }) => {
     await signIn(page, "hong@cellguard.io");
     await connectBattery(page, "PACK-004");

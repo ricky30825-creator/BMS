@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { http, HttpResponse } from "msw";
 import { setupServer } from "msw/node";
-import { handlers } from "../mocks/handlers";
+import { abnormalQuickDiagnosisFixture, handlers } from "../mocks/handlers";
 
 const base = "http://localhost";
 const safeBattery = { id: "b_pack_002", diagnosisCapability: { executionAllowed: false, reasonCode: "SAFETY_PROFILE_NOT_READY" } };
@@ -54,5 +54,22 @@ describe("MSW mode 2 capability scenario", () => {
     const detail = await fetch(`${base}/api/diagnoses/dg_pack_004_001`);
     expect(detail.status).toBe(200);
     expect(await detail.json()).toMatchObject({ id: "dg_pack_004_001", kind: "CAPACITY", status: "COMPLETED" });
+  });
+
+  it("serves an abnormal QUICK fixture through the history and detail endpoints", async () => {
+    server.resetHandlers(
+      ...handlers,
+      http.get(`${base}/api/batteries/b_pack_004/diagnoses`, () => HttpResponse.json({ items: [{ id: abnormalQuickDiagnosisFixture.id, kind: abnormalQuickDiagnosisFixture.kind, status: abnormalQuickDiagnosisFixture.status, summary: { grade: abnormalQuickDiagnosisFixture.quick?.grade ?? null } }] })),
+      http.get(`${base}/api/diagnoses/${abnormalQuickDiagnosisFixture.id}`, () => HttpResponse.json(abnormalQuickDiagnosisFixture)),
+    );
+
+    const historyResponse = await fetch(`${base}/api/batteries/b_pack_004/diagnoses`);
+    expect(historyResponse.status).toBe(200);
+    const historyBody = await historyResponse.json() as { items: Array<{ id: string; kind: string; status: string; summary?: { grade?: string | null } }> };
+    expect(historyBody.items[0]).toMatchObject({ id: "dg_pack_004_quick_abnormal", kind: "QUICK", status: "COMPLETED", summary: { grade: "SUSPECT_DEGRADED" } });
+
+    const detailResponse = await fetch(`${base}/api/diagnoses/dg_pack_004_quick_abnormal`);
+    expect(detailResponse.status).toBe(200);
+    expect(await detailResponse.json()).toMatchObject({ id: "dg_pack_004_quick_abnormal", kind: "QUICK", status: "COMPLETED", quick: { grade: "SUSPECT_DEGRADED" } });
   });
 });

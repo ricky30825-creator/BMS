@@ -30,7 +30,8 @@ let currentPassword = "demo-password";
 let alertChannels: AlertChannels = { KAKAO: true, EMAIL: true, SMS: false, WEBPUSH: false };
 let activeDiagnosis: Diagnosis | null = null;
 const completedCapacityDiagnosis: Diagnosis = { id: "dg_pack_004_001", batteryId: "b_pack_004", batteryLabel: "PACK-004", sessionId: "s_history", kind: "CAPACITY", status: "COMPLETED", confidence: "HIGH", startedAt: "2026-07-28T05:20:00.000Z", measuredAt: "2026-07-28T11:40:00.000Z", socHintLevel: null, loadTargetA: null, loadActualA: null, partialMetrics: null, quick: null, capacity: { deliveredWh: 31.2, ratedWh: 37, baselineWh: 34.8, sohRelPct: 89.7, sohAbsPct: 95.8, assumedEfficiency: 0.88, dischargeCurrentA: 1, isBaseline: false, partial: false } };
-const diagnosisHistory: Record<string, Diagnosis[]> = { b_pack_004: [completedCapacityDiagnosis] };
+export const abnormalQuickDiagnosisFixture: Diagnosis = { id: "dg_pack_004_quick_abnormal", batteryId: "b_pack_004", batteryLabel: "PACK-004", sessionId: "s_history_quick", kind: "QUICK", status: "COMPLETED", dataSource: "MEASURED", confidence: "LOW", startedAt: "2026-08-05T05:20:00.000Z", measuredAt: "2026-08-05T05:22:00.000Z", loadTargetA: 1, loadActualA: 0.72, socHintLevel: 3, partialMetrics: null, quick: { regulationKneeA: 1.2, kneeIsUpperBound: false, thermalSlopeCPerMin: 3.8, specAttainmentPct: 68, grade: "SUSPECT_DEGRADED" }, capacity: null };
+const diagnosisHistory: Record<string, Diagnosis[]> = { b_pack_004: [abnormalQuickDiagnosisFixture, completedCapacityDiagnosis] };
 let relay: Relay = { batteryId: "b_pack_001", state: "CLOSED", changedAt: now(), changedBy: { type: "SYSTEM", systemCode: "SYSTEM" }, interlock: { engaged: false, condition: null, canRestore: true } };
 const page = <T>(items: T[]) => ({ items, page: { number: 1, size: items.length || 20, total: items.length, totalPages: items.length ? 1 : 0 } });
 // Test-only MSW fixture. Production event trends are aggregated from PostgreSQL.
