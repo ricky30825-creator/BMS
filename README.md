@@ -77,7 +77,7 @@ hypertable 전환 누락은 `TIMESCALEDB_REQUIRED`로 명시적으로 중단된�
 | **백엔드** | [`docs/backend_contract.md`](docs/backend_contract.md) — REST·WebSocket 정본 | `backend/src/`, [`docs/product_contract.md`](docs/product_contract.md) |
 | **프론트엔드** | `frontend/` — **화면·동작의 최종본이다** | [`docs/product_contract.md`](docs/product_contract.md)(기능·유저플로우), [`design-system/cellguard/MASTER.md`](design-system/cellguard/MASTER.md)(토큰·반응형) |
 | **에지 (라즈베리파이)** | [`docs/hardware/mode1_beginner_guide.md`](docs/hardware/mode1_beginner_guide.md) | [`docs/hardware/mode1_backend_spec.md`](docs/hardware/mode1_backend_spec.md), `edge/`, `hardware/` |
-| **AI·모델** | [`docs/hardware/mode2_powerbank_diagnosis_spec.md`](docs/hardware/mode2_powerbank_diagnosis_spec.md) §9 — 열폭주 스크리닝 피처·판정 설계 | `CLAUDE.md`의 「이상점수와 등급」절 |
+| **AI·모델** | [`ai/model/README.md`](ai/model/README.md) — LSTM-AE + InformerLite 베이스라인 코드·결과·런타임 연동 상태 | [`docs/hardware/mode2_powerbank_diagnosis_spec.md`](docs/hardware/mode2_powerbank_diagnosis_spec.md) §9, `CLAUDE.md`의 「이상점수와 등급」절 |
 | **기획·요구사항** | [`PLAN.md`](PLAN.md) | [`docs/verification_matrix.md`](docs/verification_matrix.md) |
 
 ---
@@ -88,7 +88,7 @@ hypertable 전환 누락은 `TIMESCALEDB_REQUIRED`로 명시적으로 중단된�
 backend/     Express + TypeScript. REST·WebSocket·진단 러너·인메모리 스토어
 frontend/    React. 화면·동작의 정본
 edge/        라즈베리파이 수집 코드
-ai/          로컬 AI 추론 계약·bundle 검증·Kafka lifecycle 경계
+ai/          로컬 AI 추론 계약·bundle 검증·Kafka lifecycle 경계. model/ 에 학습·채점 베이스라인
 hardware/    KiCad 회로도 (생성물 — tools/gen_*.py로 만든다, 손으로 고치지 않는다)
 docs/        정본 문서. handover/ 아래가 인계 명세
 design-system/  디자인 토큰·마스터 문서
