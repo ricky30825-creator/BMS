@@ -213,8 +213,8 @@ v3에 흩어져 있던 표시 로직은 아래처럼 하나의 4등급 규칙으
 | `socPct` | % (0–100 정수) |
 | `tempContact`, `tempIrSurface` | °C |
 | `representativeTempC` | °C — 유효한 `tempContact.value`, `tempIrSurface.value` 중 큰 값 |
-| `tempAmbientC` | °C — 실온. Raw `temp_ambient` `[계획 2026-09-25 · 미구현]` |
-| `heatRiseC` | °C — 발열값 = `representativeTempC − tempAmbientC` `[계획 2026-09-25 · 미구현]` |
+| `tempAmbientC` | °C — 실온. Raw `temp_ambient` `[구현 2026-09-25]` |
+| `heatRiseC` | °C — 발열값 = `representativeTempC − tempAmbientC` `[구현 2026-09-25]` |
 | `gasRaw`, `pressureRaw`, `acousticRaw` | ADC raw (무차원 정수) |
 | `dTdt` | °C/min `[v3: '+2.8 °C/min']` |
 
@@ -223,9 +223,9 @@ v3에 흩어져 있던 표시 로직은 아래처럼 하나의 4등급 규칙으
 - `currentA`와 `powerW`는 **양수=충전, 음수=방전, 0=대기**인 signed 값이다. 저장·AI·API는 부호를 보존하고, 화면만 절댓값과 `CHARGING`/`DISCHARGING`/`IDLE` 방향 라벨을 함께 표시한다.
 - 대표 온도는 서버가 유효한 non-null 접촉/IR 값 중 큰 값으로 계산한다. 둘 다 null이면 `representativeTempC.value=null`; 선택 소스는 `representativeTempSource=CONTACT|IR_SURFACE|null`이다. 에지 Raw에는 합성 `temp_c`를 추가하지 않는다.
 - 모드 1은 두 온도 소스를 사용할 수 있고, 모드 2는 `tempContact=null`, IR 표면 온도만 사용한다.
-- **실온과 발열값** `[계획 2026-09-25 · 미구현]` — 에지 Raw에 실온 `temp_ambient`가 추가됐고(`backend/src/kafka.ts`, 선택·nullable) `telemetry_metric.temp_ambient`까지 적재된다. **API·화면 노출은 아직 없다.** 노출할 때의 규칙:
-  - `metrics.tempAmbientC = { value, status }`, `metrics.heatRiseC = { value, status }`를 대시보드 snapshot과 WS 갱신에 추가한다. 실온 출처는 모드 1 = MLX90614 #2 Ta, 모드 2 = 실온 DS18B20이다.
-  - `heatRiseC.value = representativeTempC.value − tempAmbientC.value`. **서버가 계산한다**(대표 온도와 같은 이유 — 판정 로직을 한 곳에). 둘 중 하나라도 null이거나 stale이면 `heatRiseC.value=null`이며, **실온 없이 대표 온도로 대체하지 않는다.**
+- **실온과 발열값** `[구현 2026-09-25]` — 에지 Raw의 선택·nullable `temp_ambient`(`backend/src/kafka.ts`)가 `telemetry_metric.temp_ambient`(`013`)와 `battery_latest.temp_ambient`(`014`)에 적재되고 대시보드로 나간다.
+  - `metrics.tempAmbientC = { value, status }`, `metrics.heatRiseC = { value, status }`는 **대시보드 snapshot과 WS `metrics.tick`의 필수 키**다(프론트 정규화가 키 누락을 거부한다). 실온 출처는 모드 1 = MLX90614 #2 Ta, 모드 2 = 실온 DS18B20이다.
+  - `heatRiseC.value = round(representativeTempC.value − tempAmbientC.value, 0.01)`. **서버가 계산한다**(`backend/src/temperature.ts` — 대표 온도와 같은 이유로 판정 로직을 한 곳에). 두 값은 `battery_latest`의 **같은 프레임**에서 온다 — 새 프레임에 실온이 없으면 latest 실온도 null로 덮어써, 오래된 실온과 새 표면온도가 짝지어지지 않는다. 둘 중 하나라도 null이면 `heatRiseC.value=null`이며, **실온 없이 대표 온도로 대체하지 않는다.**
   - 음수 발열값도 그대로 준다(방이 셀보다 따뜻한 순간). 화면은 0으로 자르지 않는다 — 잘라 버리면 "실온이 드리프트했다"는 신호가 사라진다.
   - `status`는 두 지표 모두 **`null`**(임계값 미설정, §아래 표). 발열값 문턱은 모드별 실측 후 정한다(모드 2 스펙 §8 H2).
   - 실온은 **셀 단위 데이터가 아니다**(아래 "셀 단위 데이터" 참조). 이상점수·등급과도 다른 축이다.
@@ -918,7 +918,7 @@ WebSocket 연결 **전에** 화면을 채우기 위한 1회 조회. 이후 갱�
 |---|---|---|---|
 | `tempContact`, `tempIrSurface`, `representativeTempC` | ≥ 55°C | ≥ 60°C | 서버 표시 상태 정책. 프론트는 비교하지 않으며 이 상태로 자동 차단하지 않는다 |
 | `voltageV`, `currentA`, `socPct`, `powerW` | — | — | **임계값 미설정 → `status: null`** `[Q27]` |
-| `tempAmbientC`, `heatRiseC` | — | — | **임계값 미설정 → `status: null`** `[계획 2026-09-25 · 미구현]`. 55/60°C 온도 임계를 발열값에 그대로 쓰지 않는다 — 발열값은 절대 온도가 아니다 |
+| `tempAmbientC`, `heatRiseC` | — | — | **임계값 미설정 → `status: null`** `[구현 2026-09-25]`. 55/60°C 온도 임계를 발열값에 그대로 쓰지 않는다 — 발열값은 절대 온도가 아니다 |
 
 - **`status`는 `null`을 허용한다.** 임계값이 정해지지 않은 지표는 서버가 `null`을 내려보내고, 프론트는 그 카드에 배지를 렌더링하지 않는다. 온도 카드만 배지가 붙는다.
 - 전압·전류·SOC 배지는 임계값을 정하지 않으므로 서버가 `null`을 반환한다. 임계값을 추가할 때는 이 계약과 모드별 정상범위를 함께 갱신한다 `[Q27 확정: null 유지]`.

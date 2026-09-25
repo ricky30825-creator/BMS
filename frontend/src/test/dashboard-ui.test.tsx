@@ -27,6 +27,8 @@ function dashboard(overrides: Partial<Dashboard> = {}): Dashboard {
       tempContact: { value: 31.2, status: "OK" },
       tempIrSurface: { value: 30.4, status: "OK" },
       representativeTempC: { value: 31.2, status: "OK", source: "CONTACT" },
+      tempAmbientC: { value: 24.5, status: null },
+      heatRiseC: { value: 6.7, status: null },
       socPct: { value: 78, status: null },
       socBasis: "ABSOLUTE_GAUGE",
       measuredAt: "2026-08-25T00:00:00.000Z",
@@ -119,6 +121,39 @@ describe("dashboard quick metric cards", () => {
     const points = container.querySelector(".metric-mini-line polyline")?.getAttribute("points");
 
     expect(points?.trim().split(/\s+/)).toHaveLength(2);
+  });
+});
+
+describe("dashboard heat rise", () => {
+  it("shows room temperature and heat rise next to the battery temperature", () => {
+    const { container } = renderDashboard(dashboard());
+    const heat = container.querySelector(".dashboard-heat-rise");
+
+    expect(heat).toHaveTextContent("실온");
+    expect(heat).toHaveTextContent("24.5");
+    expect(heat).toHaveTextContent("발열값");
+    expect(heat).toHaveTextContent("+6.7");
+    // No thresholds exist for either value, so no grade badge is drawn.
+    expect(heat?.querySelector(".metric-status")).toBeNull();
+  });
+
+  it("keeps a negative heat rise instead of clamping it to zero", () => {
+    const data = dashboard();
+    data.metrics.heatRiseC = { value: -2.3, status: null };
+    const { container } = renderDashboard(data);
+
+    expect(container.querySelector(".dashboard-heat-rise")).toHaveTextContent("−2.3");
+  });
+
+  it("shows a dash for heat rise when the room temperature is missing", () => {
+    const data = dashboard();
+    data.metrics.tempAmbientC = { value: null, status: null };
+    data.metrics.heatRiseC = { value: null, status: null };
+    const { container } = renderDashboard(data);
+    const heat = container.querySelector(".dashboard-heat-rise");
+
+    expect(heat).toHaveTextContent("실온 미측정");
+    expect(heat?.textContent).not.toContain("31.2");
   });
 });
 

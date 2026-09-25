@@ -196,6 +196,8 @@ export type DemoBattery = {
     powerW: number | null;
     tempContact: number | null;
     tempIrSurface: number | null;
+    // Room temperature from the same frame; reference for heat rise.
+    tempAmbient: number | null;
     socPct: number | null;
     score: number | null;
     measuredAt: string | null;

@@ -34,6 +34,7 @@ import { parseAdminEventTrendPeriod } from "./adminEventTrend.js";
 import { PHYSICAL_TREND_METRICS } from "./trendAggregate.js";
 import { parseTrendBatteryIds, parseTrendMetrics, parseTrendPeriod } from "./trendQuery.js";
 import { renderTrendPdf, safeFilenameSegment } from "./trendPdf.js";
+import { heatRiseC, representativeTemperature } from "./temperature.js";
 import {
   abortDiagnosis,
   abortDiagnosisBySystem,
@@ -165,9 +166,9 @@ async function relayJson(batteryId: string) {
 
 async function batteryJson(battery: Awaited<ReturnType<typeof batteryById>>) {
   if (!battery) return null;
-  const tempCandidates = [battery.latest.tempContact, battery.latest.tempIrSurface].filter((value): value is number => value !== null);
-  const representativeTempC = tempCandidates.length ? Math.max(...tempCandidates) : null;
-  const representativeTempSource = representativeTempC === null ? null : battery.latest.tempContact === representativeTempC ? "CONTACT" : "IR_SURFACE";
+  const representative = representativeTemperature(battery.latest.tempContact, battery.latest.tempIrSurface);
+  const representativeTempC = representative.valueC;
+  const representativeTempSource = representative.source;
   const hardwareProfile = battery.targetMode === 2 ? "COMBINED_EXISTING_PARTS_V1" : "MODE1_EXTERNAL_CELL_V1";
   const mode2ProfileReady = false;
   const relay = await relayByBattery(battery.id);
@@ -193,6 +194,8 @@ async function batteryJson(battery: Awaited<ReturnType<typeof batteryById>>) {
       representativeTempSource,
       tempContact: battery.latest.tempContact,
       tempIrSurface: battery.latest.tempIrSurface,
+      tempAmbientC: battery.latest.tempAmbient,
+      heatRiseC: heatRiseC(representativeTempC, battery.latest.tempAmbient),
       socPct: battery.targetMode === 2 && !mode2ProfileReady ? null : battery.latest.socPct,
       socBasis: battery.targetMode === 2 ? (mode2ProfileReady ? "RELATIVE_SESSION_START" : null) : "ABSOLUTE_GAUGE",
       score: battery.latest.score,
@@ -233,6 +236,10 @@ async function dashboardMetrics(battery: NonNullable<Awaited<ReturnType<typeof b
     tempContact: metric(latest.tempContact, temperatureStatus(latest.tempContact)),
     tempIrSurface: metric(latest.tempIrSurface, temperatureStatus(latest.tempIrSurface)),
     representativeTempC: { ...metric(latest.representativeTempC, temperatureStatus(latest.representativeTempC)), source: latest.representativeTempSource },
+    // No thresholds yet (contract §1.8): the 55/60 °C temperature grades are
+    // absolute temperatures and must not be applied to room temp or heat rise.
+    tempAmbientC: metric(latest.tempAmbientC, null),
+    heatRiseC: metric(latest.heatRiseC, null),
     socPct: metric(latest.socPct, null),
     socBasis: latest.socBasis,
     measuredAt: latest.measuredAt

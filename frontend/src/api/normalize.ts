@@ -202,7 +202,7 @@ function normalizeMetric(raw: unknown, path: string): { value: number | null; st
 
 export function normalizeDashboardMetrics(raw: unknown): DashboardMetrics {
   const value = requiredRecord(raw, "metrics");
-  const keys = ["voltageV", "currentA", "powerW", "tempContact", "tempIrSurface", "representativeTempC", "socPct"] as const;
+  const keys = ["voltageV", "currentA", "powerW", "tempContact", "tempIrSurface", "representativeTempC", "tempAmbientC", "heatRiseC", "socPct"] as const;
   for (const key of keys) if (!has(value, key)) throw new ApiShapeError(`metrics.${key}`);
   const representative = requiredRecord(value.representativeTempC, "metrics.representativeTempC");
   const source = representative.source;
@@ -216,6 +216,8 @@ export function normalizeDashboardMetrics(raw: unknown): DashboardMetrics {
     tempContact: normalizeMetric(value.tempContact, "metrics.tempContact"),
     tempIrSurface: normalizeMetric(value.tempIrSurface, "metrics.tempIrSurface"),
     representativeTempC: { ...normalizeMetric(value.representativeTempC, "metrics.representativeTempC"), source },
+    tempAmbientC: normalizeMetric(value.tempAmbientC, "metrics.tempAmbientC"),
+    heatRiseC: normalizeMetric(value.heatRiseC, "metrics.heatRiseC"),
     socPct: normalizeMetric(value.socPct, "metrics.socPct"),
     socBasis: value.socBasis,
     measuredAt: value.measuredAt,

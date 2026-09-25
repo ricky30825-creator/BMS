@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ApiShapeError, dashboardMetricKey, dashboardMetricParam, gradeFromScore, normalizeBattery, normalizeDashboard } from "../api/normalize";
+import { ApiShapeError, dashboardMetricKey, dashboardMetricParam, gradeFromScore, normalizeBattery, normalizeDashboard, normalizeDashboardMetrics } from "../api/normalize";
 
 describe("CellGuard contract adapters", () => {
   it("uses the four server grade bands for legacy demo scores", () => {
@@ -42,13 +42,22 @@ describe("CellGuard contract adapters", () => {
     const snapshot = normalizeDashboard({
       session: { id: "s1", batteryId: "b3", batteryLabel: "PACK-003", status: "ACTIVE", startedAt: "2026-08-11T00:00:00Z", measurementPhase: "WAITING_FOR_MEASUREMENT" },
       battery: { id: "b3", label: "PACK-003", targetMode: 1, chemistry: "LI_ION", seriesCount: 3, maker: null, model: null, capacityWh: null, ratedOutputCurrentA: null, opsStatus: "NORMAL", latest: null, health: null },
-      metrics: { voltageV: { value: null, status: null }, currentA: { value: null, status: null }, powerW: { value: null, status: null }, tempContact: { value: null, status: null }, tempIrSurface: { value: null, status: null }, representativeTempC: { value: null, source: null, status: null }, socPct: { value: null, status: null }, socBasis: null, measuredAt: null },
+      metrics: { voltageV: { value: null, status: null }, currentA: { value: null, status: null }, powerW: { value: null, status: null }, tempContact: { value: null, status: null }, tempIrSurface: { value: null, status: null }, representativeTempC: { value: null, source: null, status: null }, tempAmbientC: { value: null, status: null }, heatRiseC: { value: null, status: null }, socPct: { value: null, status: null }, socBasis: null, measuredAt: null },
       anomaly: { score: null, grade: null },
       relay: { batteryId: "b3", state: "CLOSED", changedAt: "2026-08-11T00:00:00Z", changedBy: { type: "SYSTEM", systemCode: "SYSTEM" }, interlock: { engaged: false, condition: null, canRestore: true } },
       notices: [], snapshotCursor: "1",
     });
     expect(snapshot.metrics.measuredAt).toBeNull();
     expect(snapshot.anomaly).toMatchObject({ score: null, grade: null });
+  });
+
+  it("requires room temperature and heat rise so a missing field is not shown as no heat", () => {
+    const metrics = { voltageV: { value: null, status: null }, currentA: { value: null, status: null }, powerW: { value: null, status: null }, tempContact: { value: null, status: null }, tempIrSurface: { value: 34.2, status: "OK" }, representativeTempC: { value: 34.2, source: "IR_SURFACE", status: "OK" }, tempAmbientC: { value: 24.6, status: null }, heatRiseC: { value: 9.6, status: null }, socPct: { value: null, status: null }, socBasis: null, measuredAt: null };
+    expect(normalizeDashboardMetrics(metrics)).toMatchObject({ tempAmbientC: { value: 24.6, status: null }, heatRiseC: { value: 9.6, status: null } });
+    const { heatRiseC: _omitted, ...withoutHeatRise } = metrics;
+    expect(() => normalizeDashboardMetrics(withoutHeatRise)).toThrow(ApiShapeError);
+    const { tempAmbientC: _omittedAmbient, ...withoutAmbient } = metrics;
+    expect(() => normalizeDashboardMetrics(withoutAmbient)).toThrow(ApiShapeError);
   });
 
   it("rejects a dashboard response with missing required fields", () => {

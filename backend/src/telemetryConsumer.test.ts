@@ -341,6 +341,19 @@ describe("raw telemetry ingestion", () => {
     const insert = fake.queries.find((query) => query.text.toLowerCase().includes("insert into telemetry_metric"));
     expect(insert?.text).toContain("temp_ambient");
     expect(insert?.values[20]).toBe(24.5);
+
+    const latest = fake.queries.find((query) => query.text.toLowerCase().includes("insert into battery_latest"));
+    expect(latest?.text).toContain("temp_ambient = excluded.temp_ambient");
+    expect(latest?.values[9]).toBe(24.5);
+  });
+
+  it("clears the latest ambient temperature when a newer frame has none", async () => {
+    const fake = fakeDb();
+    await ingestRawMetricsFrame(fake.pool, mode1Frame);
+
+    const latest = fake.queries.find((query) => query.text.toLowerCase().includes("insert into battery_latest"));
+    // Keeping a stale room temperature would pair it with a fresh surface reading.
+    expect(latest?.values[9]).toBeNull();
   });
 
   it("keeps a frame with null attribution when no session is active", async () => {

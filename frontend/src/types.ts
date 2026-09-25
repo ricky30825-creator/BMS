@@ -153,6 +153,10 @@ export type DashboardMetrics = {
   tempContact: MetricValue;
   tempIrSurface: MetricValue;
   representativeTempC: MetricValue & { source?: "CONTACT" | "IR_SURFACE" | null };
+  // Room temperature and server-computed heat rise (representative − room).
+  // No thresholds exist, so status is always null for both.
+  tempAmbientC: MetricValue;
+  heatRiseC: MetricValue;
   socPct: MetricValue;
   socBasis?: "ABSOLUTE_GAUGE" | "RELATIVE_SESSION_START" | null;
   measuredAt: string | null;

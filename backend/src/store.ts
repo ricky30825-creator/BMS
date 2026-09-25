@@ -49,6 +49,7 @@ export async function initializeStore(): Promise<void> {
     progress_snapshot: string | null;
     raw_payload: string | null;
     temp_ambient: string | null;
+    latest_temp_ambient: string | null;
     outbox_event_id: string | null;
     outbox_dedupe_key: string | null;
     outbox_next_attempt_at: string | null;
@@ -70,6 +71,10 @@ export async function initializeStore(): Promise<void> {
        from information_schema.columns
        where table_schema = 'public' and table_name = 'telemetry_metric'
          and column_name = 'temp_ambient') as temp_ambient,
+      (select column_name
+       from information_schema.columns
+       where table_schema = 'public' and table_name = 'battery_latest'
+         and column_name = 'temp_ambient') as latest_temp_ambient,
       (select column_name
        from information_schema.columns
        where table_schema = 'public' and table_name = 'outbox'
@@ -98,8 +103,8 @@ export async function initializeStore(): Promise<void> {
     where table_schema = 'public' and table_name = any($1::text[])
   `, [REQUIRED_POSTGRES_TABLES]);
   const schema = result.rows[0];
-  if (!schema || Number(schema.table_count) !== REQUIRED_POSTGRES_TABLES.length || !schema.progress_snapshot || !schema.raw_payload || !schema.temp_ambient || !schema.outbox_event_id || !schema.outbox_dedupe_key || !schema.outbox_next_attempt_at || !schema.outbox_claim_token || !schema.outbox_lease_until || !schema.outbox_dead_at) {
-    throw new Error("PostgreSQL schema is not ready; run npm run db:migrate (including 013_telemetry_ambient.sql)");
+  if (!schema || Number(schema.table_count) !== REQUIRED_POSTGRES_TABLES.length || !schema.progress_snapshot || !schema.raw_payload || !schema.temp_ambient || !schema.latest_temp_ambient || !schema.outbox_event_id || !schema.outbox_dedupe_key || !schema.outbox_next_attempt_at || !schema.outbox_claim_token || !schema.outbox_lease_until || !schema.outbox_dead_at) {
+    throw new Error("PostgreSQL schema is not ready; run npm run db:migrate (including 014_latest_ambient.sql)");
   }
 
   const hypertables = await db.query<{ hypertable_name: string }>(`

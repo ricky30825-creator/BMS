@@ -508,8 +508,8 @@ export async function ingestRawMetricsFrame(
       await client.query(`
         insert into battery_latest (
           battery_id, measured_at, voltage_v, current_a, power_w,
-          temp_contact, temp_ir_surface, soc_pct, soc_basis, updated_at
-        ) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, now())
+          temp_contact, temp_ir_surface, soc_pct, soc_basis, temp_ambient, updated_at
+        ) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, now())
         on conflict (battery_id) do update set
           measured_at = excluded.measured_at,
           voltage_v = excluded.voltage_v,
@@ -519,6 +519,7 @@ export async function ingestRawMetricsFrame(
           temp_ir_surface = excluded.temp_ir_surface,
           soc_pct = excluded.soc_pct,
           soc_basis = excluded.soc_basis,
+          temp_ambient = excluded.temp_ambient,
           updated_at = now()
         where battery_latest.measured_at is null
            or excluded.measured_at > battery_latest.measured_at
@@ -532,6 +533,7 @@ export async function ingestRawMetricsFrame(
         frame.temp_ir_surface,
         frame.soc_pct,
         socBasisFor(frame),
+        frame.temp_ambient ?? null,
       ]);
     }
 

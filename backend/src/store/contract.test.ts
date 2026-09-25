@@ -78,6 +78,7 @@ export function runStoreContractTests(name: string, makeStore: () => Promise<Cel
         powerW: null,
         tempContact: null,
         tempIrSurface: null,
+        tempAmbient: null,
         socPct: null,
         score: null,
         measuredAt: null,

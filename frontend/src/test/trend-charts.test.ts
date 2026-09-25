@@ -58,6 +58,8 @@ describe("dashboard trend alignment", () => {
       tempContact: { value: 31.2, status: "OK" },
       tempIrSurface: { value: 31.4, status: "OK" },
       representativeTempC: { value: 31.2, status: "OK", source: "CONTACT" },
+      tempAmbientC: { value: 24.5, status: null },
+      heatRiseC: { value: 6.7, status: null },
       socPct: { value: 78, status: "OK" },
       measuredAt: "2026-09-12T14:00:02.000Z",
     } satisfies DashboardMetrics;

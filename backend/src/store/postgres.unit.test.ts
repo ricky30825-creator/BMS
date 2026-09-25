@@ -26,6 +26,7 @@ const battery = {
   latest_power_w: "-6.12",
   latest_temp_contact: null,
   latest_temp_ir_surface: "34",
+  latest_temp_ambient: "24.5",
   latest_soc_pct: "64",
   latest_score: "0.33",
   design_capacity_mah: null,
@@ -75,6 +76,7 @@ function fakePool(options: FakeOptions = {}) {
     latest_power_w: null,
     latest_temp_contact: null,
     latest_temp_ir_surface: null,
+    latest_temp_ambient: null,
     latest_soc_pct: null,
     latest_score: null,
   } : {}) };
@@ -211,6 +213,7 @@ describe("PostgreSQL store query mapping", () => {
     expect(first?.latest.voltageV).toBe(5.1);
     expect(first?.latest.score).toBe(0.33);
     expect(first?.latest.tempIrSurface).toBe(34);
+    expect(first?.latest.tempAmbient).toBe(24.5);
     first!.latest.voltageV = 99;
     expect((await store.batteryById("b1"))?.latest.voltageV).toBe(5.1);
   });
@@ -224,6 +227,7 @@ describe("PostgreSQL store query mapping", () => {
       powerW: null,
       tempContact: null,
       tempIrSurface: null,
+      tempAmbient: null,
       socPct: null,
       score: null,
       measuredAt: null,

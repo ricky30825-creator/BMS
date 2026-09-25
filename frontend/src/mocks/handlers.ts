@@ -14,6 +14,7 @@ export function normalizeAdminInput(value: unknown, maxLength: number, allowEmpt
 }
 const grade = (score: number): Grade => score < .3 ? "NORMAL" : score < .6 ? "CAUTION" : score < .8 ? "WARNING" : "DANGER";
 const baseMetric = (score: number, temp: number, soc: number | null) => ({ voltageV: 11.9, currentA: -2.4, powerW: -28.56, representativeTempC: temp, representativeTempSource: "CONTACT" as const, tempContact: temp, tempIrSurface: temp - 1.6, socPct: soc, socBasis: "ABSOLUTE_GAUGE" as const, score, grade: grade(score), measuredAt: "2026-08-06T01:00:00.000Z" });
+const MOCK_AMBIENT_C = 24.5;
 const metricStatus = (value: number | null) => value == null ? null : value >= 60 ? "CRIT" : value >= 55 ? "WARN" : "OK";
 const batteries: Battery[] = [
   { id: "b_pack_001", label: "PACK-001", chemistry: "LI_ION", seriesCount: 3, maker: "Samsung SDI", model: "18650", targetMode: 1, capacityWh: null, ratedOutputCurrentA: null, opsStatus: "NORMAL", latest: { ...baseMetric(.18, 31.2, 78) }, health: { source: "BACKEND_BQ27441_AGGREGATE", sohPct: 92, rulCycles: 480, cycleCount: 312, internalResistanceMohm: 18.4 }, diagnosisCapability: { executionAllowed: false, reasonCode: "MODE_NOT_SUPPORTED" } },
@@ -205,12 +206,16 @@ export const handlers = [
       tempContact: { value: latest.tempContact ?? null, status: metricStatus(latest.tempContact ?? null) },
       tempIrSurface: { value: latest.tempIrSurface ?? null, status: metricStatus(latest.tempIrSurface ?? null) },
       representativeTempC: { value: latest.representativeTempC, source: latest.representativeTempSource, status: metricStatus(latest.representativeTempC) },
+      // Fixture room temperature; heat rise mirrors the server rule (null without both sides).
+      tempAmbientC: { value: MOCK_AMBIENT_C, status: null },
+      heatRiseC: { value: latest.representativeTempC == null ? null : Math.round((latest.representativeTempC - MOCK_AMBIENT_C) * 100) / 100, status: null },
       socPct: { value: latest.socPct, status: null },
       socBasis: latest.socBasis ?? null,
       measuredAt: latest.measuredAt,
     } : {
       voltageV: { value: null, status: null }, currentA: { value: null, status: null }, powerW: { value: null, status: null },
       tempContact: { value: null, status: null }, tempIrSurface: { value: null, status: null }, representativeTempC: { value: null, source: null, status: null },
+      tempAmbientC: { value: null, status: null }, heatRiseC: { value: null, status: null },
       socPct: { value: null, status: null }, socBasis: null, measuredAt: null,
     };
     return HttpResponse.json({ session: sessionForResponse(), battery, metrics, anomaly: latest ? { score: latest.score, grade: latest.grade, evaluatedAt: latest.measuredAt ?? undefined } : { score: null, grade: null }, relay, notices: publicNotices().slice(0, 3), snapshotCursor: "1" });
