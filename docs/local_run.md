@@ -86,8 +86,27 @@ IP로 바꾸고, `edge/.env`의 `EDGE_KAFKA_BROKERS`에도 같은 주소와 `190
 넣는다. `LOCALHOST://localhost:9092`는 그대로 두므로 호스트 프로세스와
 Raspberry Pi listener를 혼동하지 않는다.
 
+> ⚠️ **이 값을 안 바꾸면 "연결은 되는데 전송만 실패"한다.** Kafka 클라이언트는
+> 처음 접속한 뒤 브로커가 **광고한 주소**로 다시 붙기 때문에, TCP 접속까지는
+> 성공하고 그다음에 실패한다. 방화벽·네트워크 문제로 오인하기 쉽다(2026-09-24
+> 하드웨어팀 실측). Pi에서 막히면 아래 순서로 가른다 — 세 단계가 서로 다르게
+> 실패하므로 한 번에 원인이 좁혀진다.
+>
+> 1. **TCP 도달** — `nc -vz <호스트 LAN IP> 19092`. 실패면 방화벽·IP 문제다.
+> 2. **광고 주소** — 브로커 메타데이터가 돌려주는 주소가 Pi에서 닿는 주소인지
+>    본다(예: `kafka-python`의 `KafkaConsumer(bootstrap_servers=...).topics()`가
+>    멈추거나 `cellguard-host.example.invalid`가 로그에 보이면 여기다).
+> 3. **토픽 존재** — `battery-raw-metrics`가 목록에 있는지 본다. 없으면
+>    `kafka-init`이 실패한 것이다(아래 장애 복구 4번).
+
 LAN 포트는 방화벽에서 필요한 LAN만 허용한다. PostgreSQL `5432`, Kafka
 localhost `9092`, 백엔드 `3005`는 Compose 파일에서 loopback에만 bind한다.
+
+> **호스트에 네이티브 PostgreSQL이 이미 5432를 쓰고 있으면** TimescaleDB
+> 컨테이너가 `socket ... forbidden by its access permissions`로 뜨지 않는다.
+> 네이티브 PostgreSQL을 끄지 말고 루트 `.env`에서 `POSTGRES_PORT=55432`처럼
+> 호스트 쪽 포트만 옮긴다. 컨테이너끼리는 `timescaledb:5432`로 붙으므로
+> 백엔드 설정은 바꿀 필요가 없다. 호스트에서 `psql`로 붙을 때만 새 포트를 쓴다.
 
 ### 시작과 확인
 
@@ -201,7 +220,10 @@ docker compose -f docker-compose.local.yml start
    ```
 
 4. 토픽 초기화가 실패하면 Kafka health를 확인하고 `kafka-init`을 다시
-   실행한다.
+   실행한다. 로그가 `topic: -c: line 1: syntax error near unexpected token
+   \`newline'`이면 `kafka-init`의 `command:`가 **리스트가 아니라 문자열**로
+   되돌아간 것이다 — Compose가 문자열을 공백으로 쪼개 `bash -c`에 `for` 한
+   단어만 넘긴다. `command:` 아래 `- |` 한 항목으로 둔다(2026-09-24 수정).
 
    ```powershell
    docker compose -f docker-compose.local.yml run --rm kafka-init
@@ -223,6 +245,14 @@ docker compose -f docker-compose.local.yml start
    retry를 확인한다. DB transaction과 Kafka offset은 원자적이지 않으므로
    replay가 가능하지만, raw/anomaly/outbox/edge 각 구현의 명시된 멱등성
    경계를 벗어나 수동으로 offset을 건너뛰지 않는다.
+
+### 프론트엔드 개발 서버로 붙기
+
+빌드 없이 화면을 고치며 통합 백엔드(`localhost:3005`)에 붙을 때는
+`npm --prefix frontend run dev:real`을 쓴다. 설정값은 `frontend/.env.real`에
+있고 스크립트는 `vite --mode real`만 부르므로 Windows cmd·PowerShell에서도
+그대로 돈다(예전의 `VAR=값 vite` 접두는 POSIX 문법이라 Windows에서 실패했다).
+이 모드에서는 MSW mock이 켜지지 않는다.
 
 ### Raspberry Pi edge 연결
 

@@ -111,16 +111,20 @@ services:
     environment:
       KAFKA_TOPIC_PARTITIONS: ${KAFKA_TOPIC_PARTITIONS:-3}
     entrypoint: ["/bin/bash", "-ec"]
-    command: |
-      for topic in battery-raw-metrics battery-anomaly-alerts battery-events; do
-        /opt/kafka/bin/kafka-topics.sh \
-          --bootstrap-server kafka:29092 \
-          --create --if-not-exists \
-          --topic "$${topic}" \
-          --partitions "$${KAFKA_TOPIC_PARTITIONS}" \
-          --replication-factor 1
-      done
-      /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:29092 --list
+    # 리스트의 단일 항목이어야 한다. 문자열 command는 Compose가 공백으로 쪼개서
+    # bash -c가 "for" 한 토큰만 스크립트로 받고 나머지는 $0·$1…로 밀린다
+    # (증상: "topic: -c: line 1: syntax error near unexpected token `newline'").
+    command:
+      - |
+        for topic in battery-raw-metrics battery-anomaly-alerts battery-events; do
+          /opt/kafka/bin/kafka-topics.sh \
+            --bootstrap-server kafka:29092 \
+            --create --if-not-exists \
+            --topic "$${topic}" \
+            --partitions "$${KAFKA_TOPIC_PARTITIONS}" \
+            --replication-factor 1
+        done
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:29092 --list
 
   migrate:
     <<: *backend-build

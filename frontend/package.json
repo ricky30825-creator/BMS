@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite --host 0.0.0.0",
-    "dev:real": "VITE_API_BASE=http://127.0.0.1:3005 VITE_DEMO_MODE=true VITE_USE_MOCKS=false vite --host 0.0.0.0",
+    "dev:real": "vite --mode real --host 0.0.0.0",
     "build": "tsc -b && vite build",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
