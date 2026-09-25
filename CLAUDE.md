@@ -33,7 +33,7 @@ Raspberry Pi              Kafka → Consumer → PostgreSQL + TimescaleDB
 | 요구사항·기능·데이터 모델(`battery_asset`/`measurement_session`) | `PLAN.md` (Manyfast 프로젝트 ID `7241ba62-d21a-4de4-ba45-fe572dd0f4de`) |
 | 기능·유저플로우 (디자인 무관) | `docs/product_contract.md` — 새 디자인 작업의 입력 |
 | REST·WebSocket 인터페이스 | `docs/backend_contract.md` |
-| DB 스키마 (실제 컬럼·제약) | `backend/migrations/` — 8개 파일·테이블 14개. `npm run db:migrate`로 적용한다(`backend/scripts/migrate.mjs`). `backend/src/store/types.ts`와 **한 쌍**이라 한쪽만 고치면 조용히 깨진다 |
+| DB 스키마 (실제 컬럼·제약) | `backend/migrations/` — `000`~`013`. `npm run db:migrate`로 적용한다(`backend/scripts/migrate.mjs`). `backend/src/store/types.ts`와 **한 쌍**이라 한쪽만 고치면 조용히 깨진다 |
 | 검증·테스트·중단 조건 | `docs/verification_matrix.md` |
 | 인프라(Kafka·PostgreSQL) 인계 — 구현 경계·태깅 규칙·미결정 스키마 | `docs/handover/infra-implementations.md`, `docs/handover/b2-session-tagging.md`, `docs/handover/schema-open-questions.md` |
 | 관리자 기능·플로우 | `docs/admin_feature_definition.md`, `docs/admin_userflow.md` |
@@ -91,7 +91,8 @@ Kafka `x-cellguard-event-id` header로 전달하며, producer 성공 전에는 `
   "soc_pct": 81,
   "temp_contact": 36.8,
   "temp_ir_surface": 38.1,
-  "temp_points": { "contact": [34.1, 36.8, 35.2], "ir": [38.1, 35.9] },
+  "temp_ambient": 24.6,
+  "temp_points": { "contact": [34.1, 36.8, 35.2], "ir": [38.1] },
   "gas_raw": null,
   "pressure_raw": 420,
   "acoustic_raw": null,
@@ -101,21 +102,23 @@ Kafka `x-cellguard-event-id` header로 전달하며, producer 성공 전에는 `
 
 > **`current_a`·`power_w`는 부호를 살린다 — 양수 = 충전, 음수 = 방전(2026-07-28 확정).** 충·방전 구분이 AI 특징(`Wh_cumsum`)에 직접 필요하고 절댓값으로 내리면 복원할 수 없다. **프론트엔드는 표시할 때만 `abs()`하고 방향은 라벨(`충전`/`방전`)로 낸다** — 사용자에게 `-1.25 A`를 그대로 보이지 않는다.
 
-> **`age_ms`는 각 값이 몇 ms 전에 실측됐는지 싣는 신선도 필드다(2026-07-28 확정).** 센서마다 갱신 주기가 달라 100ms 프레임의 절반 이상이 재탕 값인데, 이걸 모르면 AI가 계단 파형을 실제 온도 변화율로 착각한다. **키가 없는 필드는 그 프레임에서 실측된 것**이다(INA226·ADS1115). `temp_ir_surface`는 MLX90614 2개를 순차로 읽으므로 **더 오래된 쪽**을 싣는다. 상세는 `docs/hardware/mode1_backend_spec.md` §1.
+> **`age_ms`는 각 값이 몇 ms 전에 실측됐는지 싣는 신선도 필드다(2026-07-28 확정).** 센서마다 갱신 주기가 달라 100ms 프레임의 절반 이상이 재탕 값인데, 이걸 모르면 AI가 계단 파형을 실제 온도 변화율로 착각한다. **키가 없는 필드는 그 프레임에서 실측된 것**이다(INA226·ADS1115). IR 존이 여러 개면(모드 2) 순차로 읽으므로 `temp_ir_surface`에는 **더 오래된 쪽**을 싣는다. 상세는 `docs/hardware/mode1_backend_spec.md` §1.
 
 > `insulation_mohm`(절연저항)은 측정 소자가 확보되지 않아 **스키마에서 제거**했다(2026-07-27). 되살리려면 절연저항 측정 수단부터 정한다.
 
 모드별 온도 필드:
-- 모드 1 (외부 셀): `temp_contact` + `temp_ir_surface`
-- 모드 2 (보조배터리): `temp_ir_surface`
+- 모드 1 (외부 셀): `temp_contact` + `temp_ir_surface` + `temp_ambient`(MLX90614 #2의 Ta)
+- 모드 2 (보조배터리): `temp_ir_surface` + `temp_ambient`(실온 DS18B20)
 
-> **모드 1의 온도는 다점 측정이며 `temp_contact`·`temp_ir_surface`는 그 최댓값이다.** 접촉 3점(DS18B20 ×3, 하단/중앙/단자쪽) + IR 2존(MLX90614 ×2, 중앙/단자쪽). 열폭주는 국부에서 시작하므로 평균을 쓰면 초기 신호가 희석된다. `temp_points`에 개별 지점값을 함께 실어(길이 고정 3·2, 위치 순서, 결측은 `null`) AI가 지점 간 온도차를 특징으로 쓸 수 있게 한다. **불변식**: `temp_contact == max(non-null contact)`, `temp_ir_surface == max(non-null ir)`. 상세는 `docs/hardware/mode1_backend_spec.md` §6-5·§7-4·§9.
+> **실온 `temp_ambient`를 잰다 — 발열값 = 표면온도 − 실온(2026-09-25, 이전의 "실온은 측정하지 않는다"를 뒤집음).** 표면온도만으로는 셀이 뜨거워진 건지 방이 더워진 건지 구분이 안 된다 — 실측 중 실온이 2.25°C 움직여 「발열이 멈췄다」로 오독된 사례가 있다. 규칙: ① **최상위 선택 필드**(`nullable`, 키 생략 = 미측정)라 v1 그대로이고 예전 에지 프레임도 유효하다. ② **`temp_points` 안에 넣지 않는다** — 셀 지점이 아니며, 최댓값 불변식에 섞이면 방이 셀보다 따뜻한 순간 실온이 "셀 온도"가 된다. 백엔드가 `.strict()`라 `temp_points.ambient` 하나로 프레임 전체가 거부된다. ③ 실온은 `max`를 취하지 않고 최신값을 싣는다(기준선이라 튀는 값을 고르면 발열값이 깎인다). ④ `temp_ambient`가 `null`이면 발열값도 `null`이다 — 표면온도로 대체하지 않는다. DB는 `telemetry_metric.temp_ambient`(migration `013`). 발열값을 쓰는 곳(AI `T_rise_norm`, 모드 2 발열 기울기, 대시보드 표시)은 **방향만 확정, 미구현**이다 — `docs/backend_contract.md`·모드 2 스펙 §2-3·§3-2 참조.
+
+> **모드 1의 셀 온도는 다점 측정이며 `temp_contact`·`temp_ir_surface`는 그 최댓값이다.** 접촉 3점(DS18B20 ×3, 하단/중앙/단자쪽) + IR 1존(MLX90614 #1, 중앙). **MLX90614 #2(`0x5B`)는 2026-09-25부터 셀이 아니라 실온을 잰다**(예전 IR 2존 = 중앙/단자쪽 구성은 폐기). 열폭주는 국부에서 시작하므로 평균을 쓰면 초기 신호가 희석된다. `temp_points`에 개별 지점값을 함께 실어(`contact` 길이 고정 3, `ir`은 존 개수 — 지금 1, 위치 순서, 결측은 `null`) AI가 지점 간 온도차를 특징으로 쓸 수 있게 한다. IR이 중앙 1점뿐이라 **단자쪽 국부 과열은 DS18B20 단자쪽 점이 혼자 맡는다.** **불변식**: `temp_contact == max(non-null contact)`, `temp_ir_surface == max(non-null ir)`. 상세는 `docs/hardware/mode1_backend_spec.md` §6-5·§7-4·§9.
 
 > **모드 2에는 접촉 프로브가 없다.** 따라서 `temp_contact`와 `temp_points.contact`는 모두 `null`이며, 길이 3 배열을 채우거나 인덱싱하지 않는다. `temp_points.ir`만 배열로 보낸다(정본: `docs/hardware/mode2_powerbank_diagnosis_spec.md` §6-1).
 
-> ⚠️ **`temp_points.ir`의 길이 2를 코드에 상수로 박지 마라(2026-07-30).** MLX90614 2개 구성은 단소자로 공간 피크를 내려는 우회책이고, **픽셀별 값을 주는 IR 어레이(MLX90640 등)로 교체할 여지가 열려 있다.** 그때 `temp_ir_surface`(= 공간 피크)와 §6-5 두 겹 피크 규칙은 그대로지만 **`ir` 배열 길이는 ROI 존 개수로 바뀐다.** 배열을 순회해 최댓값을 쓰면 교체가 설정 변경으로 끝나고, `ir[0]`·`ir[1]`을 직접 인덱싱하면 AI 특징 추출까지 손봐야 한다. **`temp_ir_surface`가 계약의 본체, `temp_points.ir`는 부가 정보다.** 상세는 스펙 §6-4b. 접촉 3점은 교체 대상이 아니다.
+> ⚠️ **`temp_points.ir`의 길이를 코드에 상수로 박지 마라(2026-07-30).** 이미 한 번 바뀌었다 — 모드 1은 2026-09-25에 2존→1존이 됐고 모드 2는 여전히 2존이다. 또 **픽셀별 값을 주는 IR 어레이(MLX90640 등)로 교체할 여지가 열려 있다.** 그때 `temp_ir_surface`(= 공간 피크)와 §6-5 두 겹 피크 규칙은 그대로지만 **`ir` 배열 길이는 ROI 존 개수로 바뀐다.** 배열을 순회해 최댓값을 쓰면 교체가 설정 변경으로 끝나고, `ir[0]`·`ir[1]`을 직접 인덱싱하면 AI 특징 추출까지 손봐야 한다. **`temp_ir_surface`가 계약의 본체, `temp_points.ir`는 부가 정보다.** 상세는 스펙 §6-4b. 접촉 3점은 교체 대상이 아니다.
 
-> 온도는 IR 표면온도(및 모드 1의 접촉온도)만 측정한다. 주변/외부 온도(`temp_ambient`)는 측정하지 않는다.
+> 실온 센서는 **배터리에서 떼어 둔다.** 셀·BW150·릴레이·Pi 5에서 10cm 이상, 렌즈(모드 1 MLX #2)가 셀을 안 보게. 실온 센서가 발열체를 느끼면 발열값이 그만큼 작게 나와 과열을 놓친다. 배치 규칙은 `docs/hardware/mode1_beginner_guide.md` §3, 실측 확인은 모드 1 스펙 §13 H10.
 
 모드별 추가 센서 필드 (아날로그 → ADS1115 → I2C 수집) — **사후 대응(임계 탐지 → 즉시 릴레이 차단) 안전계층**. **모드마다 아날로그 센서는 1개뿐이라 ADS1115 1개(A0만 사용)로 충분하다**(2026-07-28 확정):
 
@@ -125,7 +128,7 @@ Kafka `x-cellguard-event-id` header로 전달하며, producer 성공 전에는 `
 | `gas_raw` | MQ-2 | **`null` 고정** | **A0에서 측정** (5V AOUT이라 분압 필요) |
 | `acoustic_raw` | — | **`null` 고정** | **`null` 고정** |
 
-- **모드 1에 가스 센서를 달지 않는 이유**: MQ-2 히터가 상시 150mA@5V로 발열해 같은 셀에 붙은 온도 센서 5개를 오염시킨다. 모드 1의 핵심은 다점 온도라 온도를 택했다. **따라서 모드 1의 사후 대응 안전계층은 압력 단독이다** — 차단 로직에서 셋이 다 있다고 가정하면 안 된다.
+- **모드 1에 가스 센서를 달지 않는 이유**: MQ-2 히터가 상시 150mA@5V로 발열해 같은 셀에 붙은 온도 센서 4개와 실온 센서를 오염시킨다. 모드 1의 핵심은 다점 온도라 온도를 택했다. **따라서 모드 1의 사후 대응 안전계층은 압력 단독이다** — 차단 로직에서 셋이 다 있다고 가정하면 안 된다.
 - **`acoustic_raw`는 필드만 남기고 센서는 도입하지 않는다.** 진짜 조기신호인 미세 크랙의 음향방출(AE)은 100kHz~1MHz라 ADS1115(860SPS)로 원리적으로 못 잡고, 피에조로 잡히는 벤트 파열음은 가스·압력·온도가 이미 먼저 울린다. 나중에 전용 AE 센서를 붙일 여지만 스키마에 남긴다.
 - **압력 임계는 절대 카운트가 아니라 baseline 대비 상대 상승률이다.** FSR은 예압에 따라 baseline이 매번 달라져 절대값이 무의미하다. baseline은 **세션마다** 시작 10초 중앙값으로 새로 잡는다.
 
@@ -143,7 +146,7 @@ Kafka `x-cellguard-event-id` header로 전달하며, producer 성공 전에는 `
 - **부스트 효율을 보정하지 않으면 새 배터리도 SOH 85%가 된다.** 정격 Wh는 **셀 기준**(3.7V × mAh)이고 측정은 **출력단**(5V) 기준이라, 10000mAh(=37Wh) 제품에서 실제로 뽑히는 건 31~33Wh다. η는 제품·부하마다 달라 가정할 수 없으므로 **신뢰값은 그 자산의 첫 정밀 테스트를 기준선으로 삼은 `sohRelPct`**이고, η 가정 기반 `sohAbsPct`는 `assumedEfficiency`를 반드시 동봉하는 참고값이다. **첫 테스트는 `sohRelPct: null` + `isBaseline: true`** — 기준선 자신을 100%로 내면 "열화 없음"으로 오독된다.
 - **모드 2의 `cycleCount`·`rulCycles`는 `null` 확정.** 내부 BMS에 접근할 수 없어 실제 생애 사이클을 모른다. 우리가 아는 건 **우리 장비로 측정한 세션 수**뿐이며, 3년 쓴 보조배터리를 처음 물려도 카운트는 1이다. **v3의 `SOH 92% · RUL ~480 사이클 · 누적 사이클 312 · 내부 저항 18.4 mΩ`는 목업 숫자이며 모드 2에서 이 네 값이 다 채워진 화면은 만들 수 없다.**
 - **열화 등급과 이상점수 4등급은 다른 축이다.** 열화는 수명(`HEALTHY`/`CAUTION`/`SUSPECT_DEGRADED`/`BASELINE_PENDING`), 이상점수는 열폭주 위험(`NORMAL`/`CAUTION`/`WARNING`/`DANGER`). **양쪽에 `CAUTION`이 있으므로** 합산하거나 같은 enum으로 취급하면 조용히 틀린다.
-- **케이스 표면온도는 셀 온도가 아니다.** 외장이 열을 막아 셀 70°C에 표면 45°C가 가능하고 수십 초 늦게 따라온다. **모드 1의 55/60°C를 모드 2에 그대로 쓰면 안 된다** — 절대값보다 상승률이 주 근거이며 문턱은 실측 미정(§8 H2).
+- **케이스 표면온도는 셀 온도가 아니다.** 외장이 열을 막아 셀 70°C에 표면 45°C가 가능하고 수십 초 늦게 따라온다. **모드 1의 55/60°C를 모드 2에 그대로 쓰면 안 된다** — 절대값보다 상승률이 주 근거이며 문턱은 실측 미정(§8 H2). 상승률도 **발열값(표면 − 실온) 기준**으로 본다(스펙 §2-3). ⚠️ `thermalSlopeCPerMin`을 발열값 기울기로 바꾸는 건 **방향만 확정·미구현**이고, 바꾸는 순간 열화 등급 산식이 바뀌므로 이전 결과와 섞어 비교하지 않는다(스펙 §3-2 ②).
 - **`diag_phase != null` 프레임은 AI 정상패턴 학습에서 제외한다.** 계단 스윙은 사람이 만든 전류 계단이라 정상으로 배우면 실제 이상을 놓친다. 이상점수는 계속 산출하되 **알림만 억제**하고, **Fail-Safe는 억제하지 않는다.** 안전 조건이 걸리면 **부하를 0A로 내린 다음** 릴레이를 차단한다(순서가 뒤바뀌면 아크가 생긴다).
 - **부하는 보유한 ATORCH BW150을 쓴다(2026-07-28).** *"BW150은 데이터 경로가 아니다"*는 **텔레메트리가 1초라 100ms 스트림에 못 섞인다**는 뜻이지 제어가 안 된다는 뜻이 아니다 — ATORCH 시리얼은 양방향이라 `1250MA`(정전류)·`ON`/`OFF`·`10.5VCUT`이 들어간다. **정밀 용량 테스트는 단일 고정 전류라 자동화가 아예 필요 없고**, 계단 스윙이 필요한 건 빠른 진단뿐이다. WiFi로 명령을 넣으면 *"USB 절연 없음"* 문제도 사라진다(그건 CH340G 유선을 꽂을 때의 문제다).
   **5V 부하는 사양 범위 안임이 확인됐다** — 부하 전압 `DC1V~200V`, 5V에서 전류 `0.01~20A`, 전압<36V에서 전력 150W, 설정 분해능 0.01A. 우리가 쓰는 0.1~2.0A(최대 10W)는 전류로 10배·전력으로 15배 여유다. **보드에 인쇄된 `8V<V<36V`는 부하 입력 범위가 아니다.** ⚠️ 다만 **그 표기가 붙은 단자에 보조배터리를 물리면 사양 밖 동작**이니 배선 시 부하 입력 단자를 정확히 식별할 것.
@@ -170,7 +173,7 @@ Kafka `x-cellguard-event-id` header로 전달하며, producer 성공 전에는 `
 LSTM-AutoEncoder(재구성 오차 = 현재 이상)와 Informer(예측 오차 = 미래 위험)가 **동일 Sequence 입력을 공유**하고, `Final Score = α × AE Score + β × Informer Score`로 결합한다. α·β는 고정값이 아니라 테스트하며 튜닝한다. 2개 측정 모드 공통 아키텍처.
 
 - **윈도우**: 30 time-steps (정규화 + Sliding Window)
-- **특징**: `V_scaled`, `V_delta`, `V_drop`, `I_smooth`, `dT_dt`, `d2T_dt2`, `Wh_cumsum` (두 모델 공통 입력)
+- **특징**: `V_scaled`, `V_delta`, `V_drop`, `I_smooth`, `dT_dt`, `d2T_dt2`, `Wh_cumsum` (두 모델 공통 입력). 발열값 `T_rise`(표면온도 − 실온)를 추가하는 방향이 확정됐으나(2026-09-25) **실제 입력 여부는 학습 산출물의 권위 `feature_order`가 정한다** — 지금 번들이 없어 미적용
 
 | 등급 | 이상점수 범위 | UI 표시값 |
 |---|---|---|
@@ -231,7 +234,7 @@ adapter 없이 점수·파생온도를 만들거나 `battery_id`·`session_id`�
 
 **미해결 — 조립하면서 지운다**
 
-문서로 정할 수 있는 항목은 2026-07-28에 전부 확정했고, 조립을 막던 두 건(셀 보호회로 유무·Babysitter 실크스크린)도 실물 확인으로 닫혔다. 남은 건 **전원을 넣어 봐야 답이 나오는 것뿐**이며 `docs/hardware/mode1_backend_spec.md` §13에 H1~H9로 모아 두었다 — 션트 실측값, 커널 `therm_bulk_read` 지원, Pi 5 `gpio=` 동작, MLX90614 정착시간, BQ27441 센스 저항, DS18B20 ROM↔위치, BW150 프레임, 압력 baseline·임계, TFT `VCC` 3.3V 구동 여부.
+문서로 정할 수 있는 항목은 2026-07-28에 전부 확정했고, 조립을 막던 두 건(셀 보호회로 유무·Babysitter 실크스크린)도 실물 확인으로 닫혔다. 남은 건 **전원을 넣어 봐야 답이 나오는 것뿐**이며 `docs/hardware/mode1_backend_spec.md` §13에 H1~H10으로 모아 두었다 — 션트 실측값, 커널 `therm_bulk_read` 지원, Pi 5 `gpio=` 동작, MLX90614 정착시간, BQ27441 센스 저항, DS18B20 ROM↔위치, BW150 프레임, 압력 baseline·임계, TFT `VCC` 3.3V 구동 여부, 실온 MLX90614 #2 Ta가 실온을 따라가는지(H10).
 
 > **셀에 보호회로가 있다(2026-07-28 확인).** 이게 회로에 퓨즈가 없는 상태의 유일한 과전류 보호다. 파생 제약: ① 전체 길이 68~70mm라 **65mm용 홀더에 안 들어간다** ② 양 끝의 PCB·버튼탑은 셀이 아니므로 센서 축방향 기준은 **금속 캔 몸통 `L`(≈65mm)** ③ **니켈 탭이 옆구리를 타고 올라가** 수축튜브 아래 숨어 있으니 그 면을 피해 센서를 붙인다 ④ PCM이 끊기면 전압 0 + `0x55` 소실인데 **센서 오류가 아니다.**
 
@@ -250,7 +253,8 @@ adapter 없이 점수·파생온도를 만들거나 `battery_id`·`session_id`�
 - **MLX90614 EEPROM 쓰기에는 PEC 바이트가 필수다.** write word 프레임은 `SA+W | 커맨드 | LSB | MSB | PEC`이고 PEC는 `SA<<1`부터의 **CRC-8(다항식 0x07, 초기값 0)**이다(데이터시트 Figure 7). 빠지거나 틀리면 **에러 없이 조용히 무시**되어 "지우기는 됐는데 쓰기가 안 먹는" 증상이 난다. `smbus2.write_word_data()`는 PEC를 안 붙이므로 `bus.pec = 1`을 켜거나 `i2c_msg.write()`로 직접 프레임을 만든다. 주소 변경(`0x2E`)과 필터 재설정(`0x25`) 양쪽에 적용된다.
 - **모드 1 회로에 직렬 퓨즈는 없다(2026-07-28 결정).** 구매 확정 부품에 퓨즈가 없어 F1을 회로에서 뺐고, **과전류 보호는 셀에 붙은 보호회로(PCM)에만 의존한다.** 그래서 셀 + 는 `CELL_P` 한 노드로 INA226 `IN−`·`VBUS`에 직결된다(`CELL_P_F` 네트는 없어졌다). 대가로 **"셀에 보호회로가 있는가" 확인이 조립 전 필수 항목**이 됐다(가이드 §2-⑤) — 보호회로 없는 맨 셀을 물리면 배선 단락을 막을 소자가 회로 안에 하나도 없다. 보호회로가 있으면 18650이 65mm가 아니라 **68~70mm**라 홀더·센서 배치 치수가 달라진다.
 - **MLX90614는 EEPROM `0x25`를 재설정해야 쓸 만하다.** 출고 상태(IIR 50% + FIR 1024)는 갱신 864.9ms에 **스파이크를 50%로 깎는다** — 열폭주 초기의 급격한 온도 상승이 바로 그 스파이크다. `IIR=100`(감쇠 없음) + `FIR=111`로 바꾸면 **95.2ms**가 된다. 정착시간 = `9.719 + IIRSetting×(FIRSetting+5.26) + IIRSetting×(FIRSetting+12.542)` ms. **비트 3은 절대 건드리지 마라 — 공장 캘리브레이션이 취소된다.** 반드시 read-modify-write.
-- **MLX90614 1개로는 공간 피크를 못 낸다.** 서모파일 소자 1개짜리라 데이터시트대로 "FOV 안 모든 물체의 평균"만 나온다. 그래서 **2개를 다른 지점에 겨눠 2픽셀로 만든다** — `0x5A`(셀 중앙) / `0x5B`(단자쪽). 피크가 두 겹이다: 시간축(100ms 창의 최댓값) 위에 공간축(두 존 중 큰 쪽)을 얹는다.
+- **MLX90614 1개로는 공간 피크를 못 낸다.** 서모파일 소자 1개짜리라 데이터시트대로 "FOV 안 모든 물체의 평균"만 나온다. 예전에는 2개를 셀의 다른 지점에 겨눠 2픽셀을 만들었지만, **2026-09-25부터 모드 1은 `0x5A`=셀 중앙(TOBJ1 → `temp_ir_surface`), `0x5B`=실온(`temp_ambient`)이다.** 셀 IR 공간 피크는 포기했고 단자쪽은 DS18B20이 맡는다. 모드 2는 여전히 케이스 2존(중앙/USB 포트쪽).
+- **실온에는 MLX90614 #2의 TOBJ1이 아니라 Ta(`0x06`, 센서 자체 온도)를 권장한다.** IR은 공기를 못 재고 FOV 안 **물체 표면**을 잰다 — 방 쪽으로 돌려도 셀·BW150이 시야에 들어오면 실온이 발열을 따라 올라 발열값이 깎인다. 실측 전 권장이며 기준 온도계 대조로 확정한다(모드 1 스펙 §13 H10). 실온 센서는 `max`를 취하지 않는다.
 - **INA226의 전류 측정 상한은 션트가 아니라 16비트 Current 레지스터가 정한다** — `상한 = min(81.92mV/R_shunt, 32767 × Current_LSB)`. 넘치면 부호까지 뒤집혀 조용히 오염되므로 `Mask/Enable`(0x06) **bit 2 = OVF**를 매 프레임 확인할 것. **`Current_LSB = 0.0002A`(상한 6.55A)로 확정**(2026-07-28) — 실제 상한을 정하는 건 셀 스펙이 아니라 **보호회로 trip 전류(4~10A)**라 3.28A로는 부족하다. **CAL: R010=2560, R002=12800.** `Current_LSB`와 CAL은 반드시 같은 설정 파일에 두고 함께 바꾼다.
 - **BQ27441 `Flags`(0x06)의 비트 번호를 TRM에서 직접 확인해 쓸 것.** TRM이 High/Low 바이트를 각각 `bit7..bit0`으로 적어서 절대 비트로 옮길 때 틀리기 쉽다. **ITPOR = bit 5(`0x0020`)**, FC = bit 9, OT = bit 15이며 **bit 8은 `CHG`(충전 허용)**다. ITPOR을 bit 8로 잘못 잡으면 충전할 때마다 오탐하고 진짜 게이지 리셋은 못 잡는다. `AveragePower`는 `0x18`이지 `0x16`이 아니다.
 - **MLX90614·DS18B20 부착 거리와 위치가 값의 정확도를 좌우한다.** IR은 FOV 35°라 스팟 지름 = `0.63 × 거리` — **2cm 이내**여야 18650(지름 1.8cm) 안에 들어온다. 5cm면 배경이 절반 넘게 섞여 실제보다 낮게 읽힌다. 접촉 3점은 하단/중앙/**단자쪽**에 붙이되, 양극 단자 부근이 내부저항·접촉저항 때문에 가장 먼저 뜨거워지므로 반드시 한 점을 거기 둔다.
@@ -322,7 +326,7 @@ adapter 없이 점수·파생온도를 만들거나 `battery_id`·`session_id`�
 - **Better Auth는 지금 쓰지 않는다(2026-08-28).** 다만 `"user"` 테이블은 **Better Auth 코어 스키마와 같은 모양으로 우리가 미리 만들어 둔다**(`000_identity.sql`) — `001`의 FK 4개가 그걸 전제하기 때문이고, 나중에 켤 때 `session`·`account`·`verification` 3개만 추가하면 되게 하려는 것이다. **`@better-auth/cli`는 저장소 의존성이 아니라 개발자가 자기 컴퓨터에 설치한다(2026-09-02 결정).** 설치 전에는 `npm run auth:generate`·`auth:migrate`가 `sh: auth: command not found`로 실패한다 — 고장이 아니다. 데모 경로와 PostgreSQL 스토어 구현에는 필요 없다. ⚠️ **켤 때도 `auth:migrate`는 쓰지 마라** — DB에 직접 테이블을 만들어 `schema_migrations` 바깥에 남기 때문에 `npm run db:migrate`가 적용 상태를 놓친다. `auth:generate`로 SQL을 뽑아 **새 번호 마이그레이션**(`010_better_auth.sql`)으로 쌓는다.
 - **활성 `measurement_session`은 설비 전체에 1개다(2026-08-28 확정, per-device 아님).** DB가 `uq_active_session_global`로 강제한다. 근거는 BQ27441 I2C 주소 고정 — 한 번에 배터리 1개만 측정할 수 있다. ⚠️ **계약 테스트 20건은 per-device와 전역을 구분하지 못하므로**(같은 진단기로만 두 번 부른다) 테스트 통과를 이 규칙의 근거로 삼지 마라.
 - **`telemetry_metric`의 PK는 `(device_id, measured_at)` 자연키다** — 대리키 `id`는 제거했다. TimescaleDB가 모든 UNIQUE 인덱스에 파티셔닝 컬럼을 요구해서이고, 덕분에 재처리 중복 방지가 같은 제약으로 닫힌다. **적재는 `on conflict do nothing`으로 한다.** 보존 60일, 압축은 일부러 걸지 않았다(재처리 창과 충돌).
-- **`DATA_MODE=postgres`는 `initializeStore()`가 migrations `000`~`009`의 핵심 스키마와 TimescaleDB extension/hypertable을 확인한 뒤에만 listen한다.** PostgreSQL 저장소(`backend/src/store/postgres.ts`)가 도메인 REST/WS 조회·변경을 담당하며, 연결·스키마 검사가 실패하면 memory 데이터로 대체하지 않고 기동을 중단한다. 정본은 `docs/handover/infra-implementations.md` §9.
+- **`DATA_MODE=postgres`는 `initializeStore()`가 migrations `000`~`013`의 핵심 스키마(`013`의 `telemetry_metric.temp_ambient` 포함)와 TimescaleDB extension/hypertable을 확인한 뒤에만 listen한다.** PostgreSQL 저장소(`backend/src/store/postgres.ts`)가 도메인 REST/WS 조회·변경을 담당하며, 연결·스키마 검사가 실패하면 memory 데이터로 대체하지 않고 기동을 중단한다. 정본은 `docs/handover/infra-implementations.md` §9.
   - `POST /api/demo/login`·`POST /api/demo/logout`도 선택된 provider 경로를 사용하므로, `AUTH_MODE=demo DATA_MODE=postgres`에서는 DB의 사용자/profile seed가 필요하다.
   - ⚠️ WebSocket upgrade는 여전히 `AUTH_MODE`만 보고 인증 분기한다(`AUTH_MODE=betterauth`의 cookie 기반 스트리밍은 보류). `AUTH_MODE=demo DATA_MODE=postgres`에서는 연결 후 store facade가 PostgreSQL provider를 사용하며 memory fallback은 없다.
 

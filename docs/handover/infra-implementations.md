@@ -14,7 +14,7 @@
 > **2026-09-14 Task 4 갱신:** `OutboxWorker`와 Kafka DeviceCommand producer가
 > `009_outbox_delivery.sql`의 lease·retry·poison 상태를 사용한다. 실제 Kafka
 > broker/Timescale 인수 검증만 남았다.
-> **2026-09-16 현재 상태:** migrations `000`~`012`가 연속 적용 대상이다.
+> **2026-09-16 현재 상태:** migrations `000`~`013`이 연속 적용 대상이다(`013` 실온 컬럼 2026-09-25 추가).
 > 영속 domain event·관리자 추이, 공지 DB CRUD·대시보드 연결, aggregate PDF,
 > Fail-Safe 환경 설정·세션별 압력 baseline 소프트웨어 경로가 구현됐다. 다만
 > `TEST_DATABASE_URL` 기반 PostgreSQL 검증과 Docker/Kafka/Timescale 실환경,
@@ -94,12 +94,13 @@ runStoreContractTests("postgres", async () => createPostgresStore(testPool));
 | `010_domain_events.sql` | 영속 `domain_event`와 replay dedupe |
 | `011_notices.sql` | 공지, 사용자별 조회 dedupe, delivery intent |
 | `012_failsafe_profile_and_baseline.sql` | `MODE2_FULL` 프로필 제약과 세션별 pressure baseline |
+| `013_telemetry_ambient.sql` | 실온 `telemetry_metric.temp_ambient numeric`(2026-09-25). raw의 선택 필드 `temp_ambient`를 적재하며, postgres 기동 검사가 이 컬럼을 요구한다 |
 
 > **TimescaleDB는 필수다.** `005` 또는 migration runner의 extension/hypertable
 > 확인이 실패하면 `TIMESCALEDB_REQUIRED`로 전체 PostgreSQL 경로를 닫는다.
 > `telemetry_metric`을 평범한 PostgreSQL 테이블로 사용하거나 memory 데이터로
 > 대체하지 않는다. `DATA_MODE=postgres`를 열려면 TimescaleDB를 설치한 뒤
-> `npm run db:migrate`가 `012`까지 완료되고 두 hypertable 확인을 통과해야 한다.
+> `npm run db:migrate`가 `013`까지 완료되고 두 hypertable 확인을 통과해야 한다.
 
 **예전에 2단계를 막던 것과, 어떻게 풀었는지:**
 
@@ -387,7 +388,7 @@ worker를 시작하며, memory/test 경로는 Kafka client를 만들거나 연�
 > 구현됐다. 남은 것은 TEST_DATABASE_URL을 이용한 실 DB 계약/동시성 검증과
 > Docker/Kafka/Timescale·물리 relay 인수다.
 
-- ✅ **스키마** — `migrations/000`~`012`, `npm run db:migrate`로 적용. 결정 근거는 `schema-open-questions.md`와 §13·§16.
+- ✅ **스키마** — `migrations/000`~`013`, `npm run db:migrate`로 적용. 결정 근거는 `schema-open-questions.md`와 §13·§16.
 - ✅ **PostgreSQL 구현체** — 본 문서 1부. `backend/src/store/postgres.ts`, 계약 테스트 wiring, 전역 active-session unique 경합 테스트를 추가했다. `TEST_DATABASE_URL`이 없으면 실제 DB 테스트는 명시적으로 skip한다.
 - ✅ **`advanceDiagnosis`의 `progress` 영속화 방침** — 본 문서 §8-1. 런타임 메모리 + phase 경계 `progress_snapshot` 저장으로 결정했고 `006`에 반영했다.
 - ✅ **`store/types.ts`·`contract.ts` 델타** — CSV의 선택적 날짜 범위를 계약에 추가하고, 최신값·건강·텔레메트리 매핑을 기존 반환 타입에 연결했다.

@@ -117,11 +117,11 @@ INSTANCES: list[Inst] = [
         "SDI": "SPI_MOSI", "SCK": "SPI_SCLK", "LED": "+3V3",
     }, nc=["SDO", "T_CLK", "T_CS", "T_DIN", "T_DO", "T_IRQ"]),
 
-    # ---- IR 표면온도 2존. 둘 다 출고 시 0x5A이므로 U9는 EEPROM 0x0E를 0x5B로
+    # ---- U3 = 셀 IR 표면온도, U9 = 실온(2026-09-25, Ta 레지스터). 둘 다 출고 시 0x5A이므로 U9는 EEPROM 0x0E를 0x5B로
     #      바꿔 두어야 한다. 반드시 한 개씩 따로 연결해서 작업할 것.
     Inst("MLX90614", "U3", 590, 124, value="MLX90614 #1 (0x5A, 셀 중앙)",
          nets={"VCC": "+3V3", "GND": "GND", **I2C}),
-    Inst("MLX90614", "U9", 590, 152, value="MLX90614 #2 (0x5B, 셀 단자쪽)",
+    Inst("MLX90614", "U9", 590, 152, value="MLX90614 #2 (0x5B, 실온 - 셀을 겨누지 않음)",
          nets={"VCC": "+3V3", "GND": "GND", **I2C}),
     Inst("ADS1115", "U4", 590, 188, nets={
         "A0": "FSR_OUT", "VDD": "+3V3", "GND": "GND", **I2C, "ADDR": "GND",
@@ -192,15 +192,15 @@ COLUMNS: list[tuple[float, list[tuple[str, str]]]] = [
         ("", "0x48   ADS1115     A0=FSR 압력 / A1~A3 예비 (ADDR -> GND)"),
         ("", "0x55   BQ27441     SOC (Battery Babysitter 탑재)"),
         ("", "0x5A   MLX90614 #1  IR 표면온도 - 셀 중앙   (SEN0206 = MLX90614-DCC, FOV 35도)"),
-        ("", "0x5B   MLX90614 #2  IR 표면온도 - 셀 단자쪽 (EEPROM 0x0E 로 주소 변경한 개체)"),
+        ("", "0x5B   MLX90614 #2  실온 (Ta) - 셀·발열체에서 10cm 이상 (EEPROM 0x0E 로 주소 변경한 개체)"),
         ("", ""),
         ("h2", "[!] 온도는 다점 측정 -> 최댓값을 쓴다"),
-        ("", "MLX90614 소자 1개는 FOV 안의 '평균'만 낸다. 그래서 2개를 다른 지점에 겨눠 공간 피크를 만든다."),
-        ("", "   temp_ir_surface = max(#1, #2)      temp_contact = max(DS18B20 #1, #2, #3)"),
+        ("", "셀 IR 은 #1 한 존이고, #2 는 실온을 잰다 -> 발열값 = 표면온도 - 실온 (2026-09-25)."),
+        ("", "   temp_ir_surface = #1      temp_contact = max(DS18B20 #1, #2, #3)      temp_ambient = #2 Ta"),
         ("", "DS18B20 3개는 같은 3선(GPIO4 + 3.3V + GND)에 병렬로 문다. 1-Wire는 고유 64비트 ROM 코드를"),
         ("", "쓰므로 주소 설정이 필요 없다. Skip ROM + Convert T 로 셋을 동시에 변환해 750ms 그대로다."),
         ("", ""),
-        ("h2", "[!] MLX90614 부착 거리 — 2cm 이내"),
+        ("h2", "[!] MLX90614 #1 부착 거리 — 2cm 이내"),
         ("", "FOV 35도 -> 측정 스팟 지름 = 0.63 x 거리.  2cm 에서 1.26cm 로 18650(지름 1.8cm) 안에 들어간다."),
         ("", "5cm 떨어지면 스팟이 3.15cm 라 배경 온도가 절반 넘게 섞여 셀보다 낮게 읽힌다."),
         ("", "출고 상태는 갱신 865ms + 스파이크 50% 감쇠다. EEPROM 0x25 재설정 필수 -> backend_spec.md 6-3"),

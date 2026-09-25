@@ -38,6 +38,7 @@
 | Q4 | 진단기(`device`) 테이블 | **(a)** 만든다. `measurement_session.device_id`에 FK. `telemetry_metric.device_id`에는 걸지 않는다(고빈도 + 미등록 진단기 프레임도 적재해야 함) | 2026-08-28 | 오너·DB |
 | Q5 | 텔레메트리 중복 방지 키 | **(a)** 자연키 `(device_id, measured_at)` — Q3의 PK와 같은 결정이라 한 번에 닫혔다. Consumer는 `on conflict do nothing` | 2026-08-28 | 오너·DB |
 | Q6 | `battery_asset.memo` 컬럼 | **(a)** `memo text not null default ''` 추가. `store/types.ts` 변경 없음 | 2026-08-28 | 오너·DB |
+| Q7 | 실온 `temp_ambient` 적재 위치 (2026-09-24 하드웨어팀 요청) | Q2의 `temp_points` jsonb가 아니라 **스칼라 컬럼 `telemetry_metric.temp_ambient numeric`**(`013`). 실온은 셀 지점이 아니라 발열값의 기준이고 `temp_points`에는 최댓값 불변식이 걸려 있어서다. 하드웨어팀은 `temp_points.ambient`를 제안했으나 기각 | 2026-09-25 | 오너 |
 
 > 아래 Q1~Q6의 "현재 상태"와 선택지 설명은 2026-08-28 결정 전 조사 스냅샷이다. 현재 구현 상태를 확인할 때는 위 결정 표와 `backend/migrations/002`~`005`를 우선한다.
 

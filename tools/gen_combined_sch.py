@@ -146,13 +146,13 @@ INSTANCES: list[Inst] = [
         "SDI": "SPI_MOSI", "SCK": "SPI_SCLK", "LED": "+3V3",
     }, nc=["SDO", "T_CLK", "T_CS", "T_DIN", "T_DO", "T_IRQ"]),
 
-    # ---- IR 표면온도 2존 — 두 모드가 공유하는 유일한 온도 센서다.
+    # ---- MLX90614 ×2 — 모드 1: U3 셀 IR · U9 실온(2026-09-25), 모드 2: 케이스 IR 2존.
     #      모드를 오갈 때 브래킷째 옮겨 겨눠야 하므로 나사·클램프 고정.
     Inst("MLX90614", "U3", 590, 124,
          value="MLX90614 #1 (0x5A, 셀 중앙 / 모드 2: 케이스 중앙)",
          nets={"VCC": "+3V3", "GND": "GND", **I2C}),
     Inst("MLX90614", "U9", 590, 152,
-         value="MLX90614 #2 (0x5B, 셀 단자쪽 / 모드 2: USB-A 포트쪽)",
+         value="MLX90614 #2 (0x5B, 모드 1: 실온 / 모드 2: USB-A 포트쪽)",
          nets={"VCC": "+3V3", "GND": "GND", **I2C}),
     Inst("ADS1115", "U4", 590, 188, nets={
         "A0": "FSR_OUT", "VDD": "+3V3", "GND": "GND", **I2C, "ADDR": "GND",
@@ -264,7 +264,7 @@ COLUMNS: list[tuple[float, list[tuple[str, str]]]] = [
         ("", "0x48  ADS1115   A0=FSR 압력 (ADDR->GND)  모드 1 전용"),
         ("", "0x55  BQ27441   SOC (Babysitter 탑재)    모드 1 전용 — 보조배터리 셀에는 접근할 수 없다"),
         ("", "0x5A  MLX90614 #1  IR 표면온도          (두 모드 공유)"),
-        ("", "0x5B  MLX90614 #2  IR 표면온도          (EEPROM 0x0E 로 주소 변경한 개체)"),
+        ("", "0x5B  MLX90614 #2  모드 1 실온(Ta) / 모드 2 IR 표면온도  (EEPROM 0x0E 로 주소 변경한 개체)"),
         ("", "무배터리 검사 기대값:  i2cdetect -y 1  ->  40  48  5a  5b   (셀이 없으니 55 없음이 정상)"),
     ]),
     (580, [
@@ -280,14 +280,15 @@ COLUMNS: list[tuple[float, list[tuple[str, str]]]] = [
         ("h2", "[!] 모드에 따라 살아있는 센서가 다르다 — Raw 필드가 달라진다"),
         ("", "                        모드 1        모드 2"),
         ("", "voltage_v / current_a   INA226        INA226        (같은 소자, 같은 션트)"),
-        ("", "temp_ir_surface         MLX x2        MLX x2        브래킷째 옮겨 겨눈다"),
-        ("", "temp_contact            DS18B20 x3    null          보조배터리에 옮겨 붙이지 않는다"),
+        ("", "temp_ir_surface         MLX #1        MLX x2        브래킷째 옮겨 겨눈다"),
+        ("", "temp_ambient            MLX #2 (Ta)   DS18B20 1개   실온. 셀·팩·BW150 에서 10cm 이상 떨어뜨린다"),
+        ("", "temp_contact            DS18B20 x3    null          보조배터리에 옮겨 붙이지 않는다 (실온 1개만 예외)"),
         ("", "pressure_raw            FSR 406       null          외장 케이스에 가려 부착 불가"),
         ("", "soc_pct                 BQ27441       null          완제품이라 셀에 접근 불가"),
         ("", "gas_raw / acoustic_raw  null          null          이 회로에 센서 자체가 없다"),
         ("", "diag_phase / load_target_a  null      null          P0~P6 을 실행하지 않는 프로필이다"),
         ("", "온도는 다점 측정이고 쓰는 값은 최댓값이다 — 열폭주는 국부에서 시작하므로 평균을 쓰면 초기 신호가 희석된다."),
-        ("", "  temp_ir_surface = max(#1, #2)      temp_contact = max(DS18B20 #1, #2, #3)"),
+        ("", "  모드 1: temp_ir_surface = #1   모드 2: max(#1, #2)   temp_contact = max(DS18B20 #1, #2, #3)"),
         ("", "  DS18B20 3개는 같은 3선에 병렬로 문다. 1-Wire 고유 64비트 ROM 코드라 주소 설정이 필요 없고,"),
         ("", "  Skip ROM + Convert T 로 셋을 동시에 변환해 개수가 늘어도 750ms 그대로다(순차로 하면 2250ms)."),
         ("", "모드 2 IR 배치: 0x5A=케이스 중앙 / 0x5B=USB-A 출력 포트쪽. 표면에서 최대 5cm, 스팟 중심 4cm 이상 분리."),

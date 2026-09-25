@@ -148,6 +148,12 @@ Kafka 연결이다. 주요 중단 코드는 다음과 같다.
 
 1. `battery-raw-metrics`에서 v1 JSON을 받고 모드별 실제 필드/`temp_points`
    peak 불변식을 검증한다. `battery_id`와 `session_id`는 입력에도 없다.
+   선택 필드 `temp_ambient`(실온, 2026-09-25)는 `RawMetricsFrame.temp_ambient`로
+   adapter에 그대로 넘긴다 — 키가 없거나 `null`이면 `None`이다. 실온은
+   `temp_points`에 없고 peak 불변식에도 들어가지 않는다. 발열값
+   (`T_rise` = 표면온도 − 실온)을 특징으로 쓸지는 학습 산출물의 권위
+   `feature_order`가 정한다(현재 방향만 확정, bundle 없음). 런타임은 실온이
+   `None`일 때 발열값을 대체값으로 만들지 않는다.
 2. 외부 adapter가 authoritative bundle로 feature 추출·정규화·두 모델 추론·
    score fusion·필요한 파생 온도 계산을 수행한다. 런타임은 이 계산을 복제하지
    않는다.

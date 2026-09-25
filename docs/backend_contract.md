@@ -213,6 +213,8 @@ v3에 흩어져 있던 표시 로직은 아래처럼 하나의 4등급 규칙으
 | `socPct` | % (0–100 정수) |
 | `tempContact`, `tempIrSurface` | °C |
 | `representativeTempC` | °C — 유효한 `tempContact.value`, `tempIrSurface.value` 중 큰 값 |
+| `tempAmbientC` | °C — 실온. Raw `temp_ambient` `[계획 2026-09-25 · 미구현]` |
+| `heatRiseC` | °C — 발열값 = `representativeTempC − tempAmbientC` `[계획 2026-09-25 · 미구현]` |
 | `gasRaw`, `pressureRaw`, `acousticRaw` | ADC raw (무차원 정수) |
 | `dTdt` | °C/min `[v3: '+2.8 °C/min']` |
 
@@ -221,6 +223,12 @@ v3에 흩어져 있던 표시 로직은 아래처럼 하나의 4등급 규칙으
 - `currentA`와 `powerW`는 **양수=충전, 음수=방전, 0=대기**인 signed 값이다. 저장·AI·API는 부호를 보존하고, 화면만 절댓값과 `CHARGING`/`DISCHARGING`/`IDLE` 방향 라벨을 함께 표시한다.
 - 대표 온도는 서버가 유효한 non-null 접촉/IR 값 중 큰 값으로 계산한다. 둘 다 null이면 `representativeTempC.value=null`; 선택 소스는 `representativeTempSource=CONTACT|IR_SURFACE|null`이다. 에지 Raw에는 합성 `temp_c`를 추가하지 않는다.
 - 모드 1은 두 온도 소스를 사용할 수 있고, 모드 2는 `tempContact=null`, IR 표면 온도만 사용한다.
+- **실온과 발열값** `[계획 2026-09-25 · 미구현]` — 에지 Raw에 실온 `temp_ambient`가 추가됐고(`backend/src/kafka.ts`, 선택·nullable) `telemetry_metric.temp_ambient`까지 적재된다. **API·화면 노출은 아직 없다.** 노출할 때의 규칙:
+  - `metrics.tempAmbientC = { value, status }`, `metrics.heatRiseC = { value, status }`를 대시보드 snapshot과 WS 갱신에 추가한다. 실온 출처는 모드 1 = MLX90614 #2 Ta, 모드 2 = 실온 DS18B20이다.
+  - `heatRiseC.value = representativeTempC.value − tempAmbientC.value`. **서버가 계산한다**(대표 온도와 같은 이유 — 판정 로직을 한 곳에). 둘 중 하나라도 null이거나 stale이면 `heatRiseC.value=null`이며, **실온 없이 대표 온도로 대체하지 않는다.**
+  - 음수 발열값도 그대로 준다(방이 셀보다 따뜻한 순간). 화면은 0으로 자르지 않는다 — 잘라 버리면 "실온이 드리프트했다"는 신호가 사라진다.
+  - `status`는 두 지표 모두 **`null`**(임계값 미설정, §아래 표). 발열값 문턱은 모드별 실측 후 정한다(모드 2 스펙 §8 H2).
+  - 실온은 **셀 단위 데이터가 아니다**(아래 "셀 단위 데이터" 참조). 이상점수·등급과도 다른 축이다.
 - 모드 2 SOC는 `socBasis=RELATIVE_SESSION_START`, 세션 시작을 100%로 잡은 상대 SOC다. 모드 1은 `socBasis=ABSOLUTE_GAUGE`. 기준을 만들 수 없으면 `socPct=null`이며 다른 세션·모드의 값을 재사용하지 않는다.
 - 각 지표는 `ageMs`와 `freshness=FRESH|STALE`를 가진다. stale 값은 마지막 수치를 표시할 수 있으나 AI 입력과 실시간 임계 판정에서 제외한다. `ageMs`는 발행 시각과 실제 측정 시각의 차이며 필드·하드웨어 프로필별 `maxAgeMs`를 적용한다.
 
@@ -797,7 +805,7 @@ out-of-order/older frame은 적재만 하며 현재 안전 상태를 되감지 �
 - 상세 화면에는 **V·I·T·SOC 추세 4차트 + 기간 탭(24시간/7일/30일)** 이 함께 있다 `[v3]`. §4.7 `GET /api/trends`를 `batteryIds` 1개로 호출해 재사용한다.
 
 > **셀 단위 데이터는 전부 범위에서 제외한다.** v3 상세 화면에 `셀 온도 히트맵 · 24셀 (3S8P)`가 렌더링되고 이벤트·알림에도 셀 번호가 붙지만(`온도 임계값 초과 · 셀 3`, Raw 모달의 `cell_index: 3`), **셀 단위 측정을 하지 않기로 결정되었다.**
-> 따라서 셀별 온도 배열 API도, 이벤트·알림의 `cellIndex`도 만들지 않는다. 배터리 등록에 병렬 셀 수(P)도 받지 않는다. 온도는 `temp_contact`(접촉)·`temp_ir_surface`(IR 표면) 두 값뿐이다 `[PLAN]`.
+> 따라서 셀별 온도 배열 API도, 이벤트·알림의 `cellIndex`도 만들지 않는다. 배터리 등록에 병렬 셀 수(P)도 받지 않는다. 배터리 온도는 `temp_contact`(접촉)·`temp_ir_surface`(IR 표면) 두 값뿐이다 `[PLAN]`. 여기에 배터리 밖의 실온 `temp_ambient`가 기준값으로 따로 있다(2026-09-25) — 셀 단위 값이 아니다.
 
 #### `GET /api/batteries/{id}/sessions` `[REQ-WEB-041]`
 
@@ -910,6 +918,7 @@ WebSocket 연결 **전에** 화면을 채우기 위한 1회 조회. 이후 갱�
 |---|---|---|---|
 | `tempContact`, `tempIrSurface`, `representativeTempC` | ≥ 55°C | ≥ 60°C | 서버 표시 상태 정책. 프론트는 비교하지 않으며 이 상태로 자동 차단하지 않는다 |
 | `voltageV`, `currentA`, `socPct`, `powerW` | — | — | **임계값 미설정 → `status: null`** `[Q27]` |
+| `tempAmbientC`, `heatRiseC` | — | — | **임계값 미설정 → `status: null`** `[계획 2026-09-25 · 미구현]`. 55/60°C 온도 임계를 발열값에 그대로 쓰지 않는다 — 발열값은 절대 온도가 아니다 |
 
 - **`status`는 `null`을 허용한다.** 임계값이 정해지지 않은 지표는 서버가 `null`을 내려보내고, 프론트는 그 카드에 배지를 렌더링하지 않는다. 온도 카드만 배지가 붙는다.
 - 전압·전류·SOC 배지는 임계값을 정하지 않으므로 서버가 `null`을 반환한다. 임계값을 추가할 때는 이 계약과 모드별 정상범위를 함께 갱신한다 `[Q27 확정: null 유지]`.
@@ -1080,7 +1089,7 @@ CSV·PDF 버튼은 **추세 화면 상단, 기간 탭 옆**에 있다 `[v3 실�
 CSV는 집계 추세가 아니라 **100ms 센서 Raw 행**만 내보낸다. PDF는 기존 집계 추세 보고서다.
 
 - `GET /api/metrics/export.csv?batteryId=&sessionId=&from=&to=`: 범위가 1시간 이하이면 `200 text/csv` 스트리밍 + `Content-Disposition: attachment`. 현재 데모 런타임은 활성 세션 소유권과 `batteryId`를 검증하고 `batteryId-raw.csv`를 반환한다.
-- CSV 열은 최소 `measured_at,device_id,battery_id,session_id,mode,voltage_v,current_a,power_w,temp_contact,temp_ir_surface,soc_pct,soc_basis,gas_raw,pressure_raw,acoustic_raw,age_ms`다. 합성 대표 온도는 원본 두 온도와 혼동하지 않도록 원본 열에 포함하지 않는다.
+- CSV 열은 최소 `measured_at,device_id,battery_id,session_id,mode,voltage_v,current_a,power_w,temp_contact,temp_ir_surface,soc_pct,soc_basis,gas_raw,pressure_raw,acoustic_raw,age_ms`다. 합성 대표 온도는 원본 두 온도와 혼동하지 않도록 원본 열에 포함하지 않는다. 원본 실온 `temp_ambient` 열은 추가 대상이다 `[계획 2026-09-25 · 미구현]` — 발열값은 합성값이므로 대표 온도와 같은 이유로 넣지 않는다.
 - 1시간 초과는 `POST /api/exports` `{ "kind":"RAW_METRICS_CSV", "sessionId":"...", "from":"...", "to":"..." }`로 작업을 만들고 `202 { id,status:"QUEUED" }`를 반환한다.
 - `GET /api/exports/{id}`는 `QUEUED|RUNNING|READY|FAILED|EXPIRED`와, `READY`일 때 단기 서명 `downloadUrl`, `expiresAt`, `sha256`, `rowCount`를 반환한다. `export.ready` WS 이벤트로 완료를 알린다.
 - 같은 사용자·같은 범위·같은 종류는 `Idempotency-Key`로 중복 작업을 방지한다. 사용자는 본인 소유 세션만 내보낼 수 있다.

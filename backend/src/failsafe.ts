@@ -45,7 +45,7 @@ export const UNSET_THRESHOLDS: FailsafeThresholds = Object.freeze({
 
 // 하드웨어 프로필별로 실제 존재하는 센서. 없는 센서의 코드는 발생시키지
 // 않는다(계약 §3.3). 모드 1에 MQ-2를 안 단 이유는 CLAUDE.md 참조 —
-// 히터가 상시 발열해 같은 셀의 온도 센서 5개를 오염시킨다.
+// 히터가 상시 발열해 같은 셀의 온도 센서 4개와 실온 센서를 오염시킨다.
 const AVAILABLE: Record<HardwareProfile, ReadonlySet<FailsafeTriggerCode>> = {
   MODE1_EXTERNAL_CELL_V1: new Set([
     "FAILSAFE_TEMP_CONTACT_OVER_CAP",

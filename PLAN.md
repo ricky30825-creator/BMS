@@ -88,8 +88,8 @@ ADS1115          LAN          battery-anomaly-alerts ◀─ alerts 발행 ─┤
 
 | 모드 | 설명 | 온도 수집 | 가스 | 압력·음향 |
 |---|---|---|---|---|
-| 모드 1 | 외부 셀 (리튬이온 18650 / 리튬폴리머) | 접촉식(temp_contact) + IR 표면(temp_ir_surface) | ✕ | 압력 ○ · 음향 ✕ |
-| 모드 2 | 외부 보조배터리 | IR 표면(temp_ir_surface) | ○ | 압력·음향 ✕ |
+| 모드 1 | 외부 셀 (리튬이온 18650 / 리튬폴리머) | 접촉식(temp_contact) + IR 표면(temp_ir_surface) + 실온(temp_ambient, MLX90614 #2) | ✕ | 압력 ○ · 음향 ✕ |
+| 모드 2 | 외부 보조배터리 | IR 표면(temp_ir_surface) + 실온(temp_ambient, DS18B20 1개) | ○ | 압력·음향 ✕ |
 
 > AI 서버 전처리: 칼만 필터(temp_ir_filtered), 내부 셀 추정(temp_cell_estimated)
 > 가스 센서는 모드 2만, 압력 센서는 모드 1만 적용한다. 음향 센서는 도입하지 않고 스키마 필드만 유지한다.
@@ -110,8 +110,8 @@ ADS1115          LAN          battery-anomaly-alerts ◀─ alerts 발행 ─┤
 |---|---|---|---|---|---|
 | INA226 [VLT-VCM029] | 3 | 전압·전류·전력 측정 | `voltage_v`, `current_a`, `power_w` | I2C 0x40 | 1·2 |
 | BQ27441 (SparkFun Battery Babysitter [PRT-13777]) | 2 | Fuel Gauge (SOC) + 충전기(BQ24075) | `soc_pct` | I2C 0x55 | **1** |
-| DS18B20 방수형 [SEN050007] | 3 | 접촉식 표면 온도 | `temp_contact` | 1-Wire | 1 |
-| MLX90614 [SEN0206] | 2 | 비접촉 IR 표면 온도 (구 'IR 카메라' 대체). **MLX90614-DCC, FOV 35°** | `temp_ir_surface` | I2C 0x5A (EEPROM `0x0E`로 변경 가능) | 1·2 |
+| DS18B20 방수형 [SEN050007] | 3 | 모드 1: 접촉식 표면 온도 3점. 모드 2: 1개가 실온 | `temp_contact` / 모드 2 `temp_ambient` | 1-Wire | 1·2 |
+| MLX90614 [SEN0206] | 2 | 비접촉 IR 표면 온도 (구 'IR 카메라' 대체). **MLX90614-DCC, FOV 35°**. 모드 1에서 #2(`0x5B`)는 실온(2026-09-25) | `temp_ir_surface` / 모드 1 #2 `temp_ambient` | I2C 0x5A (EEPROM `0x0E`로 변경 가능) | 1·2 |
 | ADS1115 [VLT-AD004] | 1 | 16비트 4ch ADC — 아날로그 센서 → I2C 브리지 | — | I2C 0x48 | 1·2 |
 | 가스 센서 (MQ-2) [SZH-SSBH-026] | 3 | 오프가스(가연성가스·연기·H₂ 등) 누출 감지 → 열폭주 조기경보 | `gas_raw` | ADS1115 `A0` (분압 경유) | **2만** |
 | 압력 센서 (FSR 406) [30-73258] | 3 | 스웰링(부풀음) 압력/스트레인 변형률 | `pressure_raw` | ADS1115 `A0` | **1만** |
@@ -119,7 +119,7 @@ ADS1115          LAN          battery-anomaly-alerts ◀─ alerts 발행 ─┤
 
 - **가스·압력은 사후 대응(임계 탐지 → 즉시 릴레이 차단) 안전계층**이며 AI 예측 입력 특징이 아니다. 각 센서가 임계값을 초과하면 AI 판정과 무관하게 즉시 릴레이를 차단한다.
 - **✅ 모드별 아날로그 센서 배분 확정 (2026-07-28)** — 모드마다 **1개씩만** 붙으므로 **ADS1115 1개(A0만 사용)로 충분하다. 추가 구매 불필요.**
-  - **모드 1 = 압력 단독.** 가스를 안 다는 이유는 **MQ-2 히터가 상시 150mA@5V로 발열**해 같은 셀에 붙은 온도 센서 5개(DS18B20 ×3 + MLX90614 ×2)를 오염시키기 때문이다. 모드 1의 핵심은 다점 온도라 온도를 택했다. **모드 1의 사후 대응 계층은 압력 하나뿐**이므로 차단 로직에서 가스·음향이 있다고 가정하면 안 된다.
+  - **모드 1 = 압력 단독.** 가스를 안 다는 이유는 **MQ-2 히터가 상시 150mA@5V로 발열**해 같은 셀에 붙은 온도 센서 4개(DS18B20 ×3 + MLX90614 #1)와 실온 센서(MLX90614 #2)를 오염시키기 때문이다. 모드 1의 핵심은 다점 온도라 온도를 택했다. **모드 1의 사후 대응 계층은 압력 하나뿐**이므로 차단 로직에서 가스·음향이 있다고 가정하면 안 된다.
   - **모드 2 = 가스 단독.** 보조배터리는 외장 케이스에 가려 압력 센서를 못 붙인다.
   - **음향은 도입하지 않는다.** 진짜 조기신호인 미세 크랙의 음향방출(AE)은 **100kHz~1MHz**라 ADS1115(860SPS)로 원리적으로 못 잡고, 피에조로 잡히는 벤트 파열음은 가스·압력·온도가 이미 먼저 울린다. `acoustic_raw` **필드는 스키마에 남겨** 나중에 전용 AE 센서를 붙일 여지만 둔다.
 - **압력 임계는 baseline 대비 상대 상승률이다.** FSR은 예압에 따라 baseline이 매번 달라져 절대 카운트가 무의미하다. baseline은 **세션마다** 시작 10초 중앙값으로 새로 잡는다. 구체 상승률 임계는 실측 후 확정(`mode1_backend_spec.md` §13 H8).
@@ -127,8 +127,10 @@ ADS1115          LAN          battery-anomaly-alerts ◀─ alerts 발행 ─┤
 - **동시 측정은 배터리 1개**다 — BQ27441(0x55) 주소가 하드웨어 고정이기 때문이다. 표의 주소는 **출고 기본값**이며, MLX90614(0x5A)만 EEPROM `0x0E`로 바꿀 수 있다.
 - **모드 1 회로에서 온도는 다점 측정이다(2026-07-28).** 여분으로 잡아 뒀던 DS18B20 3개와 MLX90614 2개를 **예비품이 아니라 전부 투입**한다. 열폭주는 국부에서 시작하는데 MLX90614는 소자 1개짜리라 시야각 안의 평균만 내므로, 센서 1개로는 한 귀퉁이의 과열이 희석돼 사라진다.
   - DS18B20 ×3 → 셀 하단·중앙·**단자쪽**. 같은 1-Wire 버스에 병렬(고유 ROM 코드라 주소 설정 불필요), 동시 변환으로 750ms 유지.
-  - MLX90614 ×2 → 셀 중앙(`0x5A`)·**단자쪽**(`0x5B`). 셀에서 2cm 이내 부착(FOV 35°, 스팟 지름 = 0.63 × 거리).
-  - `temp_contact`·`temp_ir_surface`는 각 그룹의 **최댓값**이며, 개별 지점값은 `temp_points`로 함께 발행한다.
+  - MLX90614 #1 → 셀 중앙(`0x5A`). 셀에서 2cm 이내 부착(FOV 35°, 스팟 지름 = 0.63 × 거리).
+  - MLX90614 #2(`0x5B`) → **실온**(2026-09-25 변경, 예전에는 셀 단자쪽). 셀·BW150·Pi에서 10cm 이상 떨어뜨리고 Ta(센서 자체 온도)를 `temp_ambient`로 싣는다. 단자쪽 국부 과열은 DS18B20 단자쪽 점이 맡는다.
+  - `temp_contact`·`temp_ir_surface`는 각 그룹의 **최댓값**이며, 개별 지점값은 `temp_points`로 함께 발행한다. 실온은 `temp_points`에 넣지 않는다.
+  - **발열값 = 표면온도 − 실온**이 온도 판단의 기준이다. 실온이 움직이면 표면온도만으로는 발열을 읽을 수 없다(실측 중 실온 2.25°C 드리프트로 「발열 멈춤」 오독 사례, 2026-09-24).
   - **예비품이 남지 않는다.** 고장 시 교체품이 없다.
 
 **측정 대상 배터리**: KC인증 18650 리튬이온 3.7V 2550mAh [ZM18650-2600-KC01] ×3, KC인증 리튬폴리머 3.7V 1000mAh [TW102050] ×2.
@@ -383,13 +385,13 @@ ADS1115          LAN          battery-anomaly-alerts ◀─ alerts 발행 ─┤
 
 > `battery_asset`, `measurement_session` 관계 테이블은 PostgreSQL(비시계열)에 두고, 시계열 하이퍼테이블은 `battery_id` FK로 참조한다.
 >
-> **⚠️ 위 두 스펙은 "설계"가 아니라 "이미 있는 스키마 위의 남은 작업"이다.** 실제 컬럼·제약의 정본은 `backend/migrations/000_identity.sql`~`012_failsafe_profile_and_baseline.sql`이다. `002`~`005`는 추론 결과·Raw 보조 필드·하이퍼테이블·진단기·중복 방지·`battery_asset.memo`를, `006`은 진단 phase 경계 스냅샷을, `007`은 raw wire payload를, `008`~`009`는 outbox identity·delivery 상태를, `010`은 영속 domain event를, `011`은 공지·조회 기록·발송 의도를, `012`는 Fail-Safe 프로필과 세션별 압력 baseline을 반영한다. **이 문서가 "시계열 하이퍼테이블"이라 부르는 테이블의 실제 이름은 `telemetry_metric`이다.** 과거 결정 기록은 `docs/handover/schema-open-questions.md`에서 확인한다.
+> **⚠️ 위 두 스펙은 "설계"가 아니라 "이미 있는 스키마 위의 남은 작업"이다.** 실제 컬럼·제약의 정본은 `backend/migrations/000_identity.sql`~`013_telemetry_ambient.sql`이다. `002`~`005`는 추론 결과·Raw 보조 필드·하이퍼테이블·진단기·중복 방지·`battery_asset.memo`를, `006`은 진단 phase 경계 스냅샷을, `007`은 raw wire payload를, `008`~`009`는 outbox identity·delivery 상태를, `010`은 영속 domain event를, `011`은 공지·조회 기록·발송 의도를, `012`는 Fail-Safe 프로필과 세션별 압력 baseline을 반영한다. **이 문서가 "시계열 하이퍼테이블"이라 부르는 테이블의 실제 이름은 `telemetry_metric`이다.** 과거 결정 기록은 `docs/handover/schema-open-questions.md`에서 확인한다.
 
 ### AI 모델 (4개)
 | ID | 스펙 |
 |---|---|
 | S-LUTREM | 정상 데이터 수집/라벨링 방침 (LSTM-AutoEncoder·Informer 공통) |
-| S-WKCPVK | 특징 추출 및 윈도우링 (30 time-steps, 정규화 + Sliding Window로 Sequence 생성) — V_scaled, V_delta, V_drop, I_smooth, dT_dt, d2T_dt2, Wh_cumsum. 동일 Sequence를 LSTM-AutoEncoder·Informer에 동시 입력 |
+| S-WKCPVK | 특징 추출 및 윈도우링 (30 time-steps, 정규화 + Sliding Window로 Sequence 생성) — V_scaled, V_delta, V_drop, I_smooth, dT_dt, d2T_dt2, Wh_cumsum (+ 발열값 `T_rise` = 표면온도 − 실온을 추가하는 방향, 2026-09-25 · 미구현). 동일 Sequence를 LSTM-AutoEncoder·Informer에 동시 입력 |
 | S-FGKMXE | 이중 모델 이상점수 계산 — LSTM-AutoEncoder 재구성 오차(AE Score) + Informer 예측 오차(Informer Score)를 Score Fusion(가중합 `Final Score = α × AE Score + β × Informer Score`)으로 결합해 최종 이상점수 산출 |
 | S-WJYKSS | 상태 등급 판정 (최종 이상점수 Final Score 기준) — 정상(0.0–0.3) / 주의(0.3–0.6) / 경고(0.6–0.8) / 위험(0.8–1.0) |
 
@@ -649,7 +651,7 @@ ADS1115          LAN          battery-anomaly-alerts ◀─ alerts 발행 ─┤
 > | 5 | `docs/handover/schema-open-questions.md` | **과거 미결정 6건의 결정 기록.** 해당 DDL은 `backend/migrations/002`~`005`에 반영됐고, Consumer 착수 시 실제 컬럼·제약과 함께 확인한다 |
 > | 6 | `docs/verification_matrix.md` | 무엇을 어떻게 검증하면 끝난 것으로 치는지. 백엔드 typecheck·빌드·`/health`·테스트 명령이 여기 있다 |
 >
-> ✅ **DB는 `npm run db:migrate` 하나로 올라간다(2026-08-28).** 현재 `backend/migrations/000`~`012`가 연속된 파일명 순서로 적용된다. `010_domain_events.sql`, `011_notices.sql`, `012_failsafe_profile_and_baseline.sql`을 포함하며, 실행기는 advisory lock, TimescaleDB 가용성 사전 확인, 완료 후 두 hypertable 확인을 수행한다. 예전에 `psql -f 001_app_auth.sql`이 첫 구문에서 멈추던 문제(`"user"` 테이블 DDL 부재)는 `000_identity.sql`이 해결했다. **`psql -f`로 001만 직접 돌리지 마라** — 순서가 있는 migration 묶음이다. plain PostgreSQL로 강등하지 않는다. `npm run auth:generate`·`auth:migrate`는 CLI 패키지가 없어 실패하니 부르지 않는다(Better Auth는 지금 미사용).
+> ✅ **DB는 `npm run db:migrate` 하나로 올라간다(2026-08-28).** 현재 `backend/migrations/000`~`013`이 연속된 파일명 순서로 적용된다. `010_domain_events.sql`, `011_notices.sql`, `012_failsafe_profile_and_baseline.sql`을 포함하며, 실행기는 advisory lock, TimescaleDB 가용성 사전 확인, 완료 후 두 hypertable 확인을 수행한다. 예전에 `psql -f 001_app_auth.sql`이 첫 구문에서 멈추던 문제(`"user"` 테이블 DDL 부재)는 `000_identity.sql`이 해결했다. **`psql -f`로 001만 직접 돌리지 마라** — 순서가 있는 migration 묶음이다. plain PostgreSQL로 강등하지 않는다. `npm run auth:generate`·`auth:migrate`는 CLI 패키지가 없어 실패하니 부르지 않는다(Better Auth는 지금 미사용).
 >
 > 세부 계약이 필요해지면 — 에러 코드는 `docs/backend_contract.md` §1.10, 원자성 요구는 §3.4, 에지 프레임 정의와 `battery-events`의 code+params는 `docs/hardware/mode1_backend_spec.md` §9·§11이다.
 >
@@ -863,7 +865,7 @@ ADS1115          LAN          battery-anomaly-alerts ◀─ alerts 발행 ─┤
 |---|---|
 | **모드 2 `soc_pct`** | **INA226 적산 상대 SOC.** 시작 시점 100% 가정, `capacity_wh`를 분모로 방전 Wh 감산. 모드 2 배터리는 **용량 입력 필수**. 절대 SOC가 아니며 세션 단위로만 유효 |
 | **ADS1115 채널 배분** | 모드마다 아날로그 센서 1개씩 → **A0만 사용, ADS1115 1개로 충분(추가 구매 불필요)**. 모드 1=압력, 모드 2=가스 |
-| **모드 1 가스 센서** | **안 단다.** MQ-2 히터(150mA@5V 상시 발열)가 온도 센서 5개를 오염시킨다. `gas_raw`는 모드 1에서 `null` 고정 → 모드 1의 사후 대응 계층은 **압력 단독** |
+| **모드 1 가스 센서** | **안 단다.** MQ-2 히터(150mA@5V 상시 발열)가 셀 온도 센서 4개와 실온 센서를 오염시킨다. `gas_raw`는 모드 1에서 `null` 고정 → 모드 1의 사후 대응 계층은 **압력 단독** |
 | **음향 센서** | **도입 안 함.** AE는 100kHz~1MHz라 ADS1115로 원리적 불가. `acoustic_raw` **필드만 유지**하고 항상 `null` |
 | **INA226 `Current_LSB`** | **0.0002 A (상한 6.55A).** 실제 상한은 셀 스펙이 아니라 PCM trip(4~10A)이 정한다. CAL: R010=2560, R002=12800 |
 | **`current_a` 부호** | **유지**(양수=충전). 프론트만 표시 시 `abs()` + 방향 라벨 |
@@ -880,7 +882,7 @@ ADS1115          LAN          battery-anomaly-alerts ◀─ alerts 발행 ─┤
 - Q38: 상태 사유와 관리자 메모는 각각 필수/선택 입력과 별도 요청·별도 감사 레코드로 저장하며 기본 최대 길이·문자 정규화·버전 충돌 정책은 백엔드 계약의 기본값을 따른다.
 - Q6: 모드 1 SOH/RUL은 백엔드가 BQ27441 원시/집계값으로 계산한다. 모드 2의 미지원 건강도는 계속 `null`이다.
 | **MLX90614 필터** | **`IIR=100`, `FIR=111`**(1024탭, 95.2ms). 노이즈를 키우며 창당 2샘플을 얻지 않는다 |
-| **열화상 배열(MLX90640)** | **도입 안 함.** MLX90614 2존 + DS18B20 3점 = 5점 구성 유지 |
+| **열화상 배열(MLX90640)** | **도입 안 함.** 셀 온도는 MLX90614 1존 + DS18B20 3점 = 4점, MLX90614 #2는 실온(2026-09-25 변경 — 예전 2존 + 3점 = 5점) |
 | **계측 허용 오차** | 전류 ±2%/±20mA, 전압 ±30mV, 전력 ±3%, SOC 사이클 적산 ±10% |
 
 **같은 날 실물 확인으로 H9·H10도 닫혔다** — 셀에 보호회로가 있고, Babysitter 실크스크린은 회로도 네트 이름과 일치한다. **남은 것은 전원을 넣어야 답이 나오는 8건**(`mode1_backend_spec.md` §13 H1~H8).
