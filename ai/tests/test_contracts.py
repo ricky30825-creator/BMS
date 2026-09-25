@@ -82,6 +82,31 @@ class WireContractTests(unittest.TestCase):
         with self.assertRaisesRegex(ContractError, "temp_contact must be null"):
             parse_raw_metrics(invalid_contact)
 
+    def test_ambient_temperature_is_optional_and_outside_the_peak_invariant(self) -> None:
+        # Absent key is still a valid v1 frame (edges that predate temp_ambient).
+        self.assertIsNone(parse_raw_metrics(mode1_frame()).temp_ambient)
+
+        for frame in (mode1_frame(), mode2_frame()):
+            frame["temp_ambient"] = 24.5
+            parsed = parse_raw_metrics(frame)
+            self.assertEqual(parsed.temp_ambient, 24.5)
+            self.assertEqual(parsed.to_payload()["temp_ambient"], 24.5)
+
+        # Ambient is not a cell-surface point: it never changes the surface peak.
+        hotter_room = mode1_frame()
+        hotter_room["temp_ambient"] = 99.0
+        self.assertEqual(parse_raw_metrics(hotter_room).temp_ir_surface, 38.1)
+
+        nested = mode1_frame()
+        nested["temp_points"] = {"contact": [34.1, 36.8, 35.2], "ir": [38.1, 35.9], "ambient": 24.5}
+        with self.assertRaisesRegex(ContractError, "unknown fields: ambient"):
+            parse_raw_metrics(nested)
+
+        wrong_type = mode1_frame()
+        wrong_type["temp_ambient"] = "24.5"
+        with self.assertRaises(ContractError):
+            parse_raw_metrics(wrong_type)
+
     def test_rejects_unknown_fields_and_non_utc_timestamps(self) -> None:
         unknown = mode1_frame()
         unknown["battery_id"] = "must-not-cross-wire"

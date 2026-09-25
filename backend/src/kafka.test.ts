@@ -107,6 +107,33 @@ describe("Kafka wire contracts", () => {
     }).success).toBe(false);
   });
 
+  it("accepts an optional nullable ambient temperature outside temp_points in both modes", () => {
+    // Absent key stays valid so edges that predate temp_ambient keep flowing.
+    expect(batteryRawMetricsSchema.parse(rawFrame).temp_ambient).toBeUndefined();
+    expect(batteryRawMetricsSchema.parse({ ...rawFrame, temp_ambient: 24.5 }).temp_ambient).toBe(24.5);
+    expect(batteryRawMetricsSchema.parse({ ...rawFrame, temp_ambient: null }).temp_ambient).toBeNull();
+    expect(batteryRawMetricsSchema.safeParse({
+      ...rawFrame,
+      mode: 2,
+      temp_contact: null,
+      temp_points: { contact: null, ir: [33.1] },
+      temp_ir_surface: 33.1,
+      gas_raw: 420,
+      pressure_raw: null,
+      temp_ambient: 24.5,
+    }).success).toBe(true);
+    // Ambient is not a cell-surface point and never takes part in the peak invariant.
+    expect(batteryRawMetricsSchema.safeParse({
+      ...rawFrame,
+      temp_ambient: 99,
+    }).success).toBe(true);
+    expect(batteryRawMetricsSchema.safeParse({
+      ...rawFrame,
+      temp_points: { ...rawFrame.temp_points, ambient: 24.5 },
+    }).success).toBe(false);
+    expect(batteryRawMetricsSchema.safeParse({ ...rawFrame, temp_ambient: "24.5" }).success).toBe(false);
+  });
+
   it("requires UTC timestamps and rejects non-UTC offsets", () => {
     expect(batteryRawMetricsSchema.safeParse({ ...rawFrame, timestamp: "2026-09-14T13:00:00+09:00" }).success).toBe(false);
     expect(batteryAnomalyAlertSchema.safeParse({ ...anomalyAlert, evaluated_at: "2026-09-14T13:00:01+09:00" }).success).toBe(false);

@@ -136,6 +136,9 @@ class RawMetricsFrame:
     age_ms: Mapping[str, int]
     diag_phase: str | None = None
     load_target_a: NullableNumber = None
+    # Room temperature from a probe not attached to the battery; the reference
+    # for heat rise (surface - ambient). Not a temp_points entry, no peak rule.
+    temp_ambient: NullableNumber = None
 
     def to_payload(self) -> dict[str, Any]:
         """Return a JSON-compatible copy without adding derived values."""
@@ -161,6 +164,7 @@ class RawMetricsFrame:
             "age_ms": dict(self.age_ms),
             "diag_phase": self.diag_phase,
             "load_target_a": self.load_target_a,
+            "temp_ambient": self.temp_ambient,
         }
         # The backend schema makes these fields optional.  Including them as
         # null is valid and keeps the internal representation deterministic.
@@ -182,7 +186,7 @@ def parse_raw_metrics(payload: object) -> RawMetricsFrame:
         "soc_pct", "temp_contact", "temp_ir_surface", "temp_points", "gas_raw", "pressure_raw",
         "acoustic_raw", "age_ms",
     }
-    optional = {"diag_phase", "load_target_a"}
+    optional = {"diag_phase", "load_target_a", "temp_ambient"}
     _strict_keys(value, required, optional, code="AI_RAW_CONTRACT_INVALID")
 
     if value["version"] != CONTRACT_VERSION:
@@ -197,7 +201,7 @@ def parse_raw_metrics(payload: object) -> RawMetricsFrame:
 
     numeric_fields = {
         field: _number(value.get(field), field, nullable=True)
-        for field in ("voltage_v", "current_a", "power_w", "temp_contact", "temp_ir_surface", "gas_raw", "pressure_raw", "load_target_a")
+        for field in ("voltage_v", "current_a", "power_w", "temp_contact", "temp_ir_surface", "temp_ambient", "gas_raw", "pressure_raw", "load_target_a")
     }
     soc = _number(value["soc_pct"], "soc_pct", nullable=True)
     if soc is not None and not 0 <= float(soc) <= 100:
@@ -250,6 +254,7 @@ def parse_raw_metrics(payload: object) -> RawMetricsFrame:
         age_ms=age_ms,
         diag_phase=phase,
         load_target_a=numeric_fields["load_target_a"],
+        temp_ambient=numeric_fields["temp_ambient"],
     )
 
 

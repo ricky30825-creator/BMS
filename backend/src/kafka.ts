@@ -103,6 +103,11 @@ export const batteryRawMetricsSchema = z.object({
   temp_contact: nullableNumberSchema,
   temp_ir_surface: nullableNumberSchema,
   temp_points: temperaturePointsSchema,
+  // Room/ambient temperature from a probe that is NOT attached to the battery.
+  // It is the reference for heat rise (surface − ambient), so it stays outside
+  // temp_points and the peak invariants. Optional so pre-ambient edges remain
+  // valid; absent and null both mean "not measured".
+  temp_ambient: nullableNumberSchema.optional(),
   gas_raw: nullableNumberSchema,
   pressure_raw: nullableNumberSchema,
   acoustic_raw: nullableNumberSchema,

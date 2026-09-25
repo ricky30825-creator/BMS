@@ -330,7 +330,17 @@ describe("raw telemetry ingestion", () => {
     ]);
     expect(insert?.values[18]).toBe("ABSOLUTE_GAUGE");
     expect(insert?.values[19]).toEqual(mode1Frame);
+    expect(insert?.values[20]).toBeNull();
     expect(fake.latest.get("battery-1")?.toISOString()).toBe(mode1Frame.timestamp);
+  });
+
+  it("stores the ambient temperature in its own column", async () => {
+    const fake = fakeDb();
+    await ingestRawMetricsFrame(fake.pool, { ...mode1Frame, temp_ambient: 24.5 });
+
+    const insert = fake.queries.find((query) => query.text.toLowerCase().includes("insert into telemetry_metric"));
+    expect(insert?.text).toContain("temp_ambient");
+    expect(insert?.values[20]).toBe(24.5);
   });
 
   it("keeps a frame with null attribution when no session is active", async () => {

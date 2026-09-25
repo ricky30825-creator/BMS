@@ -394,12 +394,14 @@ export async function ingestRawMetricsFrame(
         session_id, battery_id, device_id, measured_at,
         voltage_v, current_a, power_w, temp_contact, temp_ir_surface,
         gas_raw, pressure_raw, acoustic_raw, soc_pct, diag_phase, load_target_a,
-        age_ms, temp_points, mode, soc_basis, raw_payload
+        age_ms, temp_points, mode, soc_basis, raw_payload,
+        temp_ambient
       ) values (
         $1, $2, $3, $4,
         $5, $6, $7, $8, $9,
         $10, $11, $12, $13, $14, $15,
-        $16, $17, $18, $19, $20
+        $16, $17, $18, $19, $20,
+        $21
       )
       on conflict (device_id, measured_at) do nothing
       returning device_id, measured_at
@@ -424,6 +426,7 @@ export async function ingestRawMetricsFrame(
       frame.mode,
       socBasisFor(frame),
       frame,
+      frame.temp_ambient ?? null,
     ]);
 
     const inserted = insertResult.rows.length > 0;

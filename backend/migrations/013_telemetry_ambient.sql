@@ -1,0 +1,15 @@
+-- 013_telemetry_ambient.sql — 실온(ambient) 온도 컬럼. 결정일 2026-09-25.
+--
+-- 계획 변경: 배터리에 붙이지 않은 온도 센서(DS18B20)로 주변/외부 온도를 재서
+-- 발열값(= 표면온도 − 실온)을 계산한다. 이전의 "temp_ambient는 측정하지 않는다"
+-- 결정(2026-07-27)을 되돌린다.
+--
+-- temp_points(jsonb)에 넣지 않고 별도 컬럼인 이유:
+--   · temp_points는 "셀 표면의 여러 지점"이고 temp_contact·temp_ir_surface가
+--     그 최댓값이라는 불변식이 걸려 있다. 실온은 셀 지점이 아니며 최댓값에
+--     섞이면 안 된다.
+--   · 발열값 계산·조회에서 매번 쓰는 스칼라라 jsonb에서 꺼내 쓰기보다 컬럼이 낫다.
+--
+-- null = 그 프레임에 실온이 실측되지 않음(센서 없음·키 없음 포함). 과거 행은
+-- raw_payload에도 이 값이 없으므로 채우지 않는다.
+alter table telemetry_metric add column if not exists temp_ambient numeric;
