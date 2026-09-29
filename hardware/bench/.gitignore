@@ -8,3 +8,4 @@ __pycache__/
 *.log
 *.out
 .env*
+!raw_data/MANIFEST.csv
