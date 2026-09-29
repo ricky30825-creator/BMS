@@ -164,7 +164,7 @@ describe("dashboard trend chart", () => {
     expect(container.querySelector(".score-gauge-value")).toHaveTextContent("18");
   });
 
-  it("freezes only the chart, catches up on resume, and unpauses on metric change", async () => {
+  it("keeps the chart following new samples without pause controls", async () => {
     const user = userEvent.setup();
     const initial = dashboard({ quickTrend: { metric: "temp", points: [{ at: "2026-08-25T00:00:01.000Z", value: 31.2 }] } });
     const { container, rerender } = renderDashboard(initial);
@@ -176,8 +176,7 @@ describe("dashboard trend chart", () => {
       </QueryClientProvider>,
     );
 
-    await user.click(screen.getByRole("button", { name: "차트 일시 정지" }));
-    expect(screen.getByRole("status")).toHaveTextContent("실시간 측정은 계속 수신 중입니다.");
+    expect(screen.queryByRole("button", { name: "차트 일시 정지" })).not.toBeInTheDocument();
 
     const updated = dashboard({
       metrics: { ...initial.metrics, representativeTempC: { value: 34.6, status: "OK", source: "CONTACT" } },
@@ -188,12 +187,9 @@ describe("dashboard trend chart", () => {
     });
     rerenderDashboard(updated);
     expect(container.querySelector(".dashboard-metric-card.temp")).toHaveTextContent("34.6");
-    expect(screen.getByRole("group", { name: /마지막 표시값 31.2 °C/ })).toBeInTheDocument();
-
-    await user.click(screen.getByRole("button", { name: "실시간 이어보기" }));
     expect(screen.getByRole("group", { name: /마지막 표시값 34.6 °C/ })).toBeInTheDocument();
     await user.click(container.querySelector(".dashboard-metric-card.soc")!);
-    expect(screen.getByRole("button", { name: "차트 일시 정지" })).toHaveAttribute("aria-pressed", "false");
+    expect(screen.queryByRole("button", { name: "실시간 이어보기" })).not.toBeInTheDocument();
   });
 });
 

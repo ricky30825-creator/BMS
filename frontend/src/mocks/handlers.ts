@@ -21,6 +21,7 @@ const batteries: Battery[] = [
   { id: "b_pack_002", label: "PACK-002", chemistry: "LI_PO", seriesCount: null, maker: null, model: "37Wh USB", targetMode: 2, capacityWh: 37, ratedOutputCurrentA: 2, opsStatus: "WATCH", latest: { ...baseMetric(.58, 47, null), voltageV: 5.1, currentA: -1.2, powerW: -6.12, representativeTempSource: "IR_SURFACE", tempContact: null, tempIrSurface: 47, socBasis: null }, health: null, diagnosisCapability: { executionAllowed: true, reasonCode: null } },
   { id: "b_pack_003", label: "PACK-003", chemistry: "LI_ION", seriesCount: 3, maker: "CellGuard Lab", model: "3S bench pack", targetMode: 1, capacityWh: null, ratedOutputCurrentA: null, opsStatus: "NORMAL", latest: null, health: null, diagnosisCapability: { executionAllowed: false, reasonCode: "MODE_NOT_SUPPORTED" } },
   { id: "b_pack_004", label: "PACK-004", chemistry: "LI_PO", seriesCount: null, maker: "CellGuard Lab", model: "Validated Mode 2", targetMode: 2, capacityWh: 37, ratedOutputCurrentA: 2, opsStatus: "NORMAL", latest: { ...baseMetric(.24, 42, null), voltageV: 5.05, currentA: -1, powerW: -5.05, representativeTempSource: "IR_SURFACE", tempContact: null, tempIrSurface: 42, socBasis: "RELATIVE_SESSION_START" }, health: null, diagnosisCapability: { executionAllowed: true, reasonCode: null } },
+  { id: "b_pack_006", label: "PACK-006", chemistry: "LI_PO", seriesCount: null, maker: "CellGuard Lab", model: "열화 의심 목업 · 37Wh USB", targetMode: 2, capacityWh: 37, ratedOutputCurrentA: 2, opsStatus: "WATCH", latest: { ...baseMetric(.68, 48, null), voltageV: 5.02, currentA: -1, powerW: -5.02, representativeTempSource: "IR_SURFACE", tempContact: null, tempIrSurface: 48, socBasis: "RELATIVE_SESSION_START" }, health: null, diagnosisCapability: { executionAllowed: true, reasonCode: null } },
 ];
 batteries[0].adminMemo = "기존 관리자 메모";
 batteries.forEach((battery) => { battery.adminMemo ??= ""; });
@@ -32,7 +33,10 @@ let alertChannels: AlertChannels = { KAKAO: true, EMAIL: true, SMS: false, WEBPU
 let activeDiagnosis: Diagnosis | null = null;
 const completedCapacityDiagnosis: Diagnosis = { id: "dg_pack_004_001", batteryId: "b_pack_004", batteryLabel: "PACK-004", sessionId: "s_history", kind: "CAPACITY", status: "COMPLETED", confidence: "HIGH", startedAt: "2026-07-28T05:20:00.000Z", measuredAt: "2026-07-28T11:40:00.000Z", socHintLevel: null, loadTargetA: null, loadActualA: null, partialMetrics: null, quick: null, capacity: { deliveredWh: 31.2, ratedWh: 37, baselineWh: 34.8, sohRelPct: 89.7, sohAbsPct: 95.8, assumedEfficiency: 0.88, dischargeCurrentA: 1, isBaseline: false, partial: false } };
 export const abnormalQuickDiagnosisFixture: Diagnosis = { id: "dg_pack_004_quick_abnormal", batteryId: "b_pack_004", batteryLabel: "PACK-004", sessionId: "s_history_quick", kind: "QUICK", status: "COMPLETED", dataSource: "MEASURED", confidence: "LOW", startedAt: "2026-08-05T05:20:00.000Z", measuredAt: "2026-08-05T05:22:00.000Z", loadTargetA: 1, loadActualA: 0.72, socHintLevel: 3, partialMetrics: null, quick: { regulationKneeA: 1.2, kneeIsUpperBound: false, thermalSlopeCPerMin: 3.8, specAttainmentPct: 68, grade: "SUSPECT_DEGRADED" }, capacity: null };
-const diagnosisHistory: Record<string, Diagnosis[]> = { b_pack_004: [abnormalQuickDiagnosisFixture, completedCapacityDiagnosis] };
+// Development-only result for the explicitly named degraded mock asset.
+const completedDegradedDiagnosis: Diagnosis = { ...abnormalQuickDiagnosisFixture, id: "dg_pack_006_001", batteryId: "b_pack_006", batteryLabel: "PACK-006", dataSource: "SIMULATED", quick: { regulationKneeA: 1.2, thermalSlopeCPerMin: 2.4, specAttainmentPct: 60, grade: "SUSPECT_DEGRADED" } };
+const degradedMockDurationMs = 8_000;
+const diagnosisHistory: Record<string, Diagnosis[]> = { b_pack_004: [abnormalQuickDiagnosisFixture, completedCapacityDiagnosis], b_pack_006: [completedDegradedDiagnosis] };
 let relay: Relay = { batteryId: "b_pack_001", state: "CLOSED", changedAt: now(), changedBy: { type: "SYSTEM", systemCode: "SYSTEM" }, interlock: { engaged: false, condition: null, canRestore: true } };
 const page = <T>(items: T[]) => ({ items, page: { number: 1, size: items.length || 20, total: items.length, totalPages: items.length ? 1 : 0 } });
 // Test-only MSW fixture. Production event trends are aggregated from PostgreSQL.
@@ -73,6 +77,12 @@ const hasTestFault = (fault: string) => testFault === fault;
 const alertSettings = (): AlertSettings => ({ channels: alertChannels, policy: { sendOn: ["DANGER", "WARNING"], smsOnlyDanger: true, dedupeWindowMinutes: 5 } });
 const diagnosisListItem = (diagnosis: Diagnosis): DiagnosisListItem => ({ id: diagnosis.id, batteryId: diagnosis.batteryId, batteryLabel: diagnosis.batteryLabel, kind: diagnosis.kind, status: diagnosis.status, confidence: diagnosis.confidence, measuredAt: diagnosis.measuredAt, startedAt: diagnosis.startedAt, socHintLevel: diagnosis.socHintLevel, summary: diagnosis.kind === "QUICK" ? { regulationKneeA: diagnosis.quick?.regulationKneeA ?? null, thermalSlopeCPerMin: diagnosis.quick?.thermalSlopeCPerMin ?? null, grade: diagnosis.quick?.grade ?? null } : { sohRelPct: diagnosis.capacity?.sohRelPct ?? null, deliveredWh: diagnosis.capacity?.deliveredWh ?? null } });
 const allDiagnoses = () => Object.values(diagnosisHistory).flat();
+const completeDegradedMockDiagnosis = (): void => {
+  if (!activeDiagnosis || activeDiagnosis.batteryId !== "b_pack_006" || activeDiagnosis.kind !== "QUICK" || Date.now() - Date.parse(activeDiagnosis.startedAt) < degradedMockDurationMs) return;
+  const completed: Diagnosis = { ...activeDiagnosis, status: "COMPLETED", phase: "P7", confidence: "LOW", dataSource: "SIMULATED", measuredAt: now(), estimatedEndAt: null, partialMetrics: { vLightLoadV: 5.06, regulationKneeA: 1.2, thermalSlopeCPerMin: 2.4, specAttainmentPct: 60 }, quick: completedDegradedDiagnosis.quick };
+  diagnosisHistory[completed.batteryId] = [completed, ...(diagnosisHistory[completed.batteryId] ?? [])];
+  activeDiagnosis = null;
+};
 const startDiagnosis = async (kind: "quick" | "capacity", request: Request) => {
   if (!session) return bad(409, "NO_ACTIVE_SESSION");
   const battery = currentBattery();
@@ -85,7 +95,7 @@ const startDiagnosis = async (kind: "quick" | "capacity", request: Request) => {
   if (kind === "quick" && (!("socHintLevel" in body) || (body.socHintLevel !== null && ![1, 2, 3, 4].includes(body.socHintLevel ?? 0)))) return bad(422, "VALIDATION_FAILED");
   if (kind === "capacity" && (typeof body.dischargeCurrentA !== "number" || body.dischargeCurrentA <= 0)) return bad(422, "VALIDATION_FAILED");
   if (kind === "capacity" && body.fullyChargedConfirmed !== true) return bad(400, "FULL_CHARGE_REQUIRED");
-  const diagnosis: Diagnosis = { id: `dg_${randomId()}`, batteryId: battery.id, batteryLabel: battery.label, sessionId: session.id, kind: kind === "quick" ? "QUICK" : "CAPACITY", status: "RUNNING", phase: kind === "quick" ? "P0" : "CAPACITY", startedAt: now(), estimatedEndAt: new Date(Date.now() + (kind === "quick" ? 180_000 : 21_600_000)).toISOString(), loadTargetA: kind === "quick" ? 0.5 : body.dischargeCurrentA ?? 1, loadActualA: kind === "quick" ? 0.48 : body.dischargeCurrentA ?? 1, socHintLevel: kind === "quick" ? body.socHintLevel as 1 | 2 | 3 | 4 | null : null, partialMetrics: kind === "quick" ? { vLightLoadV: 5.06, regulationKneeA: null, thermalSlopeCPerMin: null, specAttainmentPct: null } : { deliveredWh: null, specAttainmentPct: null }, quick: null, capacity: null };
+  const diagnosis: Diagnosis = { id: `dg_${randomId()}`, batteryId: battery.id, batteryLabel: battery.label, sessionId: session.id, kind: kind === "quick" ? "QUICK" : "CAPACITY", status: "RUNNING", phase: kind === "quick" ? "P0" : "CAPACITY", startedAt: now(), estimatedEndAt: new Date(Date.now() + (kind === "quick" ? (battery.id === "b_pack_006" ? degradedMockDurationMs : 180_000) : 21_600_000)).toISOString(), loadTargetA: kind === "quick" ? 0.5 : body.dischargeCurrentA ?? 1, loadActualA: kind === "quick" ? 0.48 : body.dischargeCurrentA ?? 1, socHintLevel: kind === "quick" ? body.socHintLevel as 1 | 2 | 3 | 4 | null : null, partialMetrics: kind === "quick" ? { vLightLoadV: 5.06, regulationKneeA: null, thermalSlopeCPerMin: null, specAttainmentPct: null } : { deliveredWh: null, specAttainmentPct: null }, quick: null, capacity: null };
   activeDiagnosis = diagnosis;
   return HttpResponse.json(diagnosis, { status: 202 });
 };
@@ -252,7 +262,7 @@ export const handlers = [
     }
     return HttpResponse.json({ id: notice.id, category: notice.category, title: notice.title, body: notice.body, publishedAt: notice.publishedAt });
   }),
-  http.get("/api/diagnosis/active", () => HttpResponse.json(activeDiagnosis)),
+  http.get("/api/diagnosis/active", () => { completeDegradedMockDiagnosis(); return HttpResponse.json(activeDiagnosis); }),
   http.post("/api/diagnosis/quick", ({ request }) => startDiagnosis("quick", request)),
   http.post("/api/diagnosis/capacity", ({ request }) => startDiagnosis("capacity", request)),
   http.delete("/api/diagnosis/active", () => { if (!activeDiagnosis) return bad(409, "NO_DIAGNOSIS_IN_PROGRESS"); const aborted: Diagnosis = { ...activeDiagnosis, status: "ABORTED", abortReason: "USER" }; diagnosisHistory[aborted.batteryId] = [aborted, ...(diagnosisHistory[aborted.batteryId] ?? [])]; activeDiagnosis = null; return HttpResponse.json(aborted); }),
