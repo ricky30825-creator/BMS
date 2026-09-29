@@ -1,0 +1,10 @@
+# 원자료·산출물은 git 에 넣지 않는다 (run 하나가 12~56 MB)
+*.csv
+!ai_results/*.csv
+*.bak*
+__pycache__/
+*.pt
+*.npz
+*.log
+*.out
+.env*
