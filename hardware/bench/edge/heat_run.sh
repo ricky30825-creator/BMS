@@ -262,7 +262,9 @@ cmd_watch() {
         L=$(tail -n1 ~/temp_logger.out 2>/dev/null)
         near=$(echo "$L" | sed -n 's/.*셀= *\([0-9.-]*\).*/\1/p')
         far=$(echo  "$L" | sed -n 's/.*실온= *\([0-9.-]*\).*/\1/p')
-        ir=$(echo   "$L" | sed -n 's/.*IR= *\([0-9.-]*\).*/\1/p')
+        # 온도 로그의 IR= 은 0x5B 단독이다. 겨냥이 run 마다 뒤집히므로(핵심 발견 10)
+        # 경고는 mlx_fast_log 가 기록한 temp_ir_surface(= max(5a,5b), 7번째 열)로 판정한다.
+        ir=$(tail -n1 ~/${PREFIX}_mlx01.csv 2>/dev/null | awk -F, 'NF>=7 && $7 ~ /^-?[0-9]+(\.[0-9]+)?$/ {print $7}')
         printf '%s  근처 %-6s 먼(실온) %-6s IR표면 %-6s' "$(date +%T)" "${near:---}" "${far:---}" "${ir:---}"
         if [ -n "$ir" ] && awk -v a="$ir" -v b="$WARN_C" 'BEGIN{exit !(a>=b)}'; then
             printf '   !!! %sC 초과 — 가열을 멈추세요\a' "$WARN_C"
