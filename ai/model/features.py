@@ -23,12 +23,29 @@ from .preprocess import FEATURES
 CORE = ["voltage_v", "current_discharge_a", "power_discharge_w", "cell_temp_c", "ir_a_temp_c", "ir_b_temp_c"]
 CONTEXT, HISTORY, PREDICTION = 5, 96, 32
 TOTAL = CONTEXT + HISTORY + PREDICTION
-FEATURE_SETS = ["absolute6", "local_relative6", "local_relative_rate12"]
+# mode 2 has no contact probe (the backend contract forbids temp_contact),
+# so cell_temp_c can never arrive at inference. Training with it would be
+# train/serve skew: the model leans on a channel that is always missing in
+# production. CORE5 drops it so the training input equals the serving input.
+CORE5 = [name for name in CORE if name != "cell_temp_c"]
+FEATURE_SETS = ["absolute6", "local_relative6", "local_relative_rate12",
+                "local_relative5"]
 FEATURE_NAMES = {
     "absolute6": CORE,
     "local_relative6": [f"rel_{name}" for name in CORE],
     "local_relative_rate12": [f"rel_{name}" for name in CORE] + [f"rate5_{name}" for name in CORE],
+    "local_relative5": [f"rel_{name}" for name in CORE5],
 }
+
+# Columns whose finiteness gates window eligibility. Narrowed to CORE5 by
+# set_active_core() so a run without the contact probe is still usable.
+ACTIVE_CORE = list(CORE)
+
+
+def set_active_core(names):
+    """Restrict eligibility/finiteness checks to these core channels."""
+    global ACTIVE_CORE
+    ACTIVE_CORE = list(names)
 
 
 def eligibility(frame: pd.DataFrame, calibration_seconds: int = 30) -> np.ndarray:
@@ -41,7 +58,7 @@ def eligibility(frame: pd.DataFrame, calibration_seconds: int = 30) -> np.ndarra
     times = pd.to_datetime(frame.timestamp)
     if not times.diff().iloc[1:].eq(pd.Timedelta(seconds=1)).all():
         raise ValueError("Expected a strictly continuous one-second processed grid")
-    valid = frame.phase.eq("active") & ~frame.data_gap_flag & np.isfinite(frame[FEATURES]).all(axis=1)
+    valid = frame.phase.eq("active") & ~frame.data_gap_flag & np.isfinite(frame[ACTIVE_CORE]).all(axis=1)
     consecutive = valid.rolling(calibration_seconds, min_periods=calibration_seconds).sum().eq(calibration_seconds)
     if not consecutive.any():
         raise ValueError(f"No valid consecutive {calibration_seconds}-second interval")
@@ -55,7 +72,8 @@ def run_windows(frame: pd.DataFrame, stride: int = 10) -> tuple[np.ndarray, np.n
     """All physical windows of one processed run: (n, 133, 10) and start indices."""
     values = frame[FEATURES].to_numpy(dtype=np.float32)
     values[:, FEATURES.index("power_discharge_w")] = values[:, 0] * values[:, 1]
-    good = eligibility(frame) & np.isfinite(values).all(axis=1)
+    active_idx = [FEATURES.index(name) for name in ACTIVE_CORE]
+    good = eligibility(frame) & np.isfinite(values[:, active_idx]).all(axis=1)
     cumulative = np.r_[0, np.cumsum(~good)]
     index = np.arange(CONTEXT, len(frame) - (HISTORY + PREDICTION) + 1, stride)
     index = index[(cumulative[index + HISTORY + PREDICTION] - cumulative[index - CONTEXT]) == 0]
@@ -85,14 +103,15 @@ def physical_windows(processed_dir: Path, pattern: str = "*_run_*.csv", stride: 
 
 def transform(raw: np.ndarray, feature_set: str) -> np.ndarray:
     """(n, 133, 10) physical windows -> (n, 128, k) model input."""
-    core = raw[:, :, [FEATURES.index(name) for name in CORE]]
+    channels = CORE5 if feature_set == "local_relative5" else CORE
+    core = raw[:, :, [FEATURES.index(name) for name in channels]]
     base = np.median(core[:, CONTEXT : CONTEXT + 16], axis=1, keepdims=True)
     denominator = np.ones_like(base)
     denominator[:, :, :3] = np.maximum(np.abs(base[:, :, :3]), [0.1, 0.1, 0.5])
     relative = (core[:, CONTEXT:] - base) / denominator
     if feature_set == "absolute6":
         return core[:, CONTEXT:].copy()
-    if feature_set == "local_relative6":
+    if feature_set in ("local_relative6", "local_relative5"):
         return relative
     if feature_set == "local_relative_rate12":
         rate = (core[:, CONTEXT:] - core[:, :-CONTEXT]) / float(CONTEXT) / denominator

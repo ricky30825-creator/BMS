@@ -128,6 +128,17 @@ class RuntimeTests(unittest.TestCase):
         self.assertNotIn("battery_id", anomaly)
         self.assertNotIn("session_id", anomaly)
 
+    def test_adapter_returning_none_commits_without_publishing(self) -> None:
+        directory, service, adapter, consumer, producer = service_fixture()
+        adapter.infer = lambda frame: None
+        with directory:
+            result = asyncio.run(service.process_message(raw_message()))
+        self.assertEqual(consumer.commits, [("battery-raw-metrics", 2, "8")])
+        self.assertEqual(producer.publishes, [])
+        self.assertIsNone(result.output_payload)
+        self.assertIsNone(result.output_topic)
+        self.assertEqual(result.committed_offset, "8")
+
     def test_publish_failure_does_not_commit_and_retry_reuses_result(self) -> None:
         directory, service, adapter, consumer, producer = service_fixture(fail_publish_once=True)
         with directory:
