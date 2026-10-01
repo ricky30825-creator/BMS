@@ -1,4 +1,6 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect } from "react";
+import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
+import { appendDashboardTrendPoint, sessionTrendPoints } from "../dashboardTrend";
 import { api, idempotencyKey } from "./client";
 import { normalizeBattery, normalizeDashboard, type DashboardMetricParam } from "./normalize";
 import type { AdminBatteryDetail, AdminBatteryListItem, AdminEventTrend, AdminEventTrendPeriod, AdminMemoMutationResponse, AdminNotice, AdminStatusMutationResponse, Alert, AnomalySummary, ApiUser, AuditEntry, Battery, BatteryEvent, Dashboard, Diagnosis, DiagnosisListItem, Evidence, MeResponse, NoticeSummary, Relay, RelayHistory, TrendResponse } from "../types";
@@ -33,6 +35,28 @@ export function useMe(enabled = true) { return useQuery({ queryKey: keys.me, que
 export function useBatteries(enabled = true) { return useQuery({ queryKey: keys.batteries, queryFn: async () => { const result = await api.get<{ items: Battery[]; page: { number: number; size: number; total: number; totalPages: number } }>("/api/batteries", { size: 100 }); return { ...result, items: result.items.map(normalizeBattery) }; }, enabled, refetchInterval: enabled ? 4_000 : false }); }
 export function useBattery(id: string | undefined, enabled = true) { return useQuery({ queryKey: id ? keys.battery(id) : ["battery", "none"], queryFn: async () => normalizeBattery(await api.get<Battery>(`/api/batteries/${id}`)), enabled: Boolean(id) && enabled }); }
 export function useDashboard(enabled = true, metric?: DashboardMetricParam) { return useQuery({ queryKey: keys.dashboard, queryFn: async () => normalizeDashboard(await api.get<Record<string, unknown>>("/api/dashboard", metric ? { metric } : undefined)), enabled, retry: false }); }
+
+const quickMetrics: DashboardMetricParam[] = ["volt", "curr", "temp", "soc"];
+export function useQuickMetricTrends(snapshot: Dashboard | undefined | null, sessionId?: string) {
+  const qc = useQueryClient();
+  const queries = useQueries({ queries: quickMetrics.map((metric) => ({
+    queryKey: ["quick-metric-trend", sessionId, metric],
+    enabled: Boolean(sessionId), retry: false,
+    queryFn: async () => {
+      const data = normalizeDashboard(await api.get<Record<string, unknown>>("/api/dashboard", { metric }));
+      return data.session.id === sessionId && data.quickTrend?.metric === metric ? data.quickTrend : { metric, points: [] };
+    },
+  })) });
+  useEffect(() => {
+    if (!snapshot || snapshot.session.id !== sessionId || snapshot.session.measurementPhase !== "MEASURING") return;
+    for (const metric of quickMetrics) {
+      qc.setQueryData<Dashboard["quickTrend"]>(["quick-metric-trend", sessionId, metric], (current) =>
+        appendDashboardTrendPoint(current, snapshot.metrics, metric, snapshot.session.startedAt));
+    }
+  }, [qc, sessionId, snapshot]);
+  return Object.fromEntries(quickMetrics.map((metric, index) => [metric,
+    sessionTrendPoints(snapshot?.quickTrend?.metric === metric ? snapshot.quickTrend.points : queries[index].data?.points, snapshot?.session.startedAt)])) as Record<DashboardMetricParam, Array<{ at: string; value: number | null }>>;
+}
 export function useRelay(enabled = true) { return useQuery({ queryKey: keys.relay, queryFn: () => api.get<Relay>("/api/relay"), enabled, retry: false }); }
 export function useRelayHistory(enabled = true) { return useQuery({ queryKey: ["relay-history"], queryFn: () => api.get<{ items: RelayHistory[] }>("/api/relay/history"), enabled }); }
 export function useAnomalySummary(enabled = true) { return useQuery({ queryKey: keys.anomalySummary, queryFn: () => api.get<AnomalySummary>("/api/anomaly/summary"), enabled }); }

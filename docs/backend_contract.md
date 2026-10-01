@@ -927,6 +927,7 @@ WebSocket 연결 **전에** 화면을 채우기 위한 1회 조회. 이후 갱�
 - `aeScore`/`informerScore`는 이중 모델 개별 점수 `[PLAN: S-FGKMXE]`. v3 화면에는 없다. 없으면 `null`.
 - `notices`는 대시보드 하단 공지 3건 `[v3]` `[REQ-WEB-028]`. §1.9 `NoticeSummary` 타입.
 - `quickTrend.metric`은 `volt|curr|temp|soc` 중 프론트가 선택 `[v3: dMetric]` `[REQ-WEB-024]`. 쿼리 `?metric=temp`로 지정.
+- 빠른 추세 카드 네 개는 같은 활성 세션에서 `?metric=volt|curr|temp|soc`를 각각 조회해 초기 시계열을 확보하고, 이후 수신한 측정값을 지표별 캐시에 추가한다. 상세 차트의 선택 지표와 독립적으로 표시하며 응답 스키마는 기존 `quickTrend`를 유지한다. 세션 변경 시 캐시를 분리하고 이전 세션 표본을 사용하지 않는다.
 
 > **임계치 설정 API는 없다.** v3 코드에 `T.thWatch/thWarn/thDanger/tempCap` 라벨이 남아 있지만 설정 화면에 렌더링되지 않으며(탭은 `알림 수신 / 계정 정보 / 테마·캘리브레이션` 3개뿐), **임계치 설정 기능은 제거하기로 결정되었다.** 등급 임계값은 §1.6의 고정값(0.3/0.6/0.8)이다.
 

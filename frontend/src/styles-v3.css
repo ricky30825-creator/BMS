@@ -280,3 +280,19 @@
 .dashboard-heat-rise strong { font-size: 20px; letter-spacing: -.03em; font-variant-numeric: tabular-nums; }
 .dashboard-heat-rise em { margin-left: 3px; color: var(--fg-muted); font-size: 12px; font-style: normal; }
 @media (max-width: 640px) { .dashboard-heat-rise { gap: 9px; padding: 12px; } .dashboard-heat-rise strong { font-size: 17px; } }
+
+/* Shared mode illustrations and visible quick trends. */
+.battery-illustration { display: block; width: 48px; height: 48px; flex: 0 0 auto; object-fit: contain; border-radius: 8px; }
+.battery-icon, .dashboard-battery-icon, .confirm-icon { width: 52px; height: 52px; flex: 0 0 52px; background: transparent; }
+.battery-mode-picker { grid-column: 1 / -1; min-width: 0; margin: 0; padding: 0; border: 0; }
+.battery-mode-picker legend { margin-bottom: 7px; font-size: 12px; font-weight: 700; }
+.battery-mode-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.battery-mode-option { display: flex; align-items: center; gap: 7px; min-height: 76px; padding: 8px; border: 1px solid var(--border); border-radius: 12px; cursor: pointer; }
+.battery-mode-option.selected { border-color: var(--primary); background: var(--primary-soft); }
+.battery-mode-option:focus-within { outline: 2px solid var(--primary); outline-offset: 2px; }
+.battery-mode-option input { width: 14px; height: 14px; flex: 0 0 auto; accent-color: var(--primary); }
+.battery-mode-option .battery-illustration { width: 34px; height: 44px; }
+.battery-mode-option span { display: flex; flex-direction: column; gap: 3px; }
+.battery-mode-option strong { font-size: 12px; white-space: nowrap; }
+.battery-mode-option small { color: var(--fg-muted); font-size: 11px; white-space: nowrap; }
+.battery-mode-picker:disabled .battery-mode-option { cursor: default; }
