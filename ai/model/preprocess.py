@@ -35,6 +35,8 @@ FEATURES = [
     "ir_diff_5b_c",
 ]
 
+GAP_FEATURES = list(FEATURES)
+
 RUN_PATTERNS = {
     "powerbank": "PB*/run_*/ina.csv",
     "cell": "18650/*/run_*/ina.csv",
@@ -99,9 +101,12 @@ def resample_run(run_dir: Path) -> tuple[pd.DataFrame, dict]:
         elif temp_name in result:
             result[name] = result[temp_name]
 
-    result["is_imputed"] = result[FEATURES].isna().any(axis=1)
+    # GAP_FEATURES 는 보통 FEATURES 와 같다. --core5 를 주면 cell_temp_c 가
+    # 빠진다: mode 2 는 계약상 접촉 프로브가 없어 그 열이 영영 결측이고,
+    # 그걸 공백으로 세면 run 전체가 버려진다.
+    result["is_imputed"] = result[GAP_FEATURES].isna().any(axis=1)
     result[FEATURES] = result[FEATURES].interpolate(limit=2, limit_direction="both")
-    result["data_gap_flag"] = result[FEATURES].isna().any(axis=1)
+    result["data_gap_flag"] = result[GAP_FEATURES].isna().any(axis=1)
 
     result["phase"] = "idle"
     active = result["current_discharge_a"] > 0.10
@@ -137,7 +142,15 @@ def main() -> None:
     parser.add_argument("--data-root", type=Path, required=True, help="folder containing PB*/ and 18650/")
     parser.add_argument("--output", type=Path, required=True, help="processed CSV output folder")
     parser.add_argument("--battery-type", choices=sorted(RUN_PATTERNS), default="powerbank")
+    parser.add_argument("--core5", action="store_true",
+                        help="exclude cell_temp_c from gap detection (mode 2 has no contact probe)")
     args = parser.parse_args()
+    if args.core5:
+        global GAP_FEATURES
+        # delta_c(= 셀 − 실온) 도 접촉 프로브에서 나오므로 같이 빠진다.
+        CONTACT_DERIVED = {"cell_temp_c", "delta_c"}
+        GAP_FEATURES = [n for n in FEATURES if n not in CONTACT_DERIVED]
+        print("core5: gap detection ignores cell_temp_c")
     args.output.mkdir(parents=True, exist_ok=True)
 
     metadata = []
