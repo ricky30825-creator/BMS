@@ -1,4 +1,4 @@
-import cellImage from "../assets/li-ion-cell.webp";
+import cellImage from "../assets/li-ion-cell.png";
 import powerBankImage from "../assets/power-bank.webp";
 
 export function BatteryIllustration({ mode }: { mode: 1 | 2 }) {
