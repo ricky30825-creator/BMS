@@ -3,7 +3,7 @@
 `STATE_20260929.md` §5 의 3번(「번들 형식 연결(`adapter.py`)」)을 위해 코드를 대조한 결과다.
 대상: `ai/bundle.py`·`ai/contracts.py`·`ai/inference.py`(main) 와
 `ai/model/{features,preprocess,predict,scoring,adapter}.py`(`feat/mode2-5feature`, 45e752d).
-**코드는 아직 바꾸지 않았다.** 아래 §2 의 결정이 나기 전에 배선하면 조용히 틀린 점수가 나간다.
+**2026-09-29 갱신: §2 의 권고 A–D 를 그대로 채택해 구현했다**(`ai/model/export_bundle.py`, `adapter.py`, `scoring.wire_score`, 테스트 `ai/model/tests/test_adapter.py`). 결정 B(32초 지연)는 문구 명시로 처리했고, §2-5 의 `bundle.py` 계약 변경은 하지 않았다(스칼라는 상수 벡터로 저장). 실제 학습 산출물로는 미검증.
 
 ## 1. 형식이 안 맞는 곳 (사실)
 
