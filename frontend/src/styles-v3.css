@@ -283,6 +283,7 @@
 
 /* Shared mode illustrations and visible quick trends. */
 .battery-illustration { display: block; width: 48px; height: 48px; flex: 0 0 auto; object-fit: contain; border-radius: 8px; }
+.battery-illustration-cell { transform: scale(.75); }
 .battery-icon, .dashboard-battery-icon, .confirm-icon { width: 52px; height: 52px; flex: 0 0 52px; background: transparent; }
 .battery-mode-picker { grid-column: 1 / -1; min-width: 0; margin: 0; padding: 0; border: 0; }
 .battery-mode-picker legend { margin-bottom: 7px; font-size: 12px; font-weight: 700; }
