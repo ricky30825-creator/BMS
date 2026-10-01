@@ -389,6 +389,22 @@ export function useRealtime({ enabled, sessionKey, onAutoCut, onSessionEnded, on
       }
     };
 
+    if (import.meta.env.DEV && import.meta.env.VITE_USE_MOCKS === "true" && import.meta.env.VITE_DEMO_AUTO_MEASURE === "true" && new URLSearchParams(window.location.search).get("mock") !== "0") {
+      let fetching = false;
+      const pollMockSnapshot = async () => {
+        if (disposed || fetching) return;
+        fetching = true;
+        try {
+          const snapshot = await fetchSnapshot();
+          if (!disposed) { setLastAt(snapshot.metrics.measuredAt); setState("live"); }
+        } catch {
+          if (!disposed) setState("offline");
+        } finally { fetching = false; }
+      };
+      void pollMockSnapshot();
+      const mockInterval = window.setInterval(() => { void pollMockSnapshot(); }, 1_000);
+      return () => { disposed = true; window.clearInterval(mockInterval); clearTimers(); };
+    }
     void connect("initial");
     return () => { disposed = true; clearTimers(); socketRef.current?.close(); socketRef.current = null; };
   }, [enabled, queryClient, sessionKey]);

@@ -221,31 +221,51 @@ export const handlers = [
     battery.latest.measuredAt = new Date(Math.max(Date.now(), startedMs + 1)).toISOString();
     return HttpResponse.json({ ok: true, measuredAt: battery.latest.measuredAt });
   }),
-  http.get("/api/dashboard", () => {
+  http.get("/api/dashboard", ({ request }) => {
     if (hasTestFault("dashboard-shape")) return HttpResponse.json({});
     if (!session) return bad(409, "NO_ACTIVE_SESSION");
     const battery = currentBattery();
+    const requestedMetric = new URL(request.url).searchParams.get("metric") ?? "temp";
+    const metric = ["volt", "curr", "temp", "soc"].includes(requestedMetric) ? requestedMetric : "temp";
+    const base = battery.latest;
+    const sessionStartMs = Date.parse(session.startedAt);
+    // Generated UI examples stay inside the active session's time range.
+    const endMs = Math.max(Date.now(), sessionStartMs + 1);
+    const startMs = Math.max(sessionStartMs + 1, endMs - 23_000);
+    const frames = demoAutoMeasure && base ? Array.from({ length: 24 }, (_, index) => {
+      const atMs = startMs + (endMs - startMs) * index / 23;
+      const wave = Math.sin((atMs - sessionStartMs) / 3_000);
+      return {
+        at: new Date(atMs).toISOString(),
+        volt: base.voltageV == null ? null : Number((base.voltageV + wave * .04).toFixed(2)),
+        curr: base.currentA == null ? null : Number((base.currentA + wave * .08).toFixed(2)),
+        temp: base.representativeTempC == null ? null : Number((base.representativeTempC + wave * .6).toFixed(1)),
+        soc: base.socPct,
+      };
+    }) : [];
+    const frame = frames.at(-1);
+    const quickTrend = frames.length ? { metric, points: frames.map((item) => ({ at: item.at, value: item[metric as "volt" | "curr" | "temp" | "soc"] })) } : undefined;
     const latest = battery.latest;
     const metrics = latest ? {
-      voltageV: { value: latest.voltageV, status: null },
-      currentA: { value: latest.currentA, status: null },
-      powerW: { value: latest.powerW ?? null, status: null },
-      tempContact: { value: latest.tempContact ?? null, status: metricStatus(latest.tempContact ?? null) },
-      tempIrSurface: { value: latest.tempIrSurface ?? null, status: metricStatus(latest.tempIrSurface ?? null) },
-      representativeTempC: { value: latest.representativeTempC, source: latest.representativeTempSource, status: metricStatus(latest.representativeTempC) },
+      voltageV: { value: frame?.volt ?? latest.voltageV, status: null },
+      currentA: { value: frame?.curr ?? latest.currentA, status: null },
+      powerW: { value: frame?.volt != null && frame.curr != null ? Number((frame.volt * frame.curr).toFixed(2)) : latest.powerW ?? null, status: null },
+      tempContact: { value: battery.targetMode === 1 ? frame?.temp ?? latest.tempContact ?? null : latest.tempContact ?? null, status: metricStatus(latest.tempContact ?? null) },
+      tempIrSurface: { value: battery.targetMode === 2 ? frame?.temp ?? latest.tempIrSurface ?? null : latest.tempIrSurface ?? null, status: metricStatus(latest.tempIrSurface ?? null) },
+      representativeTempC: { value: frame?.temp ?? latest.representativeTempC, source: latest.representativeTempSource, status: metricStatus(frame?.temp ?? latest.representativeTempC) },
       // Fixture room temperature; heat rise mirrors the server rule (null without both sides).
       tempAmbientC: { value: MOCK_AMBIENT_C, status: null },
-      heatRiseC: { value: latest.representativeTempC == null ? null : Math.round((latest.representativeTempC - MOCK_AMBIENT_C) * 100) / 100, status: null },
+      heatRiseC: { value: latest.representativeTempC == null ? null : Math.round(((frame?.temp ?? latest.representativeTempC) - MOCK_AMBIENT_C) * 100) / 100, status: null },
       socPct: { value: latest.socPct, status: null },
       socBasis: latest.socBasis ?? null,
-      measuredAt: latest.measuredAt,
+      measuredAt: frame?.at ?? latest.measuredAt,
     } : {
       voltageV: { value: null, status: null }, currentA: { value: null, status: null }, powerW: { value: null, status: null },
       tempContact: { value: null, status: null }, tempIrSurface: { value: null, status: null }, representativeTempC: { value: null, source: null, status: null },
       tempAmbientC: { value: null, status: null }, heatRiseC: { value: null, status: null },
       socPct: { value: null, status: null }, socBasis: null, measuredAt: null,
     };
-    return HttpResponse.json({ session: sessionForResponse(), battery, metrics, anomaly: latest ? { score: latest.score, grade: latest.grade, evaluatedAt: latest.measuredAt ?? undefined } : { score: null, grade: null }, relay, notices: publicNotices().slice(0, 3), snapshotCursor: "1" });
+    return HttpResponse.json({ session: sessionForResponse(), battery, metrics, quickTrend, anomaly: latest ? { score: latest.score, grade: latest.grade, evaluatedAt: latest.measuredAt ?? undefined } : { score: null, grade: null }, relay, notices: publicNotices().slice(0, 3), snapshotCursor: "1" });
   }),
   http.get("/api/relay", () => session ? HttpResponse.json({ ...relay, batteryId: session.batteryId }) : bad(409, "NO_ACTIVE_SESSION")),
   http.get("/api/relay/history", () => HttpResponse.json({ items: [] })),
