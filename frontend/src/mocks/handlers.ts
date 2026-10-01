@@ -28,6 +28,19 @@ batteries.forEach((battery) => { battery.adminMemo ??= ""; });
 const demoUser: NonNullable<MeResponse["user"]> = { id: "u_hong", loginId: "hong", name: "홍길동", email: "hong@cellguard.io", phone: "010-1234-5678", role: "USER", status: "ACTIVE" };
 let currentUser: MeResponse["user"] = null;
 let session: MeResponse["activeSession"] = null;
+const demoAutoMeasure = import.meta.env.DEV && import.meta.env.VITE_DEMO_AUTO_MEASURE === "true";
+function ensureDemoMeasurement(battery: Battery): NonNullable<Battery["latest"]> {
+  if (battery.latest) return battery.latest;
+  const mode2 = battery.targetMode === 2;
+  return {
+    ...baseMetric(mode2 ? .58 : .18, mode2 ? 42 : 31.2, mode2 ? null : 78),
+    ...(mode2 ? {
+      voltageV: 5.1, currentA: -1.2, powerW: -6.12,
+      representativeTempSource: "IR_SURFACE" as const,
+      tempContact: null, tempIrSurface: 42, socBasis: null,
+    } : {}),
+  };
+}
 let currentPassword = "demo-password";
 let alertChannels: AlertChannels = { KAKAO: true, EMAIL: true, SMS: false, WEBPUSH: false };
 let activeDiagnosis: Diagnosis | null = null;
@@ -187,6 +200,10 @@ export const handlers = [
     if (hasTestFault("session-start-failed") || hasTestFault("session-offline")) return bad(409, "DEVICE_OFFLINE");
     if (hasTestFault("session-timeout")) return bad(504, "DEVICE_OFFLINE");
     session = { id: `s_${randomId()}`, batteryId: battery.id, batteryLabel: battery.label, deviceId: "d_demo", mode: battery.targetMode, targetMode: battery.targetMode, status: "ACTIVE", startedAt: now(), measurementPhase: "WAITING_FOR_MEASUREMENT" };
+    if (demoAutoMeasure) {
+      battery.latest = ensureDemoMeasurement(battery);
+      battery.latest.measuredAt = new Date(Date.parse(session.startedAt) + 1).toISOString();
+    }
     return HttpResponse.json(sessionForResponse(), { status: 201 });
   }),
   // Test-only sensor injection makes the transition explicit. The default

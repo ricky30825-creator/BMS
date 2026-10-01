@@ -10,7 +10,7 @@ async function start() {
   const mockRequested = mockParam === "1"
     || (__CELLGUARD_DEV_SERVER__ && import.meta.env.VITE_USE_MOCKS !== "false" && mockParam !== "0");
 
-  // Vite injects this as true only for `serve` in development mode. Every
+  // Vite injects this as true only for `serve` in development/mockup mode. Every
   // `build` command removes this branch, regardless of mode or NODE_ENV.
   if (__CELLGUARD_DEV_SERVER__ && mockRequested) {
     const { worker } = await import("./mocks/browser");

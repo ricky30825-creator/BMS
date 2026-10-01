@@ -15,6 +15,19 @@ Kafka가 준비되지 않으면 백엔드는 listen하지 않고, 메모리 데�
 
 ## A. 화면 데모 (기존 경로)
 
+### 프론트 수정용 MSW 목업
+
+`codex/frontend-mockup`은 로컬 `main`에서 분기한 프론트 수정용 브랜치다.
+`npm --prefix frontend run dev:mockup`으로 실행하고 `http://localhost:5173`을 연다.
+임의의 비어 있지 않은 이메일·비밀번호로 로그인하고 자산을 연결하면
+목업 측정값으로 대시보드를 검토할 수 있다. `lee@lab.io`는 관리자 목업이다.
+이 경로는 백엔드·장비 없이 동작하는 MSW 예시이며 실제 센서 수신을 증명하지 않는다.
+기본 `dev`의 측정 대기 흐름과 `dev:real`의 실제 REST/WS 경로는 유지한다.
+프론트 수정 완료 후 검증하여 `main`에 병합하고, 목업 자동 측정 설정은
+최종 병합 범위를 검토할 때 별도로 확인한다.
+
+### 백엔드 메모리 데모
+
 최초 1회 `backend\\.env.example`을 `backend\\.env`로 복사하고
 `BETTER_AUTH_SECRET`을 32자 이상 무작위 문자열로 채운다. `DATABASE_URL`은
 memory 모드에서 접속하지 않지만 비어 있으면 안 된다.
