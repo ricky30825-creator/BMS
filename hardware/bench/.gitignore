@@ -9,3 +9,6 @@ __pycache__/
 *.out
 .env*
 !raw_data/MANIFEST.csv
+
+# 가열 run 결과 (작은 파생 파일만)
+!heat_runs/**/*.csv
