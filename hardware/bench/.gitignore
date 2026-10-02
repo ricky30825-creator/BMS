@@ -8,3 +8,6 @@ __pycache__/
 *.log
 *.out
 .env*
+
+# 가열 run 결과 (작은 파생 파일만)
+!heat_runs/**/*.csv
