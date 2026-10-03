@@ -1,0 +1,97 @@
+{
+  "baseline_version": "0.5.0",
+  "ae": {
+    "id": "ae_local_relative5_e2_global_top5",
+    "model": "ae",
+    "features": "local_relative5",
+    "epoch": 2,
+    "scope": "global",
+    "topk": 5,
+    "threshold": 1.0,
+    "checkpoint": "ae_local_relative5/model_epoch2.pt",
+    "scaler": "ae_local_relative5/metadata_epoch2.json"
+  },
+  "informer": {
+    "id": "informer_local_relative5_e6_global_top2",
+    "model": "informer",
+    "features": "local_relative5",
+    "epoch": 6,
+    "scope": "global",
+    "topk": 2,
+    "threshold": 1.0,
+    "checkpoint": "informer_local_relative5/model_epoch6.pt",
+    "scaler": "informer_local_relative5/metadata_epoch6.json"
+  },
+  "fusion": {
+    "ae": "ae_local_relative5_e2_global_top5",
+    "informer": "informer_local_relative5_e6_global_top2",
+    "kind": "weighted_sum",
+    "alpha_ae": 0.55,
+    "normal_far": 0.010013768932281888,
+    "tpr": 0.746474358974359,
+    "auc": 0.9859926389169724,
+    "precision": 0.9357171554841301,
+    "f1": 0.8304510607951507,
+    "threshold": 1.0368869525772537
+  },
+  "ae_calibration": {
+    "global": {
+      "median": [
+        0.006848277524113655,
+        0.09611006081104279,
+        0.05349760502576828,
+        0.22657188773155212,
+        0.36386919021606445
+      ],
+      "spread": [
+        0.19467730820178986,
+        0.21310029923915863,
+        0.12900656461715698,
+        0.4025638997554779,
+        0.4137859344482422
+      ],
+      "score_q99": 12.355968837737993
+    }
+  },
+  "informer_calibration": {
+    "global": {
+      "median": [
+        0.007397117558866739,
+        0.09375251829624176,
+        0.05042906105518341,
+        0.24639874696731567,
+        0.3852788507938385
+      ],
+      "spread": [
+        0.20207761228084564,
+        0.29307854175567627,
+        0.1683906614780426,
+        0.6351174116134644,
+        0.6152806282043457
+      ],
+      "score_q99": 26.39332794189451
+    }
+  },
+  "standalone_ae": {
+    "id": "ae_local_relative5_e6_global_top1",
+    "model": "ae",
+    "features": "local_relative5",
+    "epoch": 6,
+    "scope": "global",
+    "topk": 1,
+    "threshold": 1.0,
+    "checkpoint": "ae_local_relative5/model_epoch6.pt",
+    "scaler": "ae_local_relative5/metadata_epoch6.json"
+  },
+  "standalone_informer": {
+    "id": "informer_local_relative5_e6_global_top1",
+    "model": "informer",
+    "features": "local_relative5",
+    "epoch": 6,
+    "scope": "global",
+    "topk": 1,
+    "threshold": 1.0,
+    "checkpoint": "informer_local_relative5/model_epoch6.pt",
+    "scaler": "informer_local_relative5/metadata_epoch6.json"
+  }
+}

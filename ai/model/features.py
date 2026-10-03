@@ -101,9 +101,14 @@ def physical_windows(processed_dir: Path, pattern: str = "*_run_*.csv", stride: 
     return np.concatenate(arrays), np.array(ids), np.array(starts)
 
 
+def channels_for(feature_set: str) -> list[str]:
+    """Physical channels a feature set reads (the rest of FEATURES may be NaN)."""
+    return CORE5 if feature_set == "local_relative5" else CORE
+
+
 def transform(raw: np.ndarray, feature_set: str) -> np.ndarray:
     """(n, 133, 10) physical windows -> (n, 128, k) model input."""
-    channels = CORE5 if feature_set == "local_relative5" else CORE
+    channels = channels_for(feature_set)
     core = raw[:, :, [FEATURES.index(name) for name in channels]]
     base = np.median(core[:, CONTEXT : CONTEXT + 16], axis=1, keepdims=True)
     denominator = np.ones_like(base)
