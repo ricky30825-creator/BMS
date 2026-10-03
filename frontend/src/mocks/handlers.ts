@@ -21,18 +21,35 @@ const batteries: Battery[] = [
   { id: "b_pack_002", label: "PACK-002", chemistry: "LI_PO", seriesCount: null, maker: null, model: "37Wh USB", targetMode: 2, capacityWh: 37, ratedOutputCurrentA: 2, opsStatus: "WATCH", latest: { ...baseMetric(.58, 47, null), voltageV: 5.1, currentA: -1.2, powerW: -6.12, representativeTempSource: "IR_SURFACE", tempContact: null, tempIrSurface: 47, socBasis: null }, health: null, diagnosisCapability: { executionAllowed: true, reasonCode: null } },
   { id: "b_pack_003", label: "PACK-003", chemistry: "LI_ION", seriesCount: 3, maker: "CellGuard Lab", model: "3S bench pack", targetMode: 1, capacityWh: null, ratedOutputCurrentA: null, opsStatus: "NORMAL", latest: null, health: null, diagnosisCapability: { executionAllowed: false, reasonCode: "MODE_NOT_SUPPORTED" } },
   { id: "b_pack_004", label: "PACK-004", chemistry: "LI_PO", seriesCount: null, maker: "CellGuard Lab", model: "Validated Mode 2", targetMode: 2, capacityWh: 37, ratedOutputCurrentA: 2, opsStatus: "NORMAL", latest: { ...baseMetric(.24, 42, null), voltageV: 5.05, currentA: -1, powerW: -5.05, representativeTempSource: "IR_SURFACE", tempContact: null, tempIrSurface: 42, socBasis: "RELATIVE_SESSION_START" }, health: null, diagnosisCapability: { executionAllowed: true, reasonCode: null } },
+  { id: "b_pack_006", label: "PACK-006", chemistry: "LI_PO", seriesCount: null, maker: "CellGuard Lab", model: "열화 의심 목업 · 37Wh USB", targetMode: 2, capacityWh: 37, ratedOutputCurrentA: 2, opsStatus: "WATCH", latest: { ...baseMetric(.68, 48, null), voltageV: 5.02, currentA: -1, powerW: -5.02, representativeTempSource: "IR_SURFACE", tempContact: null, tempIrSurface: 48, socBasis: "RELATIVE_SESSION_START" }, health: null, diagnosisCapability: { executionAllowed: true, reasonCode: null } },
 ];
 batteries[0].adminMemo = "기존 관리자 메모";
 batteries.forEach((battery) => { battery.adminMemo ??= ""; });
 const demoUser: NonNullable<MeResponse["user"]> = { id: "u_hong", loginId: "hong", name: "홍길동", email: "hong@cellguard.io", phone: "010-1234-5678", role: "USER", status: "ACTIVE" };
 let currentUser: MeResponse["user"] = null;
 let session: MeResponse["activeSession"] = null;
+const demoAutoMeasure = import.meta.env.DEV && import.meta.env.VITE_DEMO_AUTO_MEASURE === "true";
+function ensureDemoMeasurement(battery: Battery): NonNullable<Battery["latest"]> {
+  if (battery.latest) return battery.latest;
+  const mode2 = battery.targetMode === 2;
+  return {
+    ...baseMetric(mode2 ? .58 : .18, mode2 ? 42 : 31.2, mode2 ? null : 78),
+    ...(mode2 ? {
+      voltageV: 5.1, currentA: -1.2, powerW: -6.12,
+      representativeTempSource: "IR_SURFACE" as const,
+      tempContact: null, tempIrSurface: 42, socBasis: null,
+    } : {}),
+  };
+}
 let currentPassword = "demo-password";
 let alertChannels: AlertChannels = { KAKAO: true, EMAIL: true, SMS: false, WEBPUSH: false };
 let activeDiagnosis: Diagnosis | null = null;
 const completedCapacityDiagnosis: Diagnosis = { id: "dg_pack_004_001", batteryId: "b_pack_004", batteryLabel: "PACK-004", sessionId: "s_history", kind: "CAPACITY", status: "COMPLETED", confidence: "HIGH", startedAt: "2026-07-28T05:20:00.000Z", measuredAt: "2026-07-28T11:40:00.000Z", socHintLevel: null, loadTargetA: null, loadActualA: null, partialMetrics: null, quick: null, capacity: { deliveredWh: 31.2, ratedWh: 37, baselineWh: 34.8, sohRelPct: 89.7, sohAbsPct: 95.8, assumedEfficiency: 0.88, dischargeCurrentA: 1, isBaseline: false, partial: false } };
 export const abnormalQuickDiagnosisFixture: Diagnosis = { id: "dg_pack_004_quick_abnormal", batteryId: "b_pack_004", batteryLabel: "PACK-004", sessionId: "s_history_quick", kind: "QUICK", status: "COMPLETED", dataSource: "MEASURED", confidence: "LOW", startedAt: "2026-08-05T05:20:00.000Z", measuredAt: "2026-08-05T05:22:00.000Z", loadTargetA: 1, loadActualA: 0.72, socHintLevel: 3, partialMetrics: null, quick: { regulationKneeA: 1.2, kneeIsUpperBound: false, thermalSlopeCPerMin: 3.8, specAttainmentPct: 68, grade: "SUSPECT_DEGRADED" }, capacity: null };
-const diagnosisHistory: Record<string, Diagnosis[]> = { b_pack_004: [abnormalQuickDiagnosisFixture, completedCapacityDiagnosis] };
+// Development-only result for the explicitly named degraded mock asset.
+const completedDegradedDiagnosis: Diagnosis = { ...abnormalQuickDiagnosisFixture, id: "dg_pack_006_001", batteryId: "b_pack_006", batteryLabel: "PACK-006", dataSource: "SIMULATED", quick: { regulationKneeA: 1.2, thermalSlopeCPerMin: 2.4, specAttainmentPct: 60, grade: "SUSPECT_DEGRADED" } };
+const degradedMockDurationMs = 8_000;
+const diagnosisHistory: Record<string, Diagnosis[]> = { b_pack_004: [abnormalQuickDiagnosisFixture, completedCapacityDiagnosis], b_pack_006: [completedDegradedDiagnosis] };
 let relay: Relay = { batteryId: "b_pack_001", state: "CLOSED", changedAt: now(), changedBy: { type: "SYSTEM", systemCode: "SYSTEM" }, interlock: { engaged: false, condition: null, canRestore: true } };
 const page = <T>(items: T[]) => ({ items, page: { number: 1, size: items.length || 20, total: items.length, totalPages: items.length ? 1 : 0 } });
 // Test-only MSW fixture. Production event trends are aggregated from PostgreSQL.
@@ -73,6 +90,12 @@ const hasTestFault = (fault: string) => testFault === fault;
 const alertSettings = (): AlertSettings => ({ channels: alertChannels, policy: { sendOn: ["DANGER", "WARNING"], smsOnlyDanger: true, dedupeWindowMinutes: 5 } });
 const diagnosisListItem = (diagnosis: Diagnosis): DiagnosisListItem => ({ id: diagnosis.id, batteryId: diagnosis.batteryId, batteryLabel: diagnosis.batteryLabel, kind: diagnosis.kind, status: diagnosis.status, confidence: diagnosis.confidence, measuredAt: diagnosis.measuredAt, startedAt: diagnosis.startedAt, socHintLevel: diagnosis.socHintLevel, summary: diagnosis.kind === "QUICK" ? { regulationKneeA: diagnosis.quick?.regulationKneeA ?? null, thermalSlopeCPerMin: diagnosis.quick?.thermalSlopeCPerMin ?? null, grade: diagnosis.quick?.grade ?? null } : { sohRelPct: diagnosis.capacity?.sohRelPct ?? null, deliveredWh: diagnosis.capacity?.deliveredWh ?? null } });
 const allDiagnoses = () => Object.values(diagnosisHistory).flat();
+const completeDegradedMockDiagnosis = (): void => {
+  if (!activeDiagnosis || activeDiagnosis.batteryId !== "b_pack_006" || activeDiagnosis.kind !== "QUICK" || Date.now() - Date.parse(activeDiagnosis.startedAt) < degradedMockDurationMs) return;
+  const completed: Diagnosis = { ...activeDiagnosis, status: "COMPLETED", phase: "P7", confidence: "LOW", dataSource: "SIMULATED", measuredAt: now(), estimatedEndAt: null, partialMetrics: { vLightLoadV: 5.06, regulationKneeA: 1.2, thermalSlopeCPerMin: 2.4, specAttainmentPct: 60 }, quick: completedDegradedDiagnosis.quick };
+  diagnosisHistory[completed.batteryId] = [completed, ...(diagnosisHistory[completed.batteryId] ?? [])];
+  activeDiagnosis = null;
+};
 const startDiagnosis = async (kind: "quick" | "capacity", request: Request) => {
   if (!session) return bad(409, "NO_ACTIVE_SESSION");
   const battery = currentBattery();
@@ -85,7 +108,7 @@ const startDiagnosis = async (kind: "quick" | "capacity", request: Request) => {
   if (kind === "quick" && (!("socHintLevel" in body) || (body.socHintLevel !== null && ![1, 2, 3, 4].includes(body.socHintLevel ?? 0)))) return bad(422, "VALIDATION_FAILED");
   if (kind === "capacity" && (typeof body.dischargeCurrentA !== "number" || body.dischargeCurrentA <= 0)) return bad(422, "VALIDATION_FAILED");
   if (kind === "capacity" && body.fullyChargedConfirmed !== true) return bad(400, "FULL_CHARGE_REQUIRED");
-  const diagnosis: Diagnosis = { id: `dg_${randomId()}`, batteryId: battery.id, batteryLabel: battery.label, sessionId: session.id, kind: kind === "quick" ? "QUICK" : "CAPACITY", status: "RUNNING", phase: kind === "quick" ? "P0" : "CAPACITY", startedAt: now(), estimatedEndAt: new Date(Date.now() + (kind === "quick" ? 180_000 : 21_600_000)).toISOString(), loadTargetA: kind === "quick" ? 0.5 : body.dischargeCurrentA ?? 1, loadActualA: kind === "quick" ? 0.48 : body.dischargeCurrentA ?? 1, socHintLevel: kind === "quick" ? body.socHintLevel as 1 | 2 | 3 | 4 | null : null, partialMetrics: kind === "quick" ? { vLightLoadV: 5.06, regulationKneeA: null, thermalSlopeCPerMin: null, specAttainmentPct: null } : { deliveredWh: null, specAttainmentPct: null }, quick: null, capacity: null };
+  const diagnosis: Diagnosis = { id: `dg_${randomId()}`, batteryId: battery.id, batteryLabel: battery.label, sessionId: session.id, kind: kind === "quick" ? "QUICK" : "CAPACITY", status: "RUNNING", phase: kind === "quick" ? "P0" : "CAPACITY", startedAt: now(), estimatedEndAt: new Date(Date.now() + (kind === "quick" ? (battery.id === "b_pack_006" ? degradedMockDurationMs : 180_000) : 21_600_000)).toISOString(), loadTargetA: kind === "quick" ? 0.5 : body.dischargeCurrentA ?? 1, loadActualA: kind === "quick" ? 0.48 : body.dischargeCurrentA ?? 1, socHintLevel: kind === "quick" ? body.socHintLevel as 1 | 2 | 3 | 4 | null : null, partialMetrics: kind === "quick" ? { vLightLoadV: 5.06, regulationKneeA: null, thermalSlopeCPerMin: null, specAttainmentPct: null } : { deliveredWh: null, specAttainmentPct: null }, quick: null, capacity: null };
   activeDiagnosis = diagnosis;
   return HttpResponse.json(diagnosis, { status: 202 });
 };
@@ -177,6 +200,10 @@ export const handlers = [
     if (hasTestFault("session-start-failed") || hasTestFault("session-offline")) return bad(409, "DEVICE_OFFLINE");
     if (hasTestFault("session-timeout")) return bad(504, "DEVICE_OFFLINE");
     session = { id: `s_${randomId()}`, batteryId: battery.id, batteryLabel: battery.label, deviceId: "d_demo", mode: battery.targetMode, targetMode: battery.targetMode, status: "ACTIVE", startedAt: now(), measurementPhase: "WAITING_FOR_MEASUREMENT" };
+    if (demoAutoMeasure) {
+      battery.latest = ensureDemoMeasurement(battery);
+      battery.latest.measuredAt = new Date(Date.parse(session.startedAt) + 1).toISOString();
+    }
     return HttpResponse.json(sessionForResponse(), { status: 201 });
   }),
   // Test-only sensor injection makes the transition explicit. The default
@@ -194,31 +221,51 @@ export const handlers = [
     battery.latest.measuredAt = new Date(Math.max(Date.now(), startedMs + 1)).toISOString();
     return HttpResponse.json({ ok: true, measuredAt: battery.latest.measuredAt });
   }),
-  http.get("/api/dashboard", () => {
+  http.get("/api/dashboard", ({ request }) => {
     if (hasTestFault("dashboard-shape")) return HttpResponse.json({});
     if (!session) return bad(409, "NO_ACTIVE_SESSION");
     const battery = currentBattery();
+    const requestedMetric = new URL(request.url).searchParams.get("metric") ?? "temp";
+    const metric = ["volt", "curr", "temp", "soc"].includes(requestedMetric) ? requestedMetric : "temp";
+    const base = battery.latest;
+    const sessionStartMs = Date.parse(session.startedAt);
+    // Generated UI examples stay inside the active session's time range.
+    const endMs = Math.max(Date.now(), sessionStartMs + 1);
+    const startMs = Math.max(sessionStartMs + 1, endMs - 23_000);
+    const frames = demoAutoMeasure && base ? Array.from({ length: 24 }, (_, index) => {
+      const atMs = startMs + (endMs - startMs) * index / 23;
+      const wave = Math.sin((atMs - sessionStartMs) / 3_000);
+      return {
+        at: new Date(atMs).toISOString(),
+        volt: base.voltageV == null ? null : Number((base.voltageV + wave * .04).toFixed(2)),
+        curr: base.currentA == null ? null : Number((base.currentA + wave * .08).toFixed(2)),
+        temp: base.representativeTempC == null ? null : Number((base.representativeTempC + wave * .6).toFixed(1)),
+        soc: base.socPct,
+      };
+    }) : [];
+    const frame = frames.at(-1);
+    const quickTrend = frames.length ? { metric, points: frames.map((item) => ({ at: item.at, value: item[metric as "volt" | "curr" | "temp" | "soc"] })) } : undefined;
     const latest = battery.latest;
     const metrics = latest ? {
-      voltageV: { value: latest.voltageV, status: null },
-      currentA: { value: latest.currentA, status: null },
-      powerW: { value: latest.powerW ?? null, status: null },
-      tempContact: { value: latest.tempContact ?? null, status: metricStatus(latest.tempContact ?? null) },
-      tempIrSurface: { value: latest.tempIrSurface ?? null, status: metricStatus(latest.tempIrSurface ?? null) },
-      representativeTempC: { value: latest.representativeTempC, source: latest.representativeTempSource, status: metricStatus(latest.representativeTempC) },
+      voltageV: { value: frame?.volt ?? latest.voltageV, status: null },
+      currentA: { value: frame?.curr ?? latest.currentA, status: null },
+      powerW: { value: frame?.volt != null && frame.curr != null ? Number((frame.volt * frame.curr).toFixed(2)) : latest.powerW ?? null, status: null },
+      tempContact: { value: battery.targetMode === 1 ? frame?.temp ?? latest.tempContact ?? null : latest.tempContact ?? null, status: metricStatus(latest.tempContact ?? null) },
+      tempIrSurface: { value: battery.targetMode === 2 ? frame?.temp ?? latest.tempIrSurface ?? null : latest.tempIrSurface ?? null, status: metricStatus(latest.tempIrSurface ?? null) },
+      representativeTempC: { value: frame?.temp ?? latest.representativeTempC, source: latest.representativeTempSource, status: metricStatus(frame?.temp ?? latest.representativeTempC) },
       // Fixture room temperature; heat rise mirrors the server rule (null without both sides).
       tempAmbientC: { value: MOCK_AMBIENT_C, status: null },
-      heatRiseC: { value: latest.representativeTempC == null ? null : Math.round((latest.representativeTempC - MOCK_AMBIENT_C) * 100) / 100, status: null },
+      heatRiseC: { value: latest.representativeTempC == null ? null : Math.round(((frame?.temp ?? latest.representativeTempC) - MOCK_AMBIENT_C) * 100) / 100, status: null },
       socPct: { value: latest.socPct, status: null },
       socBasis: latest.socBasis ?? null,
-      measuredAt: latest.measuredAt,
+      measuredAt: frame?.at ?? latest.measuredAt,
     } : {
       voltageV: { value: null, status: null }, currentA: { value: null, status: null }, powerW: { value: null, status: null },
       tempContact: { value: null, status: null }, tempIrSurface: { value: null, status: null }, representativeTempC: { value: null, source: null, status: null },
       tempAmbientC: { value: null, status: null }, heatRiseC: { value: null, status: null },
       socPct: { value: null, status: null }, socBasis: null, measuredAt: null,
     };
-    return HttpResponse.json({ session: sessionForResponse(), battery, metrics, anomaly: latest ? { score: latest.score, grade: latest.grade, evaluatedAt: latest.measuredAt ?? undefined } : { score: null, grade: null }, relay, notices: publicNotices().slice(0, 3), snapshotCursor: "1" });
+    return HttpResponse.json({ session: sessionForResponse(), battery, metrics, quickTrend, anomaly: latest ? { score: latest.score, grade: latest.grade, evaluatedAt: latest.measuredAt ?? undefined } : { score: null, grade: null }, relay, notices: publicNotices().slice(0, 3), snapshotCursor: "1" });
   }),
   http.get("/api/relay", () => session ? HttpResponse.json({ ...relay, batteryId: session.batteryId }) : bad(409, "NO_ACTIVE_SESSION")),
   http.get("/api/relay/history", () => HttpResponse.json({ items: [] })),
@@ -252,7 +299,7 @@ export const handlers = [
     }
     return HttpResponse.json({ id: notice.id, category: notice.category, title: notice.title, body: notice.body, publishedAt: notice.publishedAt });
   }),
-  http.get("/api/diagnosis/active", () => HttpResponse.json(activeDiagnosis)),
+  http.get("/api/diagnosis/active", () => { completeDegradedMockDiagnosis(); return HttpResponse.json(activeDiagnosis); }),
   http.post("/api/diagnosis/quick", ({ request }) => startDiagnosis("quick", request)),
   http.post("/api/diagnosis/capacity", ({ request }) => startDiagnosis("capacity", request)),
   http.delete("/api/diagnosis/active", () => { if (!activeDiagnosis) return bad(409, "NO_DIAGNOSIS_IN_PROGRESS"); const aborted: Diagnosis = { ...activeDiagnosis, status: "ABORTED", abortReason: "USER" }; diagnosisHistory[aborted.batteryId] = [aborted, ...(diagnosisHistory[aborted.batteryId] ?? [])]; activeDiagnosis = null; return HttpResponse.json(aborted); }),

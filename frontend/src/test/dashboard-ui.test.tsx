@@ -53,6 +53,20 @@ function renderDashboard(data: Dashboard, refetchMetric: (metric: DashboardMetri
 }
 
 describe("dashboard quick metric cards", () => {
+  it("shows all four available metric curves before any selection", () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
+    const data = dashboard();
+    for (const metric of ["volt", "curr", "temp", "soc"] as const) {
+      client.setQueryData(["quick-metric-trend", session.id, metric], { metric, points: [
+        { at: "2026-08-25T00:00:01.000Z", value: 10 },
+        { at: "2026-08-25T00:00:02.000Z", value: 12 },
+      ] });
+    }
+    const { container } = render(<QueryClientProvider client={client}><MemoryRouter>
+      <DashboardPage realtime={{ state: "live", dashboard: data, lastAt: null, refetchMetric: async () => undefined }} me={me} />
+    </MemoryRouter></QueryClientProvider>);
+    expect(container.querySelectorAll(".metric-mini-line")).toHaveLength(4);
+  });
   it("shows discharge current without a sign and states the direction as a label", () => {
     const { container } = renderDashboard(dashboard());
     const currentCard = container.querySelector(".dashboard-metric-card.curr");
@@ -85,7 +99,7 @@ describe("dashboard quick metric cards", () => {
     expect(container.querySelectorAll(".metric-mini-line")).toHaveLength(0);
   });
 
-  it("draws the served series on the card it belongs to and on no other card", () => {
+  it("draws available series only on its matching metric card", () => {
     const data = dashboard({
       quickTrend: {
         metric: "temp",
@@ -104,8 +118,8 @@ describe("dashboard quick metric cards", () => {
   });
 
   it("plots the served values rather than a fixed decorative shape", () => {
-    const rising = dashboard({ quickTrend: { metric: "soc", points: [{ at: "a", value: 10 }, { at: "b", value: 90 }] } });
-    const falling = dashboard({ quickTrend: { metric: "soc", points: [{ at: "a", value: 90 }, { at: "b", value: 10 }] } });
+    const rising = dashboard({ quickTrend: { metric: "soc", points: [{ at: "2026-08-25T00:00:01.000Z", value: 10 }, { at: "2026-08-25T00:00:02.000Z", value: 90 }] } });
+    const falling = dashboard({ quickTrend: { metric: "soc", points: [{ at: "2026-08-25T00:00:01.000Z", value: 90 }, { at: "2026-08-25T00:00:02.000Z", value: 10 }] } });
 
     const risingPoints = renderDashboard(rising).container.querySelector(".metric-mini-line polyline")?.getAttribute("points");
     const fallingPoints = renderDashboard(falling).container.querySelector(".metric-mini-line polyline")?.getAttribute("points");
@@ -116,7 +130,7 @@ describe("dashboard quick metric cards", () => {
   });
 
   it("skips gaps instead of plotting missing samples as zero", () => {
-    const data = dashboard({ quickTrend: { metric: "volt", points: [{ at: "a", value: 11.9 }, { at: "b", value: null }, { at: "c", value: 12.1 }] } });
+    const data = dashboard({ quickTrend: { metric: "volt", points: [{ at: "2026-08-25T00:00:01.000Z", value: 11.9 }, { at: "2026-08-25T00:00:02.000Z", value: null }, { at: "2026-08-25T00:00:03.000Z", value: 12.1 }] } });
     const { container } = renderDashboard(data);
     const points = container.querySelector(".metric-mini-line polyline")?.getAttribute("points");
 
@@ -164,7 +178,7 @@ describe("dashboard trend chart", () => {
     expect(container.querySelector(".score-gauge-value")).toHaveTextContent("18");
   });
 
-  it("freezes only the chart, catches up on resume, and unpauses on metric change", async () => {
+  it("keeps the chart following new samples without pause controls", async () => {
     const user = userEvent.setup();
     const initial = dashboard({ quickTrend: { metric: "temp", points: [{ at: "2026-08-25T00:00:01.000Z", value: 31.2 }] } });
     const { container, rerender } = renderDashboard(initial);
@@ -176,8 +190,7 @@ describe("dashboard trend chart", () => {
       </QueryClientProvider>,
     );
 
-    await user.click(screen.getByRole("button", { name: "차트 일시 정지" }));
-    expect(screen.getByRole("status")).toHaveTextContent("실시간 측정은 계속 수신 중입니다.");
+    expect(screen.queryByRole("button", { name: "차트 일시 정지" })).not.toBeInTheDocument();
 
     const updated = dashboard({
       metrics: { ...initial.metrics, representativeTempC: { value: 34.6, status: "OK", source: "CONTACT" } },
@@ -188,12 +201,9 @@ describe("dashboard trend chart", () => {
     });
     rerenderDashboard(updated);
     expect(container.querySelector(".dashboard-metric-card.temp")).toHaveTextContent("34.6");
-    expect(screen.getByRole("group", { name: /마지막 표시값 31.2 °C/ })).toBeInTheDocument();
-
-    await user.click(screen.getByRole("button", { name: "실시간 이어보기" }));
     expect(screen.getByRole("group", { name: /마지막 표시값 34.6 °C/ })).toBeInTheDocument();
     await user.click(container.querySelector(".dashboard-metric-card.soc")!);
-    expect(screen.getByRole("button", { name: "차트 일시 정지" })).toHaveAttribute("aria-pressed", "false");
+    expect(screen.queryByRole("button", { name: "실시간 이어보기" })).not.toBeInTheDocument();
   });
 });
 
@@ -218,7 +228,7 @@ describe("dashboard metric selection", () => {
     await user.click(container.querySelector(".dashboard-metric-card.volt")!);
     expect(container.querySelectorAll(".metric-mini-line")).toHaveLength(0);
 
-    const withVoltSeries = dashboard({ quickTrend: { metric: "volt", points: [{ at: "a", value: 11.8 }, { at: "b", value: 12.1 }] } });
+    const withVoltSeries = dashboard({ quickTrend: { metric: "volt", points: [{ at: "2026-08-25T00:00:01.000Z", value: 11.8 }, { at: "2026-08-25T00:00:02.000Z", value: 12.1 }] } });
     rerender(
       <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
         <MemoryRouter>

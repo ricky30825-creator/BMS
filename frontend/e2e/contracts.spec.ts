@@ -38,7 +38,7 @@ async function connectBattery(page: Page, label: string, measuring = true) {
   await expect(page.getByRole("dialog", { name: new RegExp(`연결 진행 · ${label}`) })).toBeVisible();
   await expect(page).toHaveURL(/\/battery$/);
   if (!measuring) return;
-  const batteryId = ({ "PACK-001": "b_pack_001", "PACK-002": "b_pack_002", "PACK-003": "b_pack_003", "PACK-004": "b_pack_004" } as Record<string, string>)[label];
+  const batteryId = ({ "PACK-001": "b_pack_001", "PACK-002": "b_pack_002", "PACK-003": "b_pack_003", "PACK-004": "b_pack_004", "PACK-006": "b_pack_006" } as Record<string, string>)[label];
   if (!batteryId) throw new Error(`no test battery id for ${label}`);
   await markSensorFrame(page, batteryId);
   await expect(page.getByRole("dialog", { name: new RegExp(`연결 확인 · ${label}`) })).toBeVisible();
@@ -81,7 +81,7 @@ test.describe("CellGuard contract flows (MSW)", () => {
 
     await expect(page.getByRole("heading", { name: "보조배터리 진단" })).toBeVisible();
     await expect(page.getByText("SAFETY_PROFILE_NOT_READY", { exact: true })).toHaveCount(0);
-    await page.getByLabel("겉면 잔량 힌트").selectOption("3");
+    await page.getByLabel("남은 배터리 잔량").selectOption("3");
     await page.getByLabel("진단 중 이상 알림은 억제되지만 Fail-Safe 자동 차단은 항상 우선함을 확인했습니다.").check();
     await expect(page.getByRole("button", { name: "빠른 진단 시작" })).toBeEnabled();
     await page.getByRole("button", { name: "빠른 진단 시작" }).click();
@@ -198,6 +198,28 @@ test.describe("CellGuard contract flows (MSW)", () => {
     await expect(page.getByRole("dialog", { name: "진단 최종 결과" })).toHaveCount(0);
   });
 
+  test("completes the PACK-006 degraded mock and preserves the current safety snapshot", async ({ page }) => {
+    await signIn(page, "hong@cellguard.io");
+    await connectBattery(page, "PACK-006");
+    await page.locator("aside").getByRole("button", { name: "보조배터리 진단" }).click();
+    await page.getByLabel("남은 배터리 잔량").selectOption("3");
+    await page.getByLabel("진단 중 이상 알림은 억제되지만 Fail-Safe 자동 차단은 항상 우선함을 확인했습니다.").check();
+    await page.getByRole("button", { name: "빠른 진단 시작" }).click();
+    const result = page.getByRole("dialog", { name: "진단 최종 결과" });
+    await expect(result).toBeVisible({ timeout: 20_000 });
+    await expect(result).toContainText("시뮬레이션 기반 진단 결과");
+    await expect(result).toContainText("상태:");
+    await expect(result).toContainText("60.0%");
+    await expect(result.getByLabel("경고 68")).toBeVisible();
+    await expect(result.locator(".degradation-suspect_degraded")).toHaveCSS("background-color", "rgb(254, 236, 236)");
+    for (const width of [1280, 768, 582]) {
+      await page.setViewportSize({ width, height: 900 });
+      await expect(result).toBeVisible();
+      await expect(result.getByText("상태:", { exact: true })).toBeVisible();
+      await result.screenshot({ path: `/private/tmp/cellguard-main-pack006-${width}.png` });
+    }
+  });
+
   test("opens the abnormal QUICK MSW history fixture from 상세 and separates current safety", async ({ page }) => {
     await signIn(page, "hong@cellguard.io");
     await connectBattery(page, "PACK-004");
@@ -234,7 +256,7 @@ test.describe("CellGuard contract flows (MSW)", () => {
     await expect(page.getByRole("dialog", { name: "진단 최종 결과" })).toHaveCount(0);
   });
 
-  test("freezes only the dashboard chart and catches up on resume", async ({ page }) => {
+  test("keeps the dashboard chart following incoming measurements", async ({ page }) => {
     await signIn(page, "hong@cellguard.io");
     await connectBattery(page, "PACK-004");
     await page.evaluate(async () => {
@@ -265,12 +287,9 @@ test.describe("CellGuard contract flows (MSW)", () => {
     const temperatureCard = page.locator(".dashboard-metric-card.temp");
     await temperatureCard.click();
     await expect(page.getByRole("group", { name: /마지막 표시값 31.2 °C/ })).toBeVisible();
-    await page.getByRole("button", { name: "차트 일시 정지" }).click();
-    await expect(page.getByRole("status")).toContainText("실시간 측정은 계속 수신 중입니다.");
+    await expect(page.getByRole("button", { name: "차트 일시 정지" })).toHaveCount(0);
     await page.evaluate(() => { (window as unknown as { __dashboardTrendValue: number }).__dashboardTrendValue = 38.8; });
     await temperatureCard.click();
-    await expect(page.getByRole("group", { name: /마지막 표시값 31.2 °C/ })).toBeVisible();
-    await page.getByRole("button", { name: "실시간 이어보기" }).click();
     await expect(page.getByRole("group", { name: /마지막 표시값 38.8 °C/ })).toBeVisible();
   });
 
