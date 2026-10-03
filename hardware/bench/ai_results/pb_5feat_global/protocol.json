@@ -1,0 +1,36 @@
+{
+  "baseline_version": "0.5.0",
+  "processed": "/tmp/claude-0/-home-user-BMS/2dc63fc9-fb39-5e35-a9b4-462c605bf75d/scratchpad/processed_pb",
+  "runs": [
+    "PB10000_run_c2_10W",
+    "PB10000_run_c6_9W",
+    "PB10000_run_r2_1A",
+    "PB10000_run_r5_2A",
+    "PB20000_run_c1_10W",
+    "PB20000_run_c8_14W",
+    "PB20000_run_r1_1A",
+    "PB20000_run_r4_2A",
+    "PB20000_run_r9_3A",
+    "PB5000_run_c7_8W",
+    "PB5000_run_r3_1A",
+    "PB5000_run_r3b_1A",
+    "PB5000_run_r6_2A"
+  ],
+  "normal_windows": 15978,
+  "synthetic_dev": 3120,
+  "synthetic_confirmation": 3120,
+  "feature_sets": [
+    "local_relative5"
+  ],
+  "epochs": 6,
+  "checkpoint_epochs": [
+    2,
+    6
+  ],
+  "seed": 42,
+  "history": 96,
+  "prediction": 32,
+  "threshold": "p99 of normal scores",
+  "selection": "max dev TPR at p99, AUROC tie-break, top four per model for fusion",
+  "script_sha256": "d4b5cb674bacafe2f74cf7ff51c2c832873ba8ee4faa2c1cf0e4cc76f1e5f172"
+}

@@ -1,0 +1,30 @@
+[Unit]
+# 상시 표시용. run 이름은 /home/<USER>/bench_display.env 에서 바꾼다.
+#
+#   sudo cp ~/bench-display.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now bench-display
+#
+# run 이름만 바꿀 때:
+#   echo 'RUN_NAME=PB20K_15W' > ~/bench_display.env
+#   sudo systemctl restart bench-display
+Description=CellGuard 방전 시험 TFT 표시
+After=multi-user.target
+
+[Service]
+Type=simple
+User=<USER>
+Group=<USER>
+# spi / i2c / gpio 그룹이 있어야 /dev/spidev·/dev/i2c-1·/dev/gpiochip0 을 연다
+SupplementaryGroups=spi i2c gpio
+WorkingDirectory=/home/<USER>
+EnvironmentFile=-/home/<USER>/bench_display.env
+Environment=RUN_NAME=
+ExecStart=/usr/bin/python3 -u /home/<USER>/bench_display.py --name ${RUN_NAME}
+Restart=always
+RestartSec=5
+# 화면은 계측보다 항상 뒤다 — 로거와 CPU 를 다투면 이쪽이 양보한다
+Nice=10
+
+[Install]
+WantedBy=multi-user.target

@@ -22,7 +22,7 @@ import numpy as np
 import pandas as pd
 import torch
 
-from .features import PREDICTION, TOTAL, split_history, transform
+from .features import PREDICTION, TOTAL, channels_for, split_history, transform
 from .networks import build_model
 from .preprocess import FEATURES
 from .scoring import apply_calibration, combine, feature_errors, grade, risk_index
@@ -46,8 +46,9 @@ class BaselineScorer:
     def score(self, raw: np.ndarray, run_id: str | None = None) -> dict:
         if raw.shape != (1, TOTAL, len(FEATURES)):
             raise ValueError(f"Expected shape (1, {TOTAL}, {len(FEATURES)}), got {raw.shape}")
-        if not np.isfinite(raw).all():
-            raise ValueError("Sample contains missing or non-finite data")
+        used = sorted({FEATURES.index(name) for tag in ("ae", "informer") for name in channels_for(self.config[tag]["features"])})
+        if not np.isfinite(raw[:, :, used]).all():
+            raise ValueError("Sample contains missing or non-finite data in a channel the model uses")
         raw = raw.astype(np.float32).copy()
         raw[:, :, 2] = raw[:, :, 0] * raw[:, :, 1]
         scores = {}

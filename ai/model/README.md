@@ -86,15 +86,21 @@ python -m unittest ai.model.tests.test_baseline
 | 보조배터리 (모드 2) | v0.5 (이 설정) | 계획 — 첫 5분 학습, 전역 보정, Safety Gate 병행 |
 | 18650 (모드 1) | 계획 — 같은 파이프라인, `--battery-type cell` | 이후 |
 
-## 런타임 연동 (미완료)
+## 런타임 연동 (2026-09-29 구현)
 
-`adapter.py`는 아직 `ai.runtime`에 연결되지 않았다. 남은 계약 차이:
+`export_bundle.py` → 번들 → `adapter.py` 경로가 연결됐다. **실제 학습 산출물로는 아직 한 번도 돌려 보지 않았다**
+(무작위 초기화 모델로 형식·동작만 테스트). 실행:
 
-1. **모드 2 접촉온도 없음** — 웹 계약(`temp_contact = null`)과 2026-09-20 이후 측정 run에는 DS18B20
-   접촉 온도가 없다. v0.5 설정은 `cell_temp_c`를 쓰므로 IR 2존만 쓰는 재학습 설정이 필요하다.
-2. **보정 범위** — v0.5는 `per_run` 보정(run id 필요). 런타임은 `global` 보정 설정을 써야 한다.
-3. **점수 스케일** — 런타임/백엔드는 0~1 점수와 0.3/0.6/0.8 등급을 가정한다. 베이스라인 점수는
-   임계값 정규화(≈1.0 = 경고)이고 사용자 표시는 0~100 위험지수(60/80/95)다. 매핑을 합의해야 한다.
+```bash
+python -m ai.model.export_bundle --artifacts <global 보정으로 학습한 폴더> --output <AI_MODEL_BUNDLE_DIR>
+AI_MODEL_BUNDLE_DIR=<위 폴더> python -m ai.runtime
+```
 
-세 항목이 정리되면 `export_bundle`로 `metadata.json`/`feature_metadata.json`/`scaler.json`을 만들고
-`create_adapter`를 `BaselineScorer`에 연결한다.
+- **내보내기가 거부하는 것**: `per_run` 보정, AE·Informer의 feature set 불일치, `local_relative5` 이외.
+- **스칼라 설정**(`score_q99`·임계·top-k·융합 가중)은 번들 형식상 벡터만 허용돼 **상수 벡터로 저장**한다. `bundle.py`는 바꾸지 않았다.
+- **점수 매핑**(`scoring.wire_score`): 융합 점수/임계 비율 0.25·0.5·1.0·≥2.0 → 0.3·0.6·0.8·1.0. 비율 1.0(학습 정상 p99)이 위험 경계다. 실제 이상 데이터가 생기면 재조정.
+- **1초 격자**는 학습(`merge_asof nearest`)과 같게 **정시에 가장 가까운 프레임 1개**를 쓴다(평균·최댓값 아님).
+- **점수가 없는 경우**(어댑터가 `None` 반환, 런타임은 발행 없이 커밋만): 창 채우는 중, 1초 이상 결측, 값 누락, 부하 0.1A 이하(대기·충전). 첫 점수는 활성 연속 173초(startup 10 + 보정 30 + 창 133) 뒤.
+- **Informer 성분은 32초 지연**이다(다음 32초 실측과 비교). 발행 점수는 그 프레임 32초 전에 끝난 창의 것이다.
+- **거부(예외)**: 모드 1 프레임, IR 존 수가 2가 아닌 프레임 — 학습하지 않은 입력이므로 서비스를 멈춘다.
+- Kalman·내부 셀 온도는 `None`(번들 `not_available`).

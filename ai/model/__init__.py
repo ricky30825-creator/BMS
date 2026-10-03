@@ -12,7 +12,8 @@ scoring     Feature-wise error, calibration, fusion, metrics
 synthetic   Physically constrained proxy anomalies used only for evaluation
 train       Train both models on normal runs and select the fusion setting
 predict     Score one 133-row physical sample with a saved configuration
-adapter     Runtime bridge skeleton for ``ai.runtime`` (not yet functional)
+export_bundle  train.py artifacts -> runtime bundle (global, local_relative5 only)
+adapter     Runtime bridge for ``ai.runtime`` (mode 2, tested with random weights only)
 
 Trained checkpoints, processed CSV files, and raw measurements are never
 committed; see README.md.

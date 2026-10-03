@@ -111,6 +111,19 @@ def risk_index(score: float, threshold: float) -> int:
     return int(round(min(max(index, 0), 100)))
 
 
+# fused score / threshold  ->  wire score (0-1) with the web grade boundaries
+# 0.3 / 0.6 / 0.8. Ratio 1.0 is the learned-normal p99, so crossing the
+# threshold is exactly crossing into DANGER. Re-tune once real abnormal data exist.
+WIRE_RATIO = (0.0, 0.25, 0.5, 1.0, 2.0)
+WIRE_SCORE = (0.0, 0.3, 0.6, 0.8, 1.0)
+
+
+def wire_score(score: float, threshold: float) -> float:
+    """Piecewise-linear, monotone, clipped map to the 0-1 anomaly wire score."""
+    ratio = max(float(score), 0.0) / max(float(threshold), 1e-8)
+    return float(np.interp(ratio, WIRE_RATIO, WIRE_SCORE))
+
+
 def grade(index: int) -> str:
     if index < 60:
         return "NORMAL"

@@ -87,6 +87,8 @@ def main() -> None:
     parser.add_argument("--feature-sets", nargs="+", default=["local_relative6"], choices=FEATURE_SETS)
     parser.add_argument("--epochs", type=int, default=6)
     parser.add_argument("--checkpoint-epochs", nargs="+", type=int, default=None, help="default: 2 and --epochs")
+    parser.add_argument("--scopes", nargs="+", default=["global", "per_run"], choices=["global", "per_run"],
+                        help="calibration scopes to search; use 'global' for a bundle that scores unseen devices")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--synthetic-per-run", type=int, default=16)
     parser.add_argument("--max-windows", type=int, default=None, help="subsample normal windows (smoke tests only)")
@@ -127,7 +129,7 @@ def main() -> None:
                 fit(model_name, train, args.epochs, checkpoints, args.seed, folder, feature_set, mu, sigma, eval_sets)
             for epoch in checkpoints:
                 saved = np.load(folder / f"errors_epoch{epoch}.npz")
-                for scope in ["global", "per_run"]:
+                for scope in args.scopes:
                     for topk in [1, 2, train.shape[2]]:
                         scores, params = calibrate(saved["normal"], [saved["dev"], saved["confirmation"]], runs,
                                                    [dev_meta.run.to_numpy(), check_meta.run.to_numpy()], scope, topk)

@@ -47,9 +47,9 @@ class ProcessResult:
     input_topic: str
     input_partition: int
     input_offset: str
-    output_topic: str
-    output_key: str
-    output_payload: bytes
+    output_topic: str | None
+    output_key: str | None
+    output_payload: bytes | None
     committed_offset: str
 
 
@@ -141,10 +141,14 @@ class InferenceService:
         if close_errors:
             raise close_errors[0]
 
-    async def _adapter_output(self, frame: Any) -> InferenceOutput:
+    async def _adapter_output(self, frame: Any) -> InferenceOutput | None:
         result = self.adapter.infer(frame)
         if inspect.isawaitable(result):
             result = await result
+        if result is None:
+            # Explicit "no score for this frame" (window still filling, data gap,
+            # idle load). Nothing is published; the offset is still committed.
+            return None
         if isinstance(result, InferenceOutput):
             return result
         try:
@@ -170,6 +174,18 @@ class InferenceService:
         if cached_payload is None:
             frame = parse_raw_metrics(_json_payload(message.value))
             output = await self._adapter_output(frame)
+            if output is None:
+                await self.consumer.commit(message.topic, message.partition, next_offset)
+                return ProcessResult(
+                    device_id=frame.device_id,
+                    input_topic=message.topic,
+                    input_partition=message.partition,
+                    input_offset=message.offset,
+                    output_topic=None,
+                    output_key=None,
+                    output_payload=None,
+                    committed_offset=next_offset,
+                )
             try:
                 anomaly = build_anomaly_alert(
                     frame,
